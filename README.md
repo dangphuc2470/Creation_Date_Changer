@@ -33,7 +33,7 @@ This simple application can fix that. It will extract the creation date from the
 
 - This application only works for images with filenames that contain the creation date.
 - The date format must be consistent for all images.
-- The application does not work for file names with certain data missing digits:
+- The application does not work for file names with certain data missing digits, you can use some tools like Batch File Rename to convert it to the right format: 
   
 eg: 
 
@@ -41,7 +41,7 @@ eg:
 
     Screenrecorder-2023-8-7-20-28-19-266.mp4
     
-This is the right name: 
+This is the right format: 
 
     Screenrecorder-2023-08-07-20-28-19-266.mp4
 
