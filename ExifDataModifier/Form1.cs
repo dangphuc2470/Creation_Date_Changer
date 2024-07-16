@@ -13,6 +13,7 @@ namespace ExifDataModifier
     {
         private List<string> filePaths = new List<string>();
         private List<DateTime> filePathsDate = new List<DateTime>();
+        private Dictionary<string, List<string>> fileGroups = new Dictionary<string, List<string>>();
 
 
         public Form1()
@@ -52,6 +53,51 @@ namespace ExifDataModifier
                 listBoxName.Items.Add(Path.GetFileName(filePath));
             }
         }
+
+        private void ScanAndGroupFiles(List<string> files)
+        {
+            // Clear previous groups
+            fileGroups.Clear();
+            fileGroups["other"] = new List<string>();
+            cbFileGroup.Items.Clear();
+
+            // Regular expression to match the prefix of the file name up to the first sequence of digits
+            Regex regex = new Regex(@"^[^\d]+");
+
+            foreach (string file in files)
+            {
+                string fileName = Path.GetFileName(file);
+                Match match = regex.Match(fileName);
+
+                if (match.Success)
+                {
+                    string key = match.Value; // This is the group key
+
+                    if (!fileGroups.ContainsKey(key))
+                    {
+                        fileGroups[key] = new List<string>();
+                    }
+
+                    fileGroups[key].Add(file);
+                }
+                else fileGroups["other"].Add(file);
+            }
+
+            // Populate the ComboBox with the first file of each group
+            foreach (var group in fileGroups)
+            {
+               if (group.Key != "other")
+                cbFileGroup.Items.Add(Path.GetFileName(group.Value.First()));
+            }
+            
+            if (fileGroups["other"].Count > 0)
+                cbFileGroup.Items.Add("Other");
+
+            if (cbFileGroup.Items.Count > 0)
+                cbFileGroup.SelectedIndex = 0;
+        }
+
+
 
         private void buttonSetTime_Click(object sender, EventArgs e)
         {
@@ -147,8 +193,78 @@ namespace ExifDataModifier
 
         private void listBoxName_SizeChanged(object sender, EventArgs e)
         {
-            listBoxFiles.Size = new Size(listBoxName.Width, listBoxName.Height);   
+            listBoxFiles.Size = new Size(listBoxName.Width, listBoxName.Height);
         }
+
+        private void btChooseFolder_Click(object sender, EventArgs e)
+        {
+            using (FolderBrowserDialog folderBrowserDialog = new FolderBrowserDialog())
+            {
+                if (folderBrowserDialog.ShowDialog() == DialogResult.OK)
+                {
+                    filePaths.Clear();
+                    // Use SearchOption.AllDirectories to include all subdirectories
+                    string[] files = Directory.GetFiles(folderBrowserDialog.SelectedPath, "*.*", SearchOption.AllDirectories);
+                    tbPath.Text = folderBrowserDialog.SelectedPath;
+                    foreach (string file in files)
+                    {
+                        filePaths.Add(file);
+                    }
+                    ScanAndGroupFiles(filePaths);
+                }
+            }
+        }
+
+        private void btView_Click(object sender, EventArgs e)
+        {
+            if (cbFileGroup.SelectedItem != null)
+            {
+                string firstFileName = cbFileGroup.SelectedItem.ToString(); // Use selected group name
+
+                if (firstFileName == "Other")
+                {
+                    // Display files in "other" group
+                    listBoxFiles.Items.Clear();
+                    listBoxName.Items.Clear();
+                    foreach (string file in fileGroups["other"])
+                    {
+                        listBoxName.Items.Add(Path.GetFileName(file));
+                        listBoxFiles.Items.Add(file);
+                    }
+                }
+                else
+                {
+
+                    Regex regex = new Regex(@"^[^\d]+");
+                    Match match = regex.Match(firstFileName);
+
+                    if (match.Success)
+                    {
+                        string key = match.Value;
+                        foreach (var group in fileGroups)
+                        {
+                            // Check if this group's key matches the extracted key
+                            if (group.Key.StartsWith(key))
+                            {
+                                // Check if the group contains the selected file name
+                                if (group.Value.Any(f => Path.GetFileName(f).Equals(firstFileName)))
+                                {
+                                    listBoxFiles.Items.Clear();
+                                    listBoxName.Items.Clear();
+                                    foreach (string file in group.Value)
+                                    {
+                                        listBoxName.Items.Add(Path.GetFileName(file));
+                                        listBoxFiles.Items.Add(file);
+                                    }
+                                    break; // Exit the loop once the matching group is found and processed
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
     }
 
 }

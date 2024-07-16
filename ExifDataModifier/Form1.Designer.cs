@@ -47,11 +47,19 @@
             label3 = new Label();
             panel5 = new Panel();
             panel4 = new Panel();
+            btAssign = new Button();
+            btView = new Button();
+            label6 = new Label();
+            cbFileGroup = new ComboBox();
+            btChooseFolder = new Button();
+            label5 = new Label();
+            tbPath = new TextBox();
             panel1.SuspendLayout();
             panel2.SuspendLayout();
             tableLayoutPanel2.SuspendLayout();
             panel3.SuspendLayout();
             panel5.SuspendLayout();
+            panel4.SuspendLayout();
             SuspendLayout();
             // 
             // listBoxFiles
@@ -250,11 +258,80 @@
             // 
             // panel4
             // 
+            panel4.Controls.Add(btAssign);
+            panel4.Controls.Add(btView);
+            panel4.Controls.Add(label6);
+            panel4.Controls.Add(cbFileGroup);
+            panel4.Controls.Add(btChooseFolder);
+            panel4.Controls.Add(label5);
+            panel4.Controls.Add(tbPath);
             panel4.Dock = DockStyle.Top;
             panel4.Location = new Point(0, 0);
             panel4.Name = "panel4";
             panel4.Size = new Size(708, 225);
             panel4.TabIndex = 15;
+            // 
+            // btAssign
+            // 
+            btAssign.Location = new Point(558, 103);
+            btAssign.Name = "btAssign";
+            btAssign.Size = new Size(94, 29);
+            btAssign.TabIndex = 6;
+            btAssign.Text = "Assign";
+            btAssign.UseVisualStyleBackColor = true;
+            // 
+            // btView
+            // 
+            btView.Location = new Point(458, 103);
+            btView.Name = "btView";
+            btView.Size = new Size(94, 29);
+            btView.TabIndex = 5;
+            btView.Text = "View";
+            btView.UseVisualStyleBackColor = true;
+            btView.Click += btView_Click;
+            // 
+            // label6
+            // 
+            label6.AutoSize = true;
+            label6.Location = new Point(34, 80);
+            label6.Name = "label6";
+            label6.Size = new Size(165, 20);
+            label6.TabIndex = 4;
+            label6.Text = "File name format found";
+            // 
+            // cbFileGroup
+            // 
+            cbFileGroup.FormattingEnabled = true;
+            cbFileGroup.Location = new Point(34, 103);
+            cbFileGroup.Name = "cbFileGroup";
+            cbFileGroup.Size = new Size(418, 28);
+            cbFileGroup.TabIndex = 3;
+            // 
+            // btChooseFolder
+            // 
+            btChooseFolder.Location = new Point(303, 44);
+            btChooseFolder.Name = "btChooseFolder";
+            btChooseFolder.Size = new Size(132, 29);
+            btChooseFolder.TabIndex = 2;
+            btChooseFolder.Text = "Choose folder";
+            btChooseFolder.UseVisualStyleBackColor = true;
+            btChooseFolder.Click += btChooseFolder_Click;
+            // 
+            // label5
+            // 
+            label5.AutoSize = true;
+            label5.Location = new Point(34, 17);
+            label5.Name = "label5";
+            label5.Size = new Size(88, 20);
+            label5.TabIndex = 1;
+            label5.Text = "Scan for file";
+            // 
+            // tbPath
+            // 
+            tbPath.Location = new Point(34, 44);
+            tbPath.Name = "tbPath";
+            tbPath.Size = new Size(263, 27);
+            tbPath.TabIndex = 0;
             // 
             // Form1
             // 
@@ -271,6 +348,8 @@
             panel3.ResumeLayout(false);
             panel3.PerformLayout();
             panel5.ResumeLayout(false);
+            panel4.ResumeLayout(false);
+            panel4.PerformLayout();
             ResumeLayout(false);
         }
 
@@ -295,5 +374,12 @@
         private TableLayoutPanel tableLayoutPanel2;
         private CheckBox cbShowFullPath;
         private Panel panel4;
+        private Label label5;
+        private TextBox tbPath;
+        private Button btChooseFolder;
+        private ComboBox cbFileGroup;
+        private Label label6;
+        private Button btAssign;
+        private Button btView;
     }
 }
