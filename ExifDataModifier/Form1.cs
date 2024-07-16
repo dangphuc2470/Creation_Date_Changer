@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics.Eventing.Reader;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Text.RegularExpressions;
@@ -33,8 +34,9 @@ namespace ExifDataModifier
 
         private void Form1_DragDrop(object sender, DragEventArgs e)
         {
-            filePaths.Clear();
-            listBoxFiles.Items.Clear();
+            //filePaths.Clear();
+            //listBoxFiles.Items.Clear();
+
             string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
             filePaths.AddRange(files);
             DisplayFilePaths();
@@ -42,6 +44,8 @@ namespace ExifDataModifier
 
         private void DisplayFilePaths()
         {
+            listBoxFiles.Items.Clear();
+            listBoxName.Items.Clear();
             foreach (string filePath in filePaths)
             {
                 listBoxFiles.Items.Add(filePath);
@@ -125,6 +129,25 @@ namespace ExifDataModifier
             {
                 MessageBox.Show(exception.Message + '\n' + "Check your format!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private void cbShowFullPath_CheckedChanged(object sender, EventArgs e)
+        {
+            if (cbShowFullPath.Checked)
+            {
+                listBoxFiles.Visible = true;
+                listBoxName.Visible = false;
+            }
+            else
+            {
+                listBoxFiles.Visible = false;
+                listBoxName.Visible = true;
+            }
+        }
+
+        private void listBoxName_SizeChanged(object sender, EventArgs e)
+        {
+            listBoxFiles.Size = new Size(listBoxName.Width, listBoxName.Height);   
         }
     }
 
