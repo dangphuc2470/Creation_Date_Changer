@@ -2,7 +2,7 @@
 
 ## Download
 
-Version 1.0: [Release](https://github.com/dangphuc2470/Creation_Date_Changer/releases)
+Version 1.1: [Release](https://github.com/dangphuc2470/Creation_Date_Changer/releases)
 
 ## Problem
 

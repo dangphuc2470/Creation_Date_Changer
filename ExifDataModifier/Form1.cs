@@ -94,7 +94,6 @@ namespace ExifDataModifier
 
                 modifiedName = RemoveSuffix(modifiedName, nmIgnore.Value);
                 modifiedName = RemoveFromLast(modifiedName, '*', 1);
-                MessageBox.Show(modifiedName);
 
                 if (!fileGroups.ContainsKey(modifiedName))
                     fileGroups[modifiedName] = new List<string>();
@@ -311,7 +310,9 @@ namespace ExifDataModifier
         string RemoveSuffix(string name, decimal numberOfLetterToRemove)
         {
             int length = name.Length;
-            string modifiedName = name.Substring(0, (int)(length - numberOfLetterToRemove));
+            string modifiedName = name;
+            if (length > numberOfLetterToRemove)
+                modifiedName = name.Substring(0, (int)(length - numberOfLetterToRemove));
             return modifiedName;
         }
 
