@@ -48,6 +48,11 @@
             label3 = new Label();
             panel5 = new Panel();
             panel4 = new Panel();
+            richTextBox1 = new RichTextBox();
+            label9 = new Label();
+            label8 = new Label();
+            label7 = new Label();
+            nmIgnore = new NumericUpDown();
             btAssign = new Button();
             btView = new Button();
             label6 = new Label();
@@ -55,11 +60,6 @@
             btChooseFolder = new Button();
             label5 = new Label();
             tbPath = new TextBox();
-            nmIgnore = new NumericUpDown();
-            label7 = new Label();
-            label8 = new Label();
-            label9 = new Label();
-            richTextBox1 = new RichTextBox();
             panel1.SuspendLayout();
             panel2.SuspendLayout();
             tableLayoutPanel2.SuspendLayout();
@@ -283,6 +283,49 @@
             panel4.Size = new Size(708, 225);
             panel4.TabIndex = 15;
             // 
+            // richTextBox1
+            // 
+            richTextBox1.BackColor = SystemColors.Control;
+            richTextBox1.BorderStyle = BorderStyle.None;
+            richTextBox1.Location = new Point(206, 147);
+            richTextBox1.Name = "richTextBox1";
+            richTextBox1.ReadOnly = true;
+            richTextBox1.Size = new Size(455, 78);
+            richTextBox1.TabIndex = 11;
+            richTextBox1.Text = resources.GetString("richTextBox1.Text");
+            // 
+            // label9
+            // 
+            label9.AutoSize = true;
+            label9.Location = new Point(200, 187);
+            label9.Name = "label9";
+            label9.Size = new Size(0, 20);
+            label9.TabIndex = 10;
+            // 
+            // label8
+            // 
+            label8.AutoSize = true;
+            label8.Location = new Point(200, 167);
+            label8.Name = "label8";
+            label8.Size = new Size(0, 20);
+            label8.TabIndex = 9;
+            // 
+            // label7
+            // 
+            label7.AutoSize = true;
+            label7.Location = new Point(29, 144);
+            label7.Name = "label7";
+            label7.Size = new Size(142, 20);
+            label7.TabIndex = 8;
+            label7.Text = "Ignore from the end";
+            // 
+            // nmIgnore
+            // 
+            nmIgnore.Location = new Point(34, 167);
+            nmIgnore.Name = "nmIgnore";
+            nmIgnore.Size = new Size(150, 27);
+            nmIgnore.TabIndex = 7;
+            // 
             // btAssign
             // 
             btAssign.Location = new Point(558, 103);
@@ -345,49 +388,6 @@
             tbPath.Name = "tbPath";
             tbPath.Size = new Size(263, 27);
             tbPath.TabIndex = 0;
-            // 
-            // nmIgnore
-            // 
-            nmIgnore.Location = new Point(34, 167);
-            nmIgnore.Name = "nmIgnore";
-            nmIgnore.Size = new Size(150, 27);
-            nmIgnore.TabIndex = 7;
-            // 
-            // label7
-            // 
-            label7.AutoSize = true;
-            label7.Location = new Point(29, 144);
-            label7.Name = "label7";
-            label7.Size = new Size(142, 20);
-            label7.TabIndex = 8;
-            label7.Text = "Ignore from the end";
-            // 
-            // label8
-            // 
-            label8.AutoSize = true;
-            label8.Location = new Point(200, 167);
-            label8.Name = "label8";
-            label8.Size = new Size(0, 20);
-            label8.TabIndex = 9;
-            // 
-            // label9
-            // 
-            label9.AutoSize = true;
-            label9.Location = new Point(200, 187);
-            label9.Name = "label9";
-            label9.Size = new Size(0, 20);
-            label9.TabIndex = 10;
-            // 
-            // richTextBox1
-            // 
-            richTextBox1.BackColor = SystemColors.Control;
-            richTextBox1.BorderStyle = BorderStyle.None;
-            richTextBox1.Location = new Point(206, 144);
-            richTextBox1.Name = "richTextBox1";
-            richTextBox1.ReadOnly = true;
-            richTextBox1.Size = new Size(455, 78);
-            richTextBox1.TabIndex = 11;
-            richTextBox1.Text = resources.GetString("richTextBox1.Text");
             // 
             // Form1
             // 

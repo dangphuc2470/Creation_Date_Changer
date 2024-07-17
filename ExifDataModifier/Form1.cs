@@ -15,6 +15,7 @@ namespace ExifDataModifier
         private List<string> filePaths = new List<string>();
         private List<DateTime> filePathsDate = new List<DateTime>();
         private Dictionary<string, List<string>> fileGroups = new Dictionary<string, List<string>>();
+        private bool isShowNotificationFirstTime = false;
         string[] allowedExtensions = {
     ".jpg", ".jpeg", ".png", ".gif",  // Common image formats
     ".bmp", ".tiff",                 // Less common image formats
@@ -297,7 +298,11 @@ namespace ExifDataModifier
             }
 
             tbRegex.Text = modifiedName.Substring(0, lastDigitIndex + 1);
-            MessageBox.Show("Assigned, Please update the number in the filename textbox to match the year, month, day,...", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (!isShowNotificationFirstTime)
+            {
+                MessageBox.Show("Assigned, Please update the number in the filename textbox to match the year, month, day,...", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                isShowNotificationFirstTime = true;
+            }
         }
 
         private void Form1_ResizeEnd(object sender, EventArgs e)
