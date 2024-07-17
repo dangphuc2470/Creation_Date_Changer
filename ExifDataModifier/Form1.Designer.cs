@@ -121,7 +121,7 @@
             tbRegex.Name = "tbRegex";
             tbRegex.Size = new Size(357, 27);
             tbRegex.TabIndex = 5;
-            tbRegex.Text = "***********yyyyMMdd-HHmmss";
+            tbRegex.Text = "***********yyyyMMdd*HHmmss";
             // 
             // btExtract
             // 
@@ -279,6 +279,7 @@
             btAssign.TabIndex = 6;
             btAssign.Text = "Assign";
             btAssign.UseVisualStyleBackColor = true;
+            btAssign.Click += btAssign_Click;
             // 
             // btView
             // 
@@ -342,6 +343,7 @@
             Controls.Add(panel5);
             Name = "Form1";
             Text = "Date Changer";
+            ResizeEnd += Form1_ResizeEnd;
             panel1.ResumeLayout(false);
             panel2.ResumeLayout(false);
             tableLayoutPanel2.ResumeLayout(false);

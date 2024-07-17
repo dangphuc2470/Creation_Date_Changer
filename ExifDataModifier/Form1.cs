@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using ExifLib;
 using static System.Windows.Forms.DataFormats;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.Button;
 
 namespace ExifDataModifier
 {
@@ -14,6 +15,26 @@ namespace ExifDataModifier
         private List<string> filePaths = new List<string>();
         private List<DateTime> filePathsDate = new List<DateTime>();
         private Dictionary<string, List<string>> fileGroups = new Dictionary<string, List<string>>();
+        string[] allowedExtensions = {
+    ".jpg", ".jpeg", ".png", ".gif",  // Common image formats
+    ".bmp", ".tiff",                 // Less common image formats
+    ".webp", ".heic",                 // Modern image formats
+    ".raw",                           // RAW image format
+    ".psd",                           // Photoshop Document format
+    ".ai",                           // Adobe Illustrator Artwork format
+    ".svg",                           // Scalable Vector Graphics format
+
+    ".mp4", ".mov", ".avi",           // Common video container formats
+    ".mkv", ".wmv", ".flv",            // Less common video container formats
+    ".webm", ".avchd",                 // Web-friendly and AVCHD video formats
+    ".mpeg2",                         // MPEG-2 video format
+    ".vp9",                           // VP9 video codec
+    ".h263",                          // H.263 video codec
+    ".prores",                         // Apple Professional Res video codec
+
+    ".tga",                           // Truevision Graphics Adapter format (legacy)
+    ".flic",                          // Flic Animation format (legacy)
+};
 
 
         public Form1()
@@ -56,45 +77,41 @@ namespace ExifDataModifier
 
         private void ScanAndGroupFiles(List<string> files)
         {
-            // Clear previous groups
             fileGroups.Clear();
-            fileGroups["other"] = new List<string>();
             cbFileGroup.Items.Clear();
-
-            // Regular expression to match the prefix of the file name up to the first sequence of digits
-            Regex regex = new Regex(@"^[^\d]+");
-
             foreach (string file in files)
             {
-                string fileName = Path.GetFileName(file);
-                Match match = regex.Match(fileName);
+                string fileName = Path.GetFileNameWithoutExtension(file);
+                string modifiedName = "";
 
-                if (match.Success)
+                for (int i = 0; i < fileName.Count(); i++)
                 {
-                    string key = match.Value; // This is the group key
-
-                    if (!fileGroups.ContainsKey(key))
-                    {
-                        fileGroups[key] = new List<string>();
-                    }
-
-                    fileGroups[key].Add(file);
+                    if (Char.IsDigit(fileName[i]))
+                        modifiedName += "*";
+                    else
+                        modifiedName += fileName[i];
                 }
-                else fileGroups["other"].Add(file);
+                modifiedName = RemoveFromLast(modifiedName, '*', 1);
+
+                if (!fileGroups.ContainsKey(modifiedName))
+                    fileGroups[modifiedName] = new List<string>();
+
+                fileGroups[modifiedName].Add(file);
             }
 
             // Populate the ComboBox with the first file of each group
             foreach (var group in fileGroups)
             {
-               if (group.Key != "other")
                 cbFileGroup.Items.Add(Path.GetFileName(group.Value.First()));
             }
-            
-            if (fileGroups["other"].Count > 0)
-                cbFileGroup.Items.Add("Other");
-
-            if (cbFileGroup.Items.Count > 0)
+            try
+            {
                 cbFileGroup.SelectedIndex = 0;
+            }
+            catch
+            {
+                MessageBox.Show("No image or video found!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
 
@@ -208,7 +225,10 @@ namespace ExifDataModifier
                     tbPath.Text = folderBrowserDialog.SelectedPath;
                     foreach (string file in files)
                     {
-                        filePaths.Add(file);
+                        string extension = Path.GetExtension(file).ToLower();
+                        // Make sure it only add the Image and Video
+                        if (allowedExtensions.Contains(extension))
+                            filePaths.Add(file);
                     }
                     ScanAndGroupFiles(filePaths);
                 }
@@ -217,54 +237,73 @@ namespace ExifDataModifier
 
         private void btView_Click(object sender, EventArgs e)
         {
+            buttonClear_Click(null, null);
+
             if (cbFileGroup.SelectedItem != null)
             {
-                string firstFileName = cbFileGroup.SelectedItem.ToString(); // Use selected group name
+                string groupName = cbFileGroup.SelectedItem.ToString(); // Use selected group name
+                string modifiedName = "";
 
-                if (firstFileName == "Other")
+                for (int i = 0; i < groupName.Count(); i++)
                 {
-                    // Display files in "other" group
-                    listBoxFiles.Items.Clear();
-                    listBoxName.Items.Clear();
-                    foreach (string file in fileGroups["other"])
-                    {
-                        listBoxName.Items.Add(Path.GetFileName(file));
-                        listBoxFiles.Items.Add(file);
-                    }
+                    if (Char.IsDigit(groupName[i]))
+                        modifiedName += "*";
+                    else
+                        modifiedName += groupName[i];
                 }
-                else
+
+                // Remove extension
+                modifiedName = RemoveFromLast(modifiedName, '.', 0);
+                // Remove package name of screenshot. Eg: Screenshot_2023-08-17-20-12-32-990_com.tencent.ig
+                modifiedName = RemoveFromLast(modifiedName, '*', 1);
+
+                filePaths.Clear();
+                foreach (string file in fileGroups[modifiedName])
                 {
-
-                    Regex regex = new Regex(@"^[^\d]+");
-                    Match match = regex.Match(firstFileName);
-
-                    if (match.Success)
-                    {
-                        string key = match.Value;
-                        foreach (var group in fileGroups)
-                        {
-                            // Check if this group's key matches the extracted key
-                            if (group.Key.StartsWith(key))
-                            {
-                                // Check if the group contains the selected file name
-                                if (group.Value.Any(f => Path.GetFileName(f).Equals(firstFileName)))
-                                {
-                                    listBoxFiles.Items.Clear();
-                                    listBoxName.Items.Clear();
-                                    foreach (string file in group.Value)
-                                    {
-                                        listBoxName.Items.Add(Path.GetFileName(file));
-                                        listBoxFiles.Items.Add(file);
-                                    }
-                                    break; // Exit the loop once the matching group is found and processed
-                                }
-                            }
-                        }
-                    }
+                    filePaths.Add(file);
                 }
+                DisplayFilePaths();
             }
+
         }
 
+        private string RemoveFromLast(string name, char charater, int offset)
+        {
+            int lastCharaterIndex = name.LastIndexOf(charater);
+            if (lastCharaterIndex != -1)
+                return name.Substring(0, lastCharaterIndex + offset);
+            return name;
+        }
+
+        private void btAssign_Click(object sender, EventArgs e)
+        {
+            string groupName = cbFileGroup.SelectedItem.ToString(); // Use selected group name
+            string modifiedName = "";
+
+            int lastDigitIndex = 0;
+            for (int i = 0; i < groupName.Count(); i++)
+            {
+                if (!Char.IsDigit(groupName[i]))
+                    modifiedName += "*";
+                else
+                {
+                    modifiedName += groupName[i];
+                    lastDigitIndex = i;
+                }
+            }
+
+            tbRegex.Text = modifiedName.Substring(0, lastDigitIndex + 1);
+            MessageBox.Show("Assigned, Please update the number in the filename textbox to match the year, month, day,...", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void Form1_ResizeEnd(object sender, EventArgs e)
+        {
+            // Check the cbShowFullPath two time to make sure it update from the size of ListBox Name (Because it does not placed in tableLayoutPanel2 so it's size does not change automatically)
+            cbShowFullPath.Checked = !cbShowFullPath.Checked;
+            cbShowFullPath.Checked = !cbShowFullPath.Checked;
+        }
+
+    
     }
 
 }
