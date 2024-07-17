@@ -28,6 +28,7 @@
         /// </summary>
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
             listBoxFiles = new ListBox();
             buttonSetTime = new Button();
             buttonClear = new Button();
@@ -54,12 +55,18 @@
             btChooseFolder = new Button();
             label5 = new Label();
             tbPath = new TextBox();
+            nmIgnore = new NumericUpDown();
+            label7 = new Label();
+            label8 = new Label();
+            label9 = new Label();
+            richTextBox1 = new RichTextBox();
             panel1.SuspendLayout();
             panel2.SuspendLayout();
             tableLayoutPanel2.SuspendLayout();
             panel3.SuspendLayout();
             panel5.SuspendLayout();
             panel4.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)nmIgnore).BeginInit();
             SuspendLayout();
             // 
             // listBoxFiles
@@ -258,6 +265,11 @@
             // 
             // panel4
             // 
+            panel4.Controls.Add(richTextBox1);
+            panel4.Controls.Add(label9);
+            panel4.Controls.Add(label8);
+            panel4.Controls.Add(label7);
+            panel4.Controls.Add(nmIgnore);
             panel4.Controls.Add(btAssign);
             panel4.Controls.Add(btView);
             panel4.Controls.Add(label6);
@@ -334,6 +346,49 @@
             tbPath.Size = new Size(263, 27);
             tbPath.TabIndex = 0;
             // 
+            // nmIgnore
+            // 
+            nmIgnore.Location = new Point(34, 167);
+            nmIgnore.Name = "nmIgnore";
+            nmIgnore.Size = new Size(150, 27);
+            nmIgnore.TabIndex = 7;
+            // 
+            // label7
+            // 
+            label7.AutoSize = true;
+            label7.Location = new Point(29, 144);
+            label7.Name = "label7";
+            label7.Size = new Size(142, 20);
+            label7.TabIndex = 8;
+            label7.Text = "Ignore from the end";
+            // 
+            // label8
+            // 
+            label8.AutoSize = true;
+            label8.Location = new Point(200, 167);
+            label8.Name = "label8";
+            label8.Size = new Size(0, 20);
+            label8.TabIndex = 9;
+            // 
+            // label9
+            // 
+            label9.AutoSize = true;
+            label9.Location = new Point(200, 187);
+            label9.Name = "label9";
+            label9.Size = new Size(0, 20);
+            label9.TabIndex = 10;
+            // 
+            // richTextBox1
+            // 
+            richTextBox1.BackColor = SystemColors.Control;
+            richTextBox1.BorderStyle = BorderStyle.None;
+            richTextBox1.Location = new Point(206, 144);
+            richTextBox1.Name = "richTextBox1";
+            richTextBox1.ReadOnly = true;
+            richTextBox1.Size = new Size(455, 78);
+            richTextBox1.TabIndex = 11;
+            richTextBox1.Text = resources.GetString("richTextBox1.Text");
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
@@ -352,6 +407,7 @@
             panel5.ResumeLayout(false);
             panel4.ResumeLayout(false);
             panel4.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)nmIgnore).EndInit();
             ResumeLayout(false);
         }
 
@@ -383,5 +439,10 @@
         private Label label6;
         private Button btAssign;
         private Button btView;
+        private NumericUpDown nmIgnore;
+        private Label label8;
+        private Label label7;
+        private Label label9;
+        private RichTextBox richTextBox1;
     }
 }

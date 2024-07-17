@@ -91,7 +91,10 @@ namespace ExifDataModifier
                     else
                         modifiedName += fileName[i];
                 }
+
+                modifiedName = RemoveSuffix(modifiedName, nmIgnore.Value);
                 modifiedName = RemoveFromLast(modifiedName, '*', 1);
+                MessageBox.Show(modifiedName);
 
                 if (!fileGroups.ContainsKey(modifiedName))
                     fileGroups[modifiedName] = new List<string>();
@@ -254,9 +257,11 @@ namespace ExifDataModifier
 
                 // Remove extension
                 modifiedName = RemoveFromLast(modifiedName, '.', 0);
+                // Remove suffix
+                modifiedName = RemoveSuffix(modifiedName, nmIgnore.Value);
+
                 // Remove package name of screenshot. Eg: Screenshot_2023-08-17-20-12-32-990_com.tencent.ig
                 modifiedName = RemoveFromLast(modifiedName, '*', 1);
-
                 filePaths.Clear();
                 foreach (string file in fileGroups[modifiedName])
                 {
@@ -303,7 +308,13 @@ namespace ExifDataModifier
             cbShowFullPath.Checked = !cbShowFullPath.Checked;
         }
 
-    
+        string RemoveSuffix(string name, decimal numberOfLetterToRemove)
+        {
+            int length = name.Length;
+            string modifiedName = name.Substring(0, (int)(length - numberOfLetterToRemove));
+            return modifiedName;
+        }
+
     }
 
 }
