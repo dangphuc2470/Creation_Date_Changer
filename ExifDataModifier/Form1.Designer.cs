@@ -28,25 +28,27 @@
         /// </summary>
         private void InitializeComponent()
         {
-            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
+            tabControl1 = new TabControl();
+            tpDate = new TabPage();
+            panel5 = new Panel();
             listBoxFiles = new ListBox();
-            buttonSetTime = new Button();
-            buttonClear = new Button();
-            listBoxExtractedDate = new ListBox();
-            listBoxName = new ListBox();
-            tbRegex = new TextBox();
-            btExtract = new Button();
-            label1 = new Label();
-            tbDateTimeFormat = new TextBox();
-            label4 = new Label();
             panel1 = new Panel();
+            buttonClear = new Button();
+            buttonSetTime = new Button();
+            panel3 = new Panel();
+            label10 = new Label();
+            cbShowFullPath = new CheckBox();
+            btExtract = new Button();
+            tbRegex = new TextBox();
+            label1 = new Label();
+            label4 = new Label();
+            label2 = new Label();
+            tbDateTimeFormat = new TextBox();
+            label3 = new Label();
             panel2 = new Panel();
             tableLayoutPanel2 = new TableLayoutPanel();
-            panel3 = new Panel();
-            cbShowFullPath = new CheckBox();
-            label2 = new Label();
-            label3 = new Label();
-            panel5 = new Panel();
+            listBoxName = new ListBox();
+            listBoxExtractedDate = new ListBox();
             panel4 = new Panel();
             richTextBox1 = new RichTextBox();
             label9 = new Label();
@@ -60,14 +62,65 @@
             btChooseFolder = new Button();
             label5 = new Label();
             tbPath = new TextBox();
+            tpFilename = new TabPage();
+            label11 = new Label();
+            rbFromCreation = new RadioButton();
+            rbFromModified = new RadioButton();
+            btFileApply = new Button();
+            tbFileNameFormat = new TextBox();
+            btFileClear = new Button();
+            btChangeName = new Button();
+            lbNameFromDate = new ListBox();
+            lbNameOriginal = new ListBox();
+            tabControl1.SuspendLayout();
+            tpDate.SuspendLayout();
+            panel5.SuspendLayout();
             panel1.SuspendLayout();
+            panel3.SuspendLayout();
             panel2.SuspendLayout();
             tableLayoutPanel2.SuspendLayout();
-            panel3.SuspendLayout();
-            panel5.SuspendLayout();
             panel4.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)nmIgnore).BeginInit();
+            tpFilename.SuspendLayout();
             SuspendLayout();
+            // 
+            // tabControl1
+            // 
+            tabControl1.Controls.Add(tpDate);
+            tabControl1.Controls.Add(tpFilename);
+            tabControl1.Dock = DockStyle.Fill;
+            tabControl1.Location = new Point(0, 0);
+            tabControl1.Name = "tabControl1";
+            tabControl1.SelectedIndex = 0;
+            tabControl1.Size = new Size(708, 725);
+            tabControl1.TabIndex = 12;
+            tabControl1.Deselected += tabControl1_Deselected;
+            // 
+            // tpDate
+            // 
+            tpDate.Controls.Add(panel5);
+            tpDate.Controls.Add(panel4);
+            tpDate.Location = new Point(4, 29);
+            tpDate.Name = "tpDate";
+            tpDate.Padding = new Padding(3);
+            tpDate.Size = new Size(700, 692);
+            tpDate.TabIndex = 0;
+            tpDate.Text = "Date";
+            tpDate.UseVisualStyleBackColor = true;
+            // 
+            // panel5
+            // 
+            panel5.Controls.Add(listBoxFiles);
+            panel5.Controls.Add(panel1);
+            panel5.Controls.Add(panel3);
+            panel5.Controls.Add(panel2);
+            panel5.Dock = DockStyle.Bottom;
+            panel5.Location = new Point(3, 204);
+            panel5.Margin = new Padding(3, 3, 3, 20);
+            panel5.Name = "panel5";
+            panel5.Padding = new Padding(20);
+            panel5.Size = new Size(694, 485);
+            panel5.TabIndex = 17;
             // 
             // listBoxFiles
             // 
@@ -79,17 +132,16 @@
             listBoxFiles.TabIndex = 0;
             listBoxFiles.Visible = false;
             // 
-            // buttonSetTime
+            // panel1
             // 
-            buttonSetTime.Dock = DockStyle.Right;
-            buttonSetTime.Location = new Point(438, 5);
-            buttonSetTime.Margin = new Padding(0);
-            buttonSetTime.Name = "buttonSetTime";
-            buttonSetTime.Size = new Size(230, 43);
-            buttonSetTime.TabIndex = 1;
-            buttonSetTime.Text = "Change";
-            buttonSetTime.UseVisualStyleBackColor = true;
-            buttonSetTime.Click += buttonSetTime_Click;
+            panel1.Controls.Add(buttonClear);
+            panel1.Controls.Add(buttonSetTime);
+            panel1.Dock = DockStyle.Bottom;
+            panel1.Location = new Point(20, 417);
+            panel1.Name = "panel1";
+            panel1.Padding = new Padding(0, 5, 0, 0);
+            panel1.Size = new Size(654, 48);
+            panel1.TabIndex = 12;
             // 
             // buttonClear
             // 
@@ -102,33 +154,54 @@
             buttonClear.UseVisualStyleBackColor = true;
             buttonClear.Click += buttonClear_Click;
             // 
-            // listBoxExtractedDate
+            // buttonSetTime
             // 
-            listBoxExtractedDate.Dock = DockStyle.Fill;
-            listBoxExtractedDate.FormattingEnabled = true;
-            listBoxExtractedDate.Location = new Point(336, 3);
-            listBoxExtractedDate.Name = "listBoxExtractedDate";
-            listBoxExtractedDate.Size = new Size(328, 239);
-            listBoxExtractedDate.TabIndex = 3;
+            buttonSetTime.Dock = DockStyle.Right;
+            buttonSetTime.Location = new Point(424, 5);
+            buttonSetTime.Margin = new Padding(0);
+            buttonSetTime.Name = "buttonSetTime";
+            buttonSetTime.Size = new Size(230, 43);
+            buttonSetTime.TabIndex = 1;
+            buttonSetTime.Text = "Change";
+            buttonSetTime.UseVisualStyleBackColor = true;
+            buttonSetTime.Click += buttonSetTime_Click;
             // 
-            // listBoxName
+            // panel3
             // 
-            listBoxName.Dock = DockStyle.Fill;
-            listBoxName.FormattingEnabled = true;
-            listBoxName.HorizontalScrollbar = true;
-            listBoxName.Location = new Point(3, 3);
-            listBoxName.Name = "listBoxName";
-            listBoxName.Size = new Size(327, 239);
-            listBoxName.TabIndex = 4;
-            listBoxName.SizeChanged += listBoxName_SizeChanged;
+            panel3.Controls.Add(label10);
+            panel3.Controls.Add(cbShowFullPath);
+            panel3.Controls.Add(btExtract);
+            panel3.Controls.Add(tbRegex);
+            panel3.Controls.Add(label1);
+            panel3.Controls.Add(label4);
+            panel3.Controls.Add(label2);
+            panel3.Controls.Add(tbDateTimeFormat);
+            panel3.Controls.Add(label3);
+            panel3.Dock = DockStyle.Top;
+            panel3.Location = new Point(20, 20);
+            panel3.Name = "panel3";
+            panel3.Size = new Size(654, 119);
+            panel3.TabIndex = 14;
             // 
-            // tbRegex
+            // label10
             // 
-            tbRegex.Location = new Point(9, 39);
-            tbRegex.Name = "tbRegex";
-            tbRegex.Size = new Size(357, 27);
-            tbRegex.TabIndex = 5;
-            tbRegex.Text = "***********yyyyMMdd*HHmmss";
+            label10.AutoSize = true;
+            label10.Font = new Font("Segoe UI", 12F, FontStyle.Bold, GraphicsUnit.Point, 0);
+            label10.Location = new Point(-7, -9);
+            label10.Name = "label10";
+            label10.Size = new Size(149, 28);
+            label10.TabIndex = 13;
+            label10.Text = "Drag and drop";
+            // 
+            // cbShowFullPath
+            // 
+            cbShowFullPath.AutoSize = true;
+            cbShowFullPath.Location = new Point(9, 72);
+            cbShowFullPath.Name = "cbShowFullPath";
+            cbShowFullPath.Size = new Size(126, 24);
+            cbShowFullPath.TabIndex = 12;
+            cbShowFullPath.Text = "Show full path";
+            cbShowFullPath.UseVisualStyleBackColor = true;
             // 
             // btExtract
             // 
@@ -140,6 +213,14 @@
             btExtract.UseVisualStyleBackColor = true;
             btExtract.Click += btExtract_Click;
             // 
+            // tbRegex
+            // 
+            tbRegex.Location = new Point(9, 39);
+            tbRegex.Name = "tbRegex";
+            tbRegex.Size = new Size(357, 27);
+            tbRegex.TabIndex = 5;
+            tbRegex.Text = "***********yyyyMMdd*HHmmss";
+            // 
             // label1
             // 
             label1.AutoSize = true;
@@ -148,14 +229,6 @@
             label1.Size = new Size(73, 20);
             label1.TabIndex = 7;
             label1.Text = "File name";
-            // 
-            // tbDateTimeFormat
-            // 
-            tbDateTimeFormat.Location = new Point(372, 39);
-            tbDateTimeFormat.Name = "tbDateTimeFormat";
-            tbDateTimeFormat.Size = new Size(181, 27);
-            tbDateTimeFormat.TabIndex = 10;
-            tbDateTimeFormat.Text = "yyyyMMdd-HHmmss";
             // 
             // label4
             // 
@@ -166,16 +239,31 @@
             label4.TabIndex = 11;
             label4.Text = "Date time format";
             // 
-            // panel1
+            // label2
             // 
-            panel1.Controls.Add(buttonClear);
-            panel1.Controls.Add(buttonSetTime);
-            panel1.Dock = DockStyle.Bottom;
-            panel1.Location = new Point(20, 392);
-            panel1.Name = "panel1";
-            panel1.Padding = new Padding(0, 5, 0, 0);
-            panel1.Size = new Size(668, 48);
-            panel1.TabIndex = 12;
+            label2.AutoSize = true;
+            label2.Location = new Point(337, 102);
+            label2.Name = "label2";
+            label2.Size = new Size(96, 20);
+            label2.TabIndex = 8;
+            label2.Text = "Date Preview";
+            // 
+            // tbDateTimeFormat
+            // 
+            tbDateTimeFormat.Location = new Point(372, 39);
+            tbDateTimeFormat.Name = "tbDateTimeFormat";
+            tbDateTimeFormat.Size = new Size(181, 27);
+            tbDateTimeFormat.TabIndex = 10;
+            tbDateTimeFormat.Text = "yyyyMMdd-HHmmss";
+            // 
+            // label3
+            // 
+            label3.AutoSize = true;
+            label3.Location = new Point(14, 102);
+            label3.Name = "label3";
+            label3.Size = new Size(73, 20);
+            label3.TabIndex = 9;
+            label3.Text = "File name";
             // 
             // panel2
             // 
@@ -184,7 +272,7 @@
             panel2.Location = new Point(20, 20);
             panel2.Name = "panel2";
             panel2.Padding = new Padding(1, 125, 0, 50);
-            panel2.Size = new Size(668, 420);
+            panel2.Size = new Size(654, 445);
             panel2.TabIndex = 13;
             // 
             // tableLayoutPanel2
@@ -201,67 +289,27 @@
             tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
             tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
             tableLayoutPanel2.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));
-            tableLayoutPanel2.Size = new Size(667, 245);
+            tableLayoutPanel2.Size = new Size(653, 270);
             tableLayoutPanel2.TabIndex = 13;
             // 
-            // panel3
+            // listBoxName
             // 
-            panel3.Controls.Add(cbShowFullPath);
-            panel3.Controls.Add(btExtract);
-            panel3.Controls.Add(tbRegex);
-            panel3.Controls.Add(label1);
-            panel3.Controls.Add(label4);
-            panel3.Controls.Add(label2);
-            panel3.Controls.Add(tbDateTimeFormat);
-            panel3.Controls.Add(label3);
-            panel3.Dock = DockStyle.Top;
-            panel3.Location = new Point(20, 20);
-            panel3.Name = "panel3";
-            panel3.Size = new Size(668, 125);
-            panel3.TabIndex = 14;
+            listBoxName.Dock = DockStyle.Fill;
+            listBoxName.FormattingEnabled = true;
+            listBoxName.HorizontalScrollbar = true;
+            listBoxName.Location = new Point(3, 3);
+            listBoxName.Name = "listBoxName";
+            listBoxName.Size = new Size(320, 264);
+            listBoxName.TabIndex = 4;
             // 
-            // cbShowFullPath
+            // listBoxExtractedDate
             // 
-            cbShowFullPath.AutoSize = true;
-            cbShowFullPath.Location = new Point(9, 72);
-            cbShowFullPath.Name = "cbShowFullPath";
-            cbShowFullPath.Size = new Size(126, 24);
-            cbShowFullPath.TabIndex = 12;
-            cbShowFullPath.Text = "Show full path";
-            cbShowFullPath.UseVisualStyleBackColor = true;
-            cbShowFullPath.CheckedChanged += cbShowFullPath_CheckedChanged;
-            // 
-            // label2
-            // 
-            label2.AutoSize = true;
-            label2.Location = new Point(337, 102);
-            label2.Name = "label2";
-            label2.Size = new Size(96, 20);
-            label2.TabIndex = 8;
-            label2.Text = "Date Preview";
-            // 
-            // label3
-            // 
-            label3.AutoSize = true;
-            label3.Location = new Point(14, 102);
-            label3.Name = "label3";
-            label3.Size = new Size(73, 20);
-            label3.TabIndex = 9;
-            label3.Text = "File name";
-            // 
-            // panel5
-            // 
-            panel5.Controls.Add(listBoxFiles);
-            panel5.Controls.Add(panel1);
-            panel5.Controls.Add(panel3);
-            panel5.Controls.Add(panel2);
-            panel5.Dock = DockStyle.Bottom;
-            panel5.Location = new Point(0, 231);
-            panel5.Margin = new Padding(3, 3, 3, 20);
-            panel5.Name = "panel5";
-            panel5.Padding = new Padding(20);
-            panel5.Size = new Size(708, 460);
-            panel5.TabIndex = 12;
+            listBoxExtractedDate.Dock = DockStyle.Fill;
+            listBoxExtractedDate.FormattingEnabled = true;
+            listBoxExtractedDate.Location = new Point(329, 3);
+            listBoxExtractedDate.Name = "listBoxExtractedDate";
+            listBoxExtractedDate.Size = new Size(321, 264);
+            listBoxExtractedDate.TabIndex = 3;
             // 
             // panel4
             // 
@@ -278,21 +326,21 @@
             panel4.Controls.Add(label5);
             panel4.Controls.Add(tbPath);
             panel4.Dock = DockStyle.Top;
-            panel4.Location = new Point(0, 0);
+            panel4.Location = new Point(3, 3);
             panel4.Name = "panel4";
-            panel4.Size = new Size(708, 225);
-            panel4.TabIndex = 15;
+            panel4.Size = new Size(694, 225);
+            panel4.TabIndex = 16;
             // 
             // richTextBox1
             // 
-            richTextBox1.BackColor = SystemColors.Control;
+            richTextBox1.BackColor = Color.WhiteSmoke;
             richTextBox1.BorderStyle = BorderStyle.None;
-            richTextBox1.Location = new Point(206, 147);
+            richTextBox1.Location = new Point(200, 147);
             richTextBox1.Name = "richTextBox1";
             richTextBox1.ReadOnly = true;
-            richTextBox1.Size = new Size(455, 78);
+            richTextBox1.Size = new Size(489, 48);
             richTextBox1.TabIndex = 11;
-            richTextBox1.Text = resources.GetString("richTextBox1.Text");
+            richTextBox1.Text = "If your file name have HEX number at the end, use this to ignore it \n(Don't count the file extension)";
             // 
             // label9
             // 
@@ -389,60 +437,185 @@
             tbPath.Size = new Size(263, 27);
             tbPath.TabIndex = 0;
             // 
+            // tpFilename
+            // 
+            tpFilename.Controls.Add(label11);
+            tpFilename.Controls.Add(rbFromCreation);
+            tpFilename.Controls.Add(rbFromModified);
+            tpFilename.Controls.Add(btFileApply);
+            tpFilename.Controls.Add(tbFileNameFormat);
+            tpFilename.Controls.Add(btFileClear);
+            tpFilename.Controls.Add(btChangeName);
+            tpFilename.Controls.Add(lbNameFromDate);
+            tpFilename.Controls.Add(lbNameOriginal);
+            tpFilename.Location = new Point(4, 29);
+            tpFilename.Name = "tpFilename";
+            tpFilename.Padding = new Padding(3);
+            tpFilename.Size = new Size(700, 692);
+            tpFilename.TabIndex = 1;
+            tpFilename.Text = "Filename";
+            tpFilename.UseVisualStyleBackColor = true;
+            // 
+            // label11
+            // 
+            label11.AutoSize = true;
+            label11.Location = new Point(24, 23);
+            label11.Name = "label11";
+            label11.Size = new Size(122, 20);
+            label11.TabIndex = 8;
+            label11.Text = "File name format";
+            // 
+            // rbFromCreation
+            // 
+            rbFromCreation.AutoSize = true;
+            rbFromCreation.Location = new Point(216, 83);
+            rbFromCreation.Name = "rbFromCreation";
+            rbFromCreation.Size = new Size(156, 24);
+            rbFromCreation.TabIndex = 7;
+            rbFromCreation.TabStop = true;
+            rbFromCreation.Text = "From creation date";
+            rbFromCreation.UseVisualStyleBackColor = true;
+            rbFromCreation.Click += rbFromModified_Click;
+            // 
+            // rbFromModified
+            // 
+            rbFromModified.AutoSize = true;
+            rbFromModified.Checked = true;
+            rbFromModified.Location = new Point(24, 83);
+            rbFromModified.Name = "rbFromModified";
+            rbFromModified.Size = new Size(163, 24);
+            rbFromModified.TabIndex = 6;
+            rbFromModified.TabStop = true;
+            rbFromModified.Text = "From modified date";
+            rbFromModified.UseVisualStyleBackColor = true;
+            rbFromModified.Click += rbFromModified_Click;
+            // 
+            // btFileApply
+            // 
+            btFileApply.Location = new Point(365, 46);
+            btFileApply.Name = "btFileApply";
+            btFileApply.Size = new Size(94, 29);
+            btFileApply.TabIndex = 5;
+            btFileApply.Text = "Apply";
+            btFileApply.UseVisualStyleBackColor = true;
+            btFileApply.Click += btFileApply_Click;
+            // 
+            // tbFileNameFormat
+            // 
+            tbFileNameFormat.Location = new Point(24, 46);
+            tbFileNameFormat.Name = "tbFileNameFormat";
+            tbFileNameFormat.Size = new Size(316, 27);
+            tbFileNameFormat.TabIndex = 4;
+            tbFileNameFormat.Text = "IMG_<yyyyMMdd_HHmmss>_[nnnn]";
+            // 
+            // btFileClear
+            // 
+            btFileClear.Location = new Point(24, 627);
+            btFileClear.Name = "btFileClear";
+            btFileClear.Size = new Size(316, 44);
+            btFileClear.TabIndex = 3;
+            btFileClear.Text = "Clear";
+            btFileClear.UseVisualStyleBackColor = true;
+            btFileClear.Click += buttonClear_Click;
+            // 
+            // btChangeName
+            // 
+            btChangeName.Location = new Point(365, 627);
+            btChangeName.Name = "btChangeName";
+            btChangeName.Size = new Size(309, 44);
+            btChangeName.TabIndex = 2;
+            btChangeName.Text = "Apply name";
+            btChangeName.UseVisualStyleBackColor = true;
+            btChangeName.Click += btChangeName_Click;
+            // 
+            // lbNameFromDate
+            // 
+            lbNameFromDate.FormattingEnabled = true;
+            lbNameFromDate.Location = new Point(365, 117);
+            lbNameFromDate.Name = "lbNameFromDate";
+            lbNameFromDate.Size = new Size(309, 504);
+            lbNameFromDate.TabIndex = 1;
+            // 
+            // lbNameOriginal
+            // 
+            lbNameOriginal.FormattingEnabled = true;
+            lbNameOriginal.Location = new Point(24, 117);
+            lbNameOriginal.Name = "lbNameOriginal";
+            lbNameOriginal.Size = new Size(316, 504);
+            lbNameOriginal.TabIndex = 0;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(708, 691);
-            Controls.Add(panel4);
-            Controls.Add(panel5);
+            ClientSize = new Size(708, 725);
+            Controls.Add(tabControl1);
             Name = "Form1";
             Text = "Date Changer";
             ResizeEnd += Form1_ResizeEnd;
+            DragDrop += Form1_DragDrop;
+            DragEnter += Form1_DragEnter;
+            tabControl1.ResumeLayout(false);
+            tpDate.ResumeLayout(false);
+            panel5.ResumeLayout(false);
             panel1.ResumeLayout(false);
-            panel2.ResumeLayout(false);
-            tableLayoutPanel2.ResumeLayout(false);
             panel3.ResumeLayout(false);
             panel3.PerformLayout();
-            panel5.ResumeLayout(false);
+            panel2.ResumeLayout(false);
+            tableLayoutPanel2.ResumeLayout(false);
             panel4.ResumeLayout(false);
             panel4.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)nmIgnore).EndInit();
+            tpFilename.ResumeLayout(false);
+            tpFilename.PerformLayout();
             ResumeLayout(false);
         }
 
         #endregion
 
-        private ListBox listBoxFiles;
-        private Button buttonSetTime;
-        private Button buttonClear;
-        private ListBox listBoxExtractedDate;
-        private ListBox listBoxName;
-        private TextBox tbRegex;
-        private Button btExtract;
-        private Label label1;
-        private TextBox tbDateTimeFormat;
-        private Label label4;
-        private Panel panel1;
-        private Panel panel2;
-        private Panel panel3;
+        private TabControl tabControl1;
+        private TabPage tpDate;
         private Panel panel5;
-        private Label label2;
-        private Label label3;
-        private TableLayoutPanel tableLayoutPanel2;
+        private ListBox listBoxFiles;
+        private Panel panel1;
+        private Button buttonClear;
+        private Button buttonSetTime;
+        private Panel panel3;
         private CheckBox cbShowFullPath;
+        private Button btExtract;
+        private TextBox tbRegex;
+        private Label label1;
+        private Label label4;
+        private Label label2;
+        private TextBox tbDateTimeFormat;
+        private Label label3;
+        private Panel panel2;
+        private TableLayoutPanel tableLayoutPanel2;
+        private ListBox listBoxName;
+        private ListBox listBoxExtractedDate;
         private Panel panel4;
-        private Label label5;
-        private TextBox tbPath;
-        private Button btChooseFolder;
-        private ComboBox cbFileGroup;
-        private Label label6;
-        private Button btAssign;
-        private Button btView;
-        private NumericUpDown nmIgnore;
+        private RichTextBox richTextBox1;
+        private Label label9;
         private Label label8;
         private Label label7;
-        private Label label9;
-        private RichTextBox richTextBox1;
+        private NumericUpDown nmIgnore;
+        private Button btAssign;
+        private Button btView;
+        private Label label6;
+        private ComboBox cbFileGroup;
+        private Button btChooseFolder;
+        private Label label5;
+        private TextBox tbPath;
+        private TabPage tpFilename;
+        private Label label10;
+        private ListBox lbNameFromDate;
+        private ListBox lbNameOriginal;
+        private Button btFileClear;
+        private Button btChangeName;
+        private RadioButton rbFromCreation;
+        private RadioButton rbFromModified;
+        private Button btFileApply;
+        private TextBox tbFileNameFormat;
+        private Label label11;
     }
 }
