@@ -36,6 +36,12 @@ namespace ExifDataModifier
 
     ".tga",                           // Truevision Graphics Adapter format (legacy)
     ".flic",                          // Flic Animation format (legacy)
+    ".cr2",
+  ".nef",
+  ".arw",
+  ".orf",
+  ".pef",
+  ".dng",
 };
 
 
