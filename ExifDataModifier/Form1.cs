@@ -14,6 +14,7 @@ namespace ExifDataModifier
     {
         private List<string> filePaths = new List<string>();
         private List<DateTime> filePathsDate = new List<DateTime>();
+        private List<string> newFileNames = new List<string>();
         private Dictionary<string, List<string>> fileGroups = new Dictionary<string, List<string>>();
         private bool isShowNotificationFirstTime = false;
         string[] allowedExtensions = {
@@ -41,10 +42,7 @@ namespace ExifDataModifier
         public Form1()
         {
             InitializeComponent();
-
             AllowDrop = true;
-            DragEnter += Form1_DragEnter;
-            DragDrop += Form1_DragDrop;
         }
 
         private void Form1_DragEnter(object sender, DragEventArgs e)
@@ -69,10 +67,17 @@ namespace ExifDataModifier
         {
             listBoxFiles.Items.Clear();
             listBoxName.Items.Clear();
+            lbNameFromDate.Items.Clear();
+            lbNameOriginal.Items.Clear();
             foreach (string filePath in filePaths)
             {
                 listBoxFiles.Items.Add(filePath);
                 listBoxName.Items.Add(Path.GetFileName(filePath));
+                lbNameOriginal.Items.Add(Path.GetFileName(filePath));
+            }
+            for (int i = 0; i < newFileNames.Count; i++)
+            {
+                lbNameFromDate.Items.Add(newFileNames[i] + Path.GetExtension(filePaths[i]));
             }
         }
 
@@ -142,11 +147,18 @@ namespace ExifDataModifier
             listBoxFiles.Items.Clear();
             listBoxName.Items.Clear();
             listBoxExtractedDate.Items.Clear();
+            lbNameFromDate.Items.Clear();
+            lbNameOriginal.Items.Clear();
         }
 
         private void btExtract_Click(object sender, EventArgs e)
         {
             filePathsDate.Clear();
+            if (listBoxFiles.Items.Count == 0)
+            {
+                MessageBox.Show("Nothing to apply");
+                return;
+            }
             listBoxExtractedDate.Items.Clear();
             Exception exception = null;
             foreach (string fileName in listBoxName.Items)
@@ -321,6 +333,117 @@ namespace ExifDataModifier
             return modifiedName;
         }
 
+        private void btChangeName_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                foreach (string newFileName in newFileNames)
+                {
+                    if (newFileName == "Error")
+                    {
+                        DialogResult result = MessageBox.Show("Some file name are not correct, do you want to continue?", "Error", MessageBoxButtons.OKCancel, MessageBoxIcon.Error);
+                        if (result == DialogResult.Cancel)
+                            return;
+                        else
+                            break;
+                    }
+                }
+
+                if (filePaths.Count != newFileNames.Count)
+                {
+                    MessageBox.Show("Please check the format!");
+                    return;
+                }
+                for (int i = 0; i < filePaths.Count; i++)
+                {
+                    string newFileNameWithoutExtension = newFileNames[i];
+                    if (newFileNameWithoutExtension == "Error")
+                        continue;
+                    // Extract the directory, original file name without extension, and extension
+                    string directory = Path.GetDirectoryName(filePaths[i]);
+                    string originalExtension = Path.GetExtension(filePaths[i]);
+
+                    // Combine the directory, new file name, and original extension
+                    string newFilePath = Path.Combine(directory, newFileNameWithoutExtension + originalExtension);
+
+                    File.Move(filePaths[i], newFilePath);
+                }
+
+                MessageBox.Show("Success!");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message);
+
+            }
+        }
+
+        private void tabControl1_Deselected(object sender, TabControlEventArgs e)
+        {
+            buttonClear_Click(null, null);
+        }
+
+        private void rbFromModified_Click(object sender, EventArgs e)
+        {
+            rbFromCreation.Checked = !rbFromModified.Checked;
+        }
+
+        private void btFileApply_Click(object sender, EventArgs e)
+        {
+            newFileNames.Clear();
+            lbNameFromDate.Items.Clear();
+            string nameFormat = tbFileNameFormat.Text;
+            int startIndex = nameFormat.IndexOf("<") + 1;
+            int endIndex = nameFormat.IndexOf(">");
+            int length = endIndex - startIndex;
+
+            string prefix = nameFormat.Substring(0, startIndex - 1);
+            string suffix = nameFormat.Substring(endIndex + 1, nameFormat.Length - endIndex - 1);
+
+            int startSequenceIndex = nameFormat.IndexOf("[");
+            int endSequenceIndex = nameFormat.IndexOf("]");
+            int lengthSequence = endSequenceIndex - startSequenceIndex - 1;
+
+            nameFormat = nameFormat.Substring(startIndex, length);
+
+            for (int i = 0; i < filePaths.Count; i++)
+            {
+                try
+                {
+                    FileInfo fileInfo = new FileInfo(filePaths[i]);
+                    DateTime creationTime = fileInfo.CreationTime; // Ngày tạo file
+                    DateTime lastModifiedTime = fileInfo.LastWriteTime; // Ngày chỉnh sửa cuối cùng
+
+                    string newName;
+                    if (rbFromModified.Checked)
+                        newName = prefix + lastModifiedTime.ToString(nameFormat) + suffix;
+                    else
+                        newName = prefix + creationTime.ToString(nameFormat) + suffix;
+
+                    if (lengthSequence > 0)
+                    {
+                        // Change position after remove the "<>"
+                        int newStartSequenceIndex = startSequenceIndex -2 ;
+                        int newEndSequenceIndex = endSequenceIndex - 2;
+                        string newPrefix = newName.Substring(0, newStartSequenceIndex);
+                        string newSuffix = newName.Substring(newEndSequenceIndex + 1, newName.Length - newEndSequenceIndex - 1);
+                        newPrefix += i.ToString($"D{lengthSequence}");
+                        newName = newPrefix + newSuffix;
+                    }
+                    newFileNames.Add(newName);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    newFileNames.Add("Error");
+                }
+
+            }
+
+            DisplayFilePaths();
+
+
+        }
     }
 
 }
