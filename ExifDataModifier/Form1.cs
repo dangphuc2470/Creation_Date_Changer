@@ -33,9 +33,14 @@ namespace ExifDataModifier
     ".vp9",                           // VP9 video codec
     ".h263",                          // H.263 video codec
     ".prores",                         // Apple Professional Res video codec
-
     ".tga",                           // Truevision Graphics Adapter format (legacy)
     ".flic",                          // Flic Animation format (legacy)
+    ".cr2",
+    ".nef",
+    ".arw",
+    ".orf",
+    ".pef",
+    ".dng",
 };
 
 
@@ -423,7 +428,7 @@ namespace ExifDataModifier
                     if (lengthSequence > 0)
                     {
                         // Change position after remove the "<>"
-                        int newStartSequenceIndex = startSequenceIndex -2 ;
+                        int newStartSequenceIndex = startSequenceIndex - 2;
                         int newEndSequenceIndex = endSequenceIndex - 2;
                         string newPrefix = newName.Substring(0, newStartSequenceIndex);
                         string newSuffix = newName.Substring(newEndSequenceIndex + 1, newName.Length - newEndSequenceIndex - 1);
