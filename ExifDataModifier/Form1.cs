@@ -80,10 +80,10 @@ namespace ExifDataModifier
                 listBoxName.Items.Add(Path.GetFileName(filePath));
                 lbNameOriginal.Items.Add(Path.GetFileName(filePath));
             }
-            for (int i = 0; i < newFileNames.Count; i++)
-            {
-                lbNameFromDate.Items.Add(newFileNames[i] + Path.GetExtension(filePaths[i]));
-            }
+            //for (int i = 0; i < newFileNames.Count; i++)
+            //{
+            //    lbNameFromDate.Items.Add(newFileNames[i] + Path.GetExtension(filePaths[i]));
+            //}
         }
 
         private void ScanAndGroupFiles(List<string> files)
@@ -445,7 +445,10 @@ namespace ExifDataModifier
 
             }
 
-            DisplayFilePaths();
+            for (int i = 0; i < newFileNames.Count; i++)
+            {
+                lbNameFromDate.Items.Add(newFileNames[i] + Path.GetExtension(filePaths[i]));
+            }
 
 
         }
