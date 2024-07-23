@@ -6,6 +6,7 @@ using System.Drawing.Imaging;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using ExifLib;
+using GMap.NET.WindowsForms;
 using static System.Windows.Forms.DataFormats;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.Button;
 
@@ -68,6 +69,39 @@ namespace ExifDataModifier
         {
             InitializeComponent();
             AllowDrop = true;
+            gMapControl1.MapProvider = GMap.NET.MapProviders.GoogleMapProvider.Instance;
+            GMap.NET.GMaps.Instance.Mode = GMap.NET.AccessMode.ServerOnly;
+            gMapControl1.Position = new GMap.NET.PointLatLng(40.712776, -74.005974); // Example: New York City
+                                                                                     // Enable dragging the map:
+            gMapControl1.CanDragMap = true;
+            gMapControl1.DragButton = MouseButtons.Left; // Use the left mouse button for dragging
+
+            // Enable zooming:
+            gMapControl1.MinZoom = 1;  // Minimum zoom level
+            gMapControl1.MaxZoom = 20; // Maximum zoom level
+            gMapControl1.Zoom = 9;     // Initial zoom level
+            gMapControl1.IgnoreMarkerOnMouseWheel = true; // Zoom without centering on markers
+
+            // Optional: Enable mouse wheel zoom without holding down Ctrl
+            gMapControl1.MouseWheelZoomType = GMap.NET.MouseWheelZoomType.MousePositionAndCenter;
+
+            // Optional: Disable the red cross when the map is dragged beyond its boundaries
+            gMapControl1.ShowTileGridLines = false;
+            Init(gMapControl1);
+        }
+
+        internal void Init(GMapControl gMapControl)
+        {
+            var c = gMapControl;
+            c.MouseWheel += GMap_MouseWheel;
+            c.MouseWheelZoomEnabled = false;
+        }
+
+        private void GMap_MouseWheel(object sender, MouseEventArgs e)
+        {
+            if (e.Delta < 0) gMapControl1.Zoom--;
+            else gMapControl1.Zoom++;
+            // Note: No need to set e.Handled = true; as MouseEventArgs does not contain a Handled property
         }
 
         private void Form1_DragEnter(object sender, DragEventArgs e)
@@ -599,6 +633,48 @@ namespace ExifDataModifier
         private void panel6_SizeChanged(object sender, EventArgs e)
         {
 
+        }
+
+        private void btLocationApply_Click(object sender, EventArgs e)
+        {
+            var center = gMapControl1.Position;
+            MessageBox.Show($"Latitude: {center.Lat}, Longitude: {center.Lng}", "Map Center");
+        }
+
+        private void gMapControl1_MouseUp(object sender, MouseEventArgs e)
+        {
+            var center = gMapControl1.Position;
+            if (tbLatLgn.Text != $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}")
+                tbLatLgn.Text = $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}";
+        }
+
+        private void gMapControl1_MouseHover(object sender, EventArgs e)
+        {
+            var center = gMapControl1.Position;
+            if (tbLatLgn.Text != $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}")
+                tbLatLgn.Text = $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}";
+        }
+
+        private void tbLatLgn_TextChanged(object sender, EventArgs e)
+        {
+            var center = gMapControl1.Position;
+            if (tbLatLgn.Text != $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}")
+            {
+                // Move to the location
+                string[] latlng = tbLatLgn.Text.Split(',');
+                if (latlng.Length == 2)
+                {
+                    try
+                    {
+                        double lat = double.Parse(latlng[0]);
+                        double lng = double.Parse(latlng[1]);
+                        gMapControl1.Position = new GMap.NET.PointLatLng(lat, lng);
+                    }
+                    catch (Exception ex)
+                    { }
+                }
+                
+            }
         }
     }
 
