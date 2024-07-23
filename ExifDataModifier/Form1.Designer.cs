@@ -28,6 +28,7 @@
         /// </summary>
         private void InitializeComponent()
         {
+            components = new System.ComponentModel.Container();
             tabControl1 = new TabControl();
             tpDate = new TabPage();
             panel5 = new Panel();
@@ -72,6 +73,11 @@
             btChangeName = new Button();
             lbNameFromDate = new ListBox();
             lbNameOriginal = new ListBox();
+            tpLocation = new TabPage();
+            panel6 = new Panel();
+            lvImageLocation = new ListView();
+            imageList1 = new ImageList(components);
+            btLocationClear = new Button();
             tabControl1.SuspendLayout();
             tpDate.SuspendLayout();
             panel5.SuspendLayout();
@@ -82,12 +88,15 @@
             panel4.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)nmIgnore).BeginInit();
             tpFilename.SuspendLayout();
+            tpLocation.SuspendLayout();
+            panel6.SuspendLayout();
             SuspendLayout();
             // 
             // tabControl1
             // 
             tabControl1.Controls.Add(tpDate);
             tabControl1.Controls.Add(tpFilename);
+            tabControl1.Controls.Add(tpLocation);
             tabControl1.Dock = DockStyle.Fill;
             tabControl1.Location = new Point(0, 0);
             tabControl1.Name = "tabControl1";
@@ -544,6 +553,58 @@
             lbNameOriginal.Size = new Size(316, 504);
             lbNameOriginal.TabIndex = 0;
             // 
+            // tpLocation
+            // 
+            tpLocation.Controls.Add(panel6);
+            tpLocation.Location = new Point(4, 29);
+            tpLocation.Name = "tpLocation";
+            tpLocation.Padding = new Padding(3);
+            tpLocation.Size = new Size(700, 692);
+            tpLocation.TabIndex = 2;
+            tpLocation.Text = "Location";
+            tpLocation.UseVisualStyleBackColor = true;
+            // 
+            // panel6
+            // 
+            panel6.Controls.Add(btLocationClear);
+            panel6.Controls.Add(lvImageLocation);
+            panel6.Dock = DockStyle.Left;
+            panel6.Location = new Point(3, 3);
+            panel6.Name = "panel6";
+            panel6.Size = new Size(353, 686);
+            panel6.TabIndex = 1;
+            panel6.SizeChanged += panel6_SizeChanged;
+            // 
+            // lvImageLocation
+            // 
+            lvImageLocation.LargeImageList = imageList1;
+            lvImageLocation.Location = new Point(-103, -2);
+            lvImageLocation.Margin = new Padding(0);
+            lvImageLocation.Name = "lvImageLocation";
+            lvImageLocation.Size = new Size(455, 616);
+            lvImageLocation.SmallImageList = imageList1;
+            lvImageLocation.Sorting = SortOrder.Ascending;
+            lvImageLocation.StateImageList = imageList1;
+            lvImageLocation.TabIndex = 0;
+            lvImageLocation.UseCompatibleStateImageBehavior = false;
+            lvImageLocation.View = View.SmallIcon;
+            // 
+            // imageList1
+            // 
+            imageList1.ColorDepth = ColorDepth.Depth16Bit;
+            imageList1.ImageSize = new Size(100, 100);
+            imageList1.TransparentColor = Color.Transparent;
+            // 
+            // btLocationClear
+            // 
+            btLocationClear.Location = new Point(5, 632);
+            btLocationClear.Name = "btLocationClear";
+            btLocationClear.Size = new Size(345, 51);
+            btLocationClear.TabIndex = 1;
+            btLocationClear.Text = "Clear";
+            btLocationClear.UseVisualStyleBackColor = true;
+            btLocationClear.Click += buttonClear_Click;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
@@ -568,6 +629,8 @@
             ((System.ComponentModel.ISupportInitialize)nmIgnore).EndInit();
             tpFilename.ResumeLayout(false);
             tpFilename.PerformLayout();
+            tpLocation.ResumeLayout(false);
+            panel6.ResumeLayout(false);
             ResumeLayout(false);
         }
 
@@ -617,5 +680,10 @@
         private Button btFileApply;
         private TextBox tbFileNameFormat;
         private Label label11;
+        private TabPage tpLocation;
+        private ImageList imageList1;
+        private ListView lvImageLocation;
+        private Panel panel6;
+        private Button btLocationClear;
     }
 }
