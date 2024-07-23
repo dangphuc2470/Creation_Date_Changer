@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics.Eventing.Reader;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -17,6 +18,7 @@ namespace ExifDataModifier
         private List<string> newFileNames = new List<string>();
         private Dictionary<string, List<string>> fileGroups = new Dictionary<string, List<string>>();
         private bool isShowNotificationFirstTime = false;
+        private volatile bool stopRequested = false;
         string[] allowedExtensions = {
     ".jpg", ".jpeg", ".png", ".gif",  // Common image formats
     ".bmp", ".tiff",                 // Less common image formats
@@ -25,6 +27,13 @@ namespace ExifDataModifier
     ".psd",                           // Photoshop Document format
     ".ai",                           // Adobe Illustrator Artwork format
     ".svg",                           // Scalable Vector Graphics format
+    ".cr2",
+    ".nef",
+    ".arw",
+    ".orf",
+    ".pef",
+    ".dng",
+
 
     ".mp4", ".mov", ".avi",           // Common video container formats
     ".mkv", ".wmv", ".flv",            // Less common video container formats
@@ -35,13 +44,24 @@ namespace ExifDataModifier
     ".prores",                         // Apple Professional Res video codec
     ".tga",                           // Truevision Graphics Adapter format (legacy)
     ".flic",                          // Flic Animation format (legacy)
+
+};
+        string[] imageExtensions =
+        {
+    ".jpg", ".jpeg", ".png", ".gif",  // Common image formats
+    ".bmp", ".tiff",                 // Less common image formats
+    ".webp", ".heic",                 // Modern image formats
+    ".raw",                           // RAW image format
+    ".psd",                           // Photoshop Document format
+    ".ai",                           // Adobe Illustrator Artwork format
+    ".svg",                           // Scalable Vector Graphics format
     ".cr2",
     ".nef",
     ".arw",
     ".orf",
     ".pef",
-    ".dng",
-};
+    ".dng"
+        };
 
 
         public Form1()
@@ -62,7 +82,7 @@ namespace ExifDataModifier
         {
             //filePaths.Clear();
             //listBoxFiles.Items.Clear();
-
+            stopRequested = false;
             string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
             filePaths.AddRange(files);
             DisplayFilePaths();
@@ -80,11 +100,14 @@ namespace ExifDataModifier
                 listBoxName.Items.Add(Path.GetFileName(filePath));
                 lbNameOriginal.Items.Add(Path.GetFileName(filePath));
             }
+
+            LoadImagesIntoListView(filePaths);
             //for (int i = 0; i < newFileNames.Count; i++)
             //{
             //    lbNameFromDate.Items.Add(newFileNames[i] + Path.GetExtension(filePaths[i]));
             //}
         }
+
 
         private void ScanAndGroupFiles(List<string> files)
         {
@@ -147,6 +170,7 @@ namespace ExifDataModifier
 
         private void buttonClear_Click(object sender, EventArgs e)
         {
+            stopRequested = true;
             filePaths.Clear();
             filePathsDate.Clear();
             listBoxFiles.Items.Clear();
@@ -154,6 +178,7 @@ namespace ExifDataModifier
             listBoxExtractedDate.Items.Clear();
             lbNameFromDate.Items.Clear();
             lbNameOriginal.Items.Clear();
+            lvImageLocation.Items.Clear();
         }
 
         private void btExtract_Click(object sender, EventArgs e)
@@ -450,6 +475,129 @@ namespace ExifDataModifier
                 lbNameFromDate.Items.Add(newFileNames[i] + Path.GetExtension(filePaths[i]));
             }
 
+
+        }
+
+        private void LoadImagesIntoListView(List<string> imagePaths)
+        {
+            Parallel.ForEach(imagePaths, (path, state) =>
+            {
+                if (stopRequested)
+                {
+                    state.Stop(); // Yêu cầu dừng vòng lặp song song
+                    return;
+                }
+                try
+                {
+                    // If not image, load white image
+                    if (!imageExtensions.Contains(Path.GetExtension(path).ToLower()))
+                    {
+                        this.Invoke((MethodInvoker)delegate
+                        {
+                            int imageIndex = imageList1.Images.Count;
+                            imageList1.Images.Add(new Bitmap(100, 100));
+                            ListViewItem item = new ListViewItem(Path.GetFileNameWithoutExtension(path))
+                            {
+                                ImageIndex = imageIndex
+                            };
+                            lvImageLocation.Items.Add(item);
+                        });
+                        return;
+                    }
+
+                    Image originalImage = Image.FromFile(path);
+                    Image resizedImage = ResizeImage(originalImage, imageList1.ImageSize.Width, imageList1.ImageSize.Height);
+
+                    // Marshal the UI update back to the UI thread
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        int imageIndex = imageList1.Images.Count;
+                        imageList1.Images.Add(resizedImage);
+
+                        // Extract a file name or any other text you want to display next to the image
+                        string fileName = Path.GetFileNameWithoutExtension(path);
+                        // Create a ListViewItem with text and set its ImageIndex
+                        ListViewItem item = new ListViewItem(fileName)
+                        {
+                            ImageIndex = imageIndex
+                        };
+                        lvImageLocation.Items.Add(item); // Add the item to the ListView
+                    });
+                }
+                catch (Exception ex)
+                {
+                    // Handle exceptions (e.g., file not found, invalid image format)
+                    // Marshal the exception handling to the UI thread if you need to interact with the UI, e.g., showing a MessageBox
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        MessageBox.Show($"Error loading image: {ex.Message}");
+                    });
+                }
+            });
+            this.Invoke((MethodInvoker)delegate
+            {
+                lvImageLocation.EndUpdate(); // Ends the update process and repaints the ListView if necessary.
+            });
+        }
+
+
+        private Image ResizeImage(Image image, int width, int height)
+        {
+            // Correct orientation
+            image = CorrectImageOrientation(image);
+
+            int size = Math.Min(image.Width, image.Height); // Find the shortest dimension
+            int x = (image.Width - size) / 2;
+            int y = (image.Height - size) / 2;
+
+            // Create a new Bitmap with the desired size
+            Bitmap croppedImage = new Bitmap(size, size);
+            using (Graphics g = Graphics.FromImage(croppedImage))
+            {
+                // Draw the original image, cropped to a square
+                g.DrawImage(image, new Rectangle(0, 0, size, size), new Rectangle(x, y, size, size), GraphicsUnit.Pixel);
+            }
+
+            return croppedImage;
+        }
+
+        private Image CorrectImageOrientation(Image img)
+        {
+            if (img.PropertyIdList.Contains(0x0112)) // Check if the image has orientation metadata
+            {
+                int orientation = (int)img.GetPropertyItem(0x0112).Value[0];
+                switch (orientation)
+                {
+                    case 2:
+                        img.RotateFlip(RotateFlipType.RotateNoneFlipX); // Horizontal flip
+                        break;
+                    case 3:
+                        img.RotateFlip(RotateFlipType.Rotate180FlipNone); // 180° rotation
+                        break;
+                    case 4:
+                        img.RotateFlip(RotateFlipType.RotateNoneFlipY); // Vertical flip
+                        break;
+                    case 5:
+                        img.RotateFlip(RotateFlipType.Rotate90FlipX);
+                        break;
+                    case 6:
+                        img.RotateFlip(RotateFlipType.Rotate90FlipNone); // 90° rotation
+                        break;
+                    case 7:
+                        img.RotateFlip(RotateFlipType.Rotate270FlipX);
+                        break;
+                    case 8:
+                        img.RotateFlip(RotateFlipType.Rotate270FlipNone); // 270° rotation
+                        break;
+                }
+                // Remove the orientation property to prevent further adjustments
+                img.RemovePropertyItem(0x0112);
+            }
+            return img;
+        }
+
+        private void panel6_SizeChanged(object sender, EventArgs e)
+        {
 
         }
     }
