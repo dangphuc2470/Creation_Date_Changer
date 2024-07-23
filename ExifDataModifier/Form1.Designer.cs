@@ -74,10 +74,13 @@
             lbNameFromDate = new ListBox();
             lbNameOriginal = new ListBox();
             tpLocation = new TabPage();
+            tbLatLgn = new TextBox();
+            btLocationApply = new Button();
+            gMapControl1 = new GMap.NET.WindowsForms.GMapControl();
             panel6 = new Panel();
+            btLocationClear = new Button();
             lvImageLocation = new ListView();
             imageList1 = new ImageList(components);
-            btLocationClear = new Button();
             tabControl1.SuspendLayout();
             tpDate.SuspendLayout();
             panel5.SuspendLayout();
@@ -555,6 +558,9 @@
             // 
             // tpLocation
             // 
+            tpLocation.Controls.Add(tbLatLgn);
+            tpLocation.Controls.Add(btLocationApply);
+            tpLocation.Controls.Add(gMapControl1);
             tpLocation.Controls.Add(panel6);
             tpLocation.Location = new Point(4, 29);
             tpLocation.Name = "tpLocation";
@@ -563,6 +569,52 @@
             tpLocation.TabIndex = 2;
             tpLocation.Text = "Location";
             tpLocation.UseVisualStyleBackColor = true;
+            // 
+            // tbLatLgn
+            // 
+            tbLatLgn.Location = new Point(362, 590);
+            tbLatLgn.Name = "tbLatLgn";
+            tbLatLgn.Size = new Size(184, 27);
+            tbLatLgn.TabIndex = 4;
+            tbLatLgn.TextChanged += tbLatLgn_TextChanged;
+            // 
+            // btLocationApply
+            // 
+            btLocationApply.Location = new Point(358, 635);
+            btLocationApply.Name = "btLocationApply";
+            btLocationApply.Size = new Size(339, 51);
+            btLocationApply.TabIndex = 3;
+            btLocationApply.Text = "Apply";
+            btLocationApply.UseVisualStyleBackColor = true;
+            btLocationApply.Click += btLocationApply_Click;
+            // 
+            // gMapControl1
+            // 
+            gMapControl1.Bearing = 0F;
+            gMapControl1.CanDragMap = true;
+            gMapControl1.Dock = DockStyle.Fill;
+            gMapControl1.EmptyTileColor = Color.Navy;
+            gMapControl1.GrayScaleMode = false;
+            gMapControl1.HelperLineOption = GMap.NET.WindowsForms.HelperLineOptions.DontShow;
+            gMapControl1.LevelsKeepInMemory = 5;
+            gMapControl1.Location = new Point(356, 3);
+            gMapControl1.MarkersEnabled = true;
+            gMapControl1.MaxZoom = 2;
+            gMapControl1.MinZoom = 2;
+            gMapControl1.MouseWheelZoomEnabled = true;
+            gMapControl1.MouseWheelZoomType = GMap.NET.MouseWheelZoomType.MousePositionAndCenter;
+            gMapControl1.Name = "gMapControl1";
+            gMapControl1.NegativeMode = false;
+            gMapControl1.PolygonsEnabled = true;
+            gMapControl1.RetryLoadTile = 0;
+            gMapControl1.RoutesEnabled = true;
+            gMapControl1.ScaleMode = GMap.NET.WindowsForms.ScaleModes.Integer;
+            gMapControl1.SelectedAreaFillColor = Color.FromArgb(33, 65, 105, 225);
+            gMapControl1.ShowTileGridLines = false;
+            gMapControl1.Size = new Size(341, 686);
+            gMapControl1.TabIndex = 2;
+            gMapControl1.Zoom = 0D;
+            gMapControl1.MouseMove += gMapControl1_MouseUp;
             // 
             // panel6
             // 
@@ -574,6 +626,16 @@
             panel6.Size = new Size(353, 686);
             panel6.TabIndex = 1;
             panel6.SizeChanged += panel6_SizeChanged;
+            // 
+            // btLocationClear
+            // 
+            btLocationClear.Location = new Point(5, 632);
+            btLocationClear.Name = "btLocationClear";
+            btLocationClear.Size = new Size(345, 51);
+            btLocationClear.TabIndex = 1;
+            btLocationClear.Text = "Clear";
+            btLocationClear.UseVisualStyleBackColor = true;
+            btLocationClear.Click += buttonClear_Click;
             // 
             // lvImageLocation
             // 
@@ -594,16 +656,6 @@
             imageList1.ColorDepth = ColorDepth.Depth16Bit;
             imageList1.ImageSize = new Size(100, 100);
             imageList1.TransparentColor = Color.Transparent;
-            // 
-            // btLocationClear
-            // 
-            btLocationClear.Location = new Point(5, 632);
-            btLocationClear.Name = "btLocationClear";
-            btLocationClear.Size = new Size(345, 51);
-            btLocationClear.TabIndex = 1;
-            btLocationClear.Text = "Clear";
-            btLocationClear.UseVisualStyleBackColor = true;
-            btLocationClear.Click += buttonClear_Click;
             // 
             // Form1
             // 
@@ -630,6 +682,7 @@
             tpFilename.ResumeLayout(false);
             tpFilename.PerformLayout();
             tpLocation.ResumeLayout(false);
+            tpLocation.PerformLayout();
             panel6.ResumeLayout(false);
             ResumeLayout(false);
         }
@@ -685,5 +738,8 @@
         private ListView lvImageLocation;
         private Panel panel6;
         private Button btLocationClear;
+        private GMap.NET.WindowsForms.GMapControl gMapControl1;
+        private Button btLocationApply;
+        private TextBox tbLatLgn;
     }
 }
