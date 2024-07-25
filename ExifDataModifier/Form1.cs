@@ -13,6 +13,7 @@ using System.Drawing;
 using ExifLib;
 using System.Text.Json;
 using GMap.NET;
+using System.ComponentModel;
 namespace ExifDataModifier
 {
     public partial class Form1 : Form
@@ -75,11 +76,13 @@ namespace ExifDataModifier
     ".tiff",
     ".webp", ".heic",
         };
-
+        private BackgroundWorker backgroundWorker;
+        private ProgressForm progressForm;
 
         public Form1()
         {
             InitializeComponent();
+            InitializeBackgroundWorker();
             AllowDrop = true;
             gMapControl1.MapProvider = GMap.NET.MapProviders.GoogleMapProvider.Instance;
             GMap.NET.GMaps.Instance.Mode = GMap.NET.AccessMode.ServerOnly;
@@ -88,7 +91,7 @@ namespace ExifDataModifier
             if (File.Exists(jsonFilePath))
             {
                 string json = File.ReadAllText(jsonFilePath);
-               MapConfig config = JsonSerializer.Deserialize<MapConfig>(json);
+                MapConfig config = JsonSerializer.Deserialize<MapConfig>(json);
                 gMapControl1.Position = config.Center;
                 int mapType = config.MapType;
 
@@ -119,6 +122,7 @@ namespace ExifDataModifier
             // Optional: Disable the red cross when the map is dragged beyond its boundaries
             gMapControl1.ShowTileGridLines = false;
             Init(gMapControl1);
+
 
 
         }
@@ -686,69 +690,10 @@ namespace ExifDataModifier
 
         private void btLocationApply_Click(object sender, EventArgs e)
         {
-            ApplyLocation();
+            StartProcessing();
         }
 
-        private void ApplyLocation()
-        {
-            GMap.NET.PointLatLng center = gMapControl1.Position;
-            String latlng = ConvertPointLatLngToString(center);
 
-            MapConfig config = new MapConfig
-            {
-                Center = center,
-                MapType = mapType
-            };
-
-
-            // Save location to json file for later session
-            string json = JsonSerializer.Serialize(config);
-            string jsonFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "location.json");
-            File.WriteAllText(jsonFilePath, json);
-
-
-            foreach (String path in filePaths)
-            {
-                double latitude = gMapControl1.Position.Lat;
-                double longitude = gMapControl1.Position.Lng;
-                //Function.GeotagVideo(path, latitude, longitude);
-                if (!CheckSupported(path, supportedGeoTagFormats))
-                    continue;
-                using (Image originalImage = Image.FromFile(path))
-                {
-                    using (Image geotaggedImage = Function.Geotag(originalImage, latitude, longitude))
-                    {
-
-                        // Save the geotagged image in the same folder with a new name
-                        string directory = Path.GetDirectoryName(path);
-                        string newDirectory = directory + "_Geotagged";
-
-                        // Check if the new directory exists, if not, create it
-                        if (!Directory.Exists(newDirectory))
-                        {
-                            Directory.CreateDirectory(newDirectory);
-                        }
-
-                        string newFileName = Path.Combine(newDirectory, Path.GetFileName(path));
-                        geotaggedImage.Save(newFileName, originalImage.RawFormat);
-
-                        DateTime creationTime = File.GetCreationTime(path);
-                        DateTime lastWriteTime = File.GetLastWriteTime(path);
-
-                        // Set the creation and modified dates to the new file
-                        File.SetCreationTime(newFileName, creationTime);
-                        File.SetLastWriteTime(newFileName, lastWriteTime);
-
-                    }
-                }
-
-            }
-
-
-            DialogResult dialog = MessageBox.Show($"Geotagged image saved in _Geotagged folder, location: {latlng}. Clear list?", "Success", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-            if (dialog == DialogResult.Yes)
-                buttonClear_Click(null, null);
-        }
 
         private string ConvertPointLatLngToString(PointLatLng center)
         {
@@ -805,21 +750,99 @@ namespace ExifDataModifier
             mapType++;
             if (mapType > 3)
                 mapType = 0;
-            
-           gMapControl1.MapProvider = mapType switch
-                {
-                    0 => GMap.NET.MapProviders.GoogleMapProvider.Instance,
-                    1 => GMap.NET.MapProviders.GoogleHybridMapProvider.Instance,
-                    2 => GMap.NET.MapProviders.BingMapProvider.Instance,
-                    3 => GMap.NET.MapProviders.BingHybridMapProvider.Instance,
-                    _ => GMap.NET.MapProviders.GoogleMapProvider.Instance,
-                };
+
+            gMapControl1.MapProvider = mapType switch
+            {
+                0 => GMap.NET.MapProviders.GoogleMapProvider.Instance,
+                1 => GMap.NET.MapProviders.GoogleHybridMapProvider.Instance,
+                2 => GMap.NET.MapProviders.BingMapProvider.Instance,
+                3 => GMap.NET.MapProviders.BingHybridMapProvider.Instance,
+                _ => GMap.NET.MapProviders.GoogleMapProvider.Instance,
+            };
 
         }
 
         private void cbLoadImage_CheckedChanged(object sender, EventArgs e)
         {
             DisplayFilePaths();
+        }
+
+        private void InitializeBackgroundWorker()
+        {
+            backgroundWorker = new BackgroundWorker();
+            backgroundWorker.WorkerReportsProgress = true;
+            backgroundWorker.DoWork += BackgroundWorker_DoWork;
+            backgroundWorker.ProgressChanged += BackgroundWorker_ProgressChanged;
+            backgroundWorker.RunWorkerCompleted += BackgroundWorker_RunWorkerCompleted;
+        }
+
+        private void StartProcessing()
+        {
+            progressForm = new ProgressForm();
+            progressForm.Show();
+
+            backgroundWorker.RunWorkerAsync();
+        }
+
+        private void BackgroundWorker_DoWork(object sender, DoWorkEventArgs e)
+        {
+            GMap.NET.PointLatLng center = gMapControl1.Position;
+            String latlng = ConvertPointLatLngToString(center);
+
+            MapConfig config = new MapConfig
+            {
+                Center = center,
+                MapType = mapType
+            };
+            // Save location to json file for later session
+            string json = JsonSerializer.Serialize(config);
+            string jsonFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "location.json");
+            File.WriteAllText(jsonFilePath, json);
+
+            int totalFiles = filePaths.Count;
+            for (int i = 0; i < totalFiles; i++)
+            {
+                string path = filePaths[i];
+                double latitude = gMapControl1.Position.Lat;
+                double longitude = gMapControl1.Position.Lng;
+
+                if (!CheckSupported(path, supportedGeoTagFormats))
+                    continue;
+
+                using (Image originalImage = Image.FromFile(path))
+                {
+                    using (Image geotaggedImage = Function.Geotag(originalImage, latitude, longitude))
+                    {
+                        string directory = Path.GetDirectoryName(path);
+                        string newDirectory = directory + "_Geotagged";
+
+                        if (!Directory.Exists(newDirectory))
+                        {
+                            Directory.CreateDirectory(newDirectory);
+                        }
+
+                        string newFileName = Path.Combine(newDirectory, Path.GetFileName(path));
+                        geotaggedImage.Save(newFileName, originalImage.RawFormat);
+                    }
+                }
+
+                int progress = (i + 1) * 100 / totalFiles;
+                backgroundWorker.ReportProgress(progress, $"Processing {i + 1} of {totalFiles} files...");
+            }
+        }
+
+        private void BackgroundWorker_ProgressChanged(object sender, ProgressChangedEventArgs e)
+        {
+            progressForm.UpdateProgress(e.ProgressPercentage, e.UserState.ToString());
+        }
+
+        private void BackgroundWorker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        {
+            progressForm.Close();
+            
+            DialogResult dialog = MessageBox.Show($"Geotagged image saved in _Geotagged folder. Clear list?", "Success", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (dialog == DialogResult.Yes)
+                buttonClear_Click(null, null);
         }
 
 
