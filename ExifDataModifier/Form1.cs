@@ -9,6 +9,8 @@ using ExifLib;
 using GMap.NET.WindowsForms;
 using static System.Windows.Forms.DataFormats;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.Button;
+using System.Drawing;
+using ExifLib;
 
 namespace ExifDataModifier
 {
@@ -135,11 +137,15 @@ namespace ExifDataModifier
                 lbNameOriginal.Items.Add(Path.GetFileName(filePath));
             }
 
-            LoadImagesIntoListView(filePaths);
-            //for (int i = 0; i < newFileNames.Count; i++)
-            //{
-            //    lbNameFromDate.Items.Add(newFileNames[i] + Path.GetExtension(filePaths[i]));
-            //}
+            if (cbLoadImage.Checked)
+                LoadImagesIntoListView(filePaths);
+            else
+            {
+                foreach (string filePath in filePaths)
+                {
+                    lvImageLocation.Items.Add(Path.GetFileName(filePath));
+                }
+            }
         }
 
 
@@ -546,7 +552,7 @@ namespace ExifDataModifier
                     this.Invoke((MethodInvoker)delegate
                     {
                         int imageIndex = imageList1.Images.Count;
-                        imageList1.Images.Add(resizedImage);
+                        //imageList1.Images.Add(resizedImage);
 
                         // Extract a file name or any other text you want to display next to the image
                         string fileName = Path.GetFileNameWithoutExtension(path);
@@ -638,7 +644,37 @@ namespace ExifDataModifier
         private void btLocationApply_Click(object sender, EventArgs e)
         {
             var center = gMapControl1.Position;
-            MessageBox.Show($"Latitude: {center.Lat}, Longitude: {center.Lng}", "Map Center");
+            foreach (String path in filePaths)
+            {
+                double latitude = gMapControl1.Position.Lat;
+                double longitude = gMapControl1.Position.Lng;
+                Image originalImage = Image.FromFile(path);
+                Image geotaggedImage = Function.Geotag(originalImage, latitude, longitude);
+
+                // Save the geotagged image in the same folder with a new name
+                string directory = Path.GetDirectoryName(path);
+                string newDirectory = directory + "_Geotagged";
+
+                // Check if the new directory exists, if not, create it
+                if (!Directory.Exists(newDirectory))
+                {
+                    Directory.CreateDirectory(newDirectory);
+                }
+
+                string newFileName = Path.Combine(newDirectory, Path.GetFileName(path));
+                geotaggedImage.Save(newFileName, ImageFormat.Jpeg);
+
+                DateTime creationTime = File.GetCreationTime(path);
+                DateTime lastWriteTime = File.GetLastWriteTime(path);
+
+                // Set the creation and modified dates to the new file
+                File.SetCreationTime(newFileName, creationTime);
+                File.SetLastWriteTime(newFileName, lastWriteTime);
+
+            }
+            DialogResult dialog = MessageBox.Show($"Geotagged image saved in _Geotagged folder, location: {gMapControl1.Position.Lat}, {gMapControl1.Position.Lng}. Clear items?", "Success", MessageBoxButtons.YesNo);
+            if (dialog == DialogResult.Yes)
+                buttonClear_Click(null, null);
         }
 
         private void gMapControl1_MouseUp(object sender, MouseEventArgs e)
@@ -673,8 +709,28 @@ namespace ExifDataModifier
                     catch (Exception ex)
                     { }
                 }
-                
+
             }
+        }
+
+        private void ptbSatelite_Click(object sender, EventArgs e)
+        {
+            // Change the map provider sequenccly from GoogleMapProvider, GoogleHybridMapProvider, BingMapProvider, BingHybridMapProvider
+
+            if (gMapControl1.MapProvider == GMap.NET.MapProviders.GoogleMapProvider.Instance)
+                gMapControl1.MapProvider = GMap.NET.MapProviders.GoogleHybridMapProvider.Instance;
+            else if (gMapControl1.MapProvider == GMap.NET.MapProviders.GoogleHybridMapProvider.Instance)
+                gMapControl1.MapProvider = GMap.NET.MapProviders.BingMapProvider.Instance;
+            else if (gMapControl1.MapProvider == GMap.NET.MapProviders.BingMapProvider.Instance)
+                gMapControl1.MapProvider = GMap.NET.MapProviders.BingHybridMapProvider.Instance;
+            else
+                gMapControl1.MapProvider = GMap.NET.MapProviders.GoogleMapProvider.Instance;
+
+        }
+
+        private void cbLoadImage_CheckedChanged(object sender, EventArgs e)
+        {
+            DisplayFilePaths();
         }
     }
 
