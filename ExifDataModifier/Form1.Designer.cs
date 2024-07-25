@@ -74,10 +74,12 @@
             lbNameFromDate = new ListBox();
             lbNameOriginal = new ListBox();
             tpLocation = new TabPage();
+            ptbSatelite = new PictureBox();
             tbLatLgn = new TextBox();
             btLocationApply = new Button();
             gMapControl1 = new GMap.NET.WindowsForms.GMapControl();
             panel6 = new Panel();
+            cbLoadImage = new CheckBox();
             btLocationClear = new Button();
             lvImageLocation = new ListView();
             imageList1 = new ImageList(components);
@@ -92,6 +94,7 @@
             ((System.ComponentModel.ISupportInitialize)nmIgnore).BeginInit();
             tpFilename.SuspendLayout();
             tpLocation.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)ptbSatelite).BeginInit();
             panel6.SuspendLayout();
             SuspendLayout();
             // 
@@ -106,7 +109,6 @@
             tabControl1.SelectedIndex = 0;
             tabControl1.Size = new Size(708, 725);
             tabControl1.TabIndex = 12;
-            tabControl1.Deselected += tabControl1_Deselected;
             // 
             // tpDate
             // 
@@ -558,6 +560,7 @@
             // 
             // tpLocation
             // 
+            tpLocation.Controls.Add(ptbSatelite);
             tpLocation.Controls.Add(tbLatLgn);
             tpLocation.Controls.Add(btLocationApply);
             tpLocation.Controls.Add(gMapControl1);
@@ -569,6 +572,17 @@
             tpLocation.TabIndex = 2;
             tpLocation.Text = "Location";
             tpLocation.UseVisualStyleBackColor = true;
+            // 
+            // ptbSatelite
+            // 
+            ptbSatelite.Image = Properties.Resources.download;
+            ptbSatelite.Location = new Point(362, 541);
+            ptbSatelite.Name = "ptbSatelite";
+            ptbSatelite.Size = new Size(52, 43);
+            ptbSatelite.SizeMode = PictureBoxSizeMode.Zoom;
+            ptbSatelite.TabIndex = 5;
+            ptbSatelite.TabStop = false;
+            ptbSatelite.Click += ptbSatelite_Click;
             // 
             // tbLatLgn
             // 
@@ -618,6 +632,7 @@
             // 
             // panel6
             // 
+            panel6.Controls.Add(cbLoadImage);
             panel6.Controls.Add(btLocationClear);
             panel6.Controls.Add(lvImageLocation);
             panel6.Dock = DockStyle.Left;
@@ -626,6 +641,17 @@
             panel6.Size = new Size(353, 686);
             panel6.TabIndex = 1;
             panel6.SizeChanged += panel6_SizeChanged;
+            // 
+            // cbLoadImage
+            // 
+            cbLoadImage.AutoSize = true;
+            cbLoadImage.Location = new Point(5, 590);
+            cbLoadImage.Name = "cbLoadImage";
+            cbLoadImage.Size = new Size(110, 24);
+            cbLoadImage.TabIndex = 2;
+            cbLoadImage.Text = "Load image";
+            cbLoadImage.UseVisualStyleBackColor = true;
+            cbLoadImage.CheckedChanged += cbLoadImage_CheckedChanged;
             // 
             // btLocationClear
             // 
@@ -643,7 +669,7 @@
             lvImageLocation.Location = new Point(-103, -2);
             lvImageLocation.Margin = new Padding(0);
             lvImageLocation.Name = "lvImageLocation";
-            lvImageLocation.Size = new Size(455, 616);
+            lvImageLocation.Size = new Size(455, 583);
             lvImageLocation.SmallImageList = imageList1;
             lvImageLocation.Sorting = SortOrder.Ascending;
             lvImageLocation.StateImageList = imageList1;
@@ -683,7 +709,9 @@
             tpFilename.PerformLayout();
             tpLocation.ResumeLayout(false);
             tpLocation.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)ptbSatelite).EndInit();
             panel6.ResumeLayout(false);
+            panel6.PerformLayout();
             ResumeLayout(false);
         }
 
@@ -741,5 +769,7 @@
         private GMap.NET.WindowsForms.GMapControl gMapControl1;
         private Button btLocationApply;
         private TextBox tbLatLgn;
+        private PictureBox ptbSatelite;
+        private CheckBox cbLoadImage;
     }
 }
