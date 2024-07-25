@@ -4,6 +4,7 @@ using System.Drawing.Imaging;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Diagnostics;
 
 namespace ExifDataModifier
 {
@@ -75,6 +76,36 @@ namespace ExifDataModifier
             pi.Len = value.Length;
             pi.Value = value;
             img.SetPropertyItem(pi);
+        }
+
+        public static void GeotagVideo(string videoPath, double latitude, double longitude)
+        {
+            string outputPath = Path.Combine(Path.GetDirectoryName(videoPath), Path.GetFileNameWithoutExtension(videoPath) + "_Geotagged" + Path.GetExtension(videoPath));
+
+            // FFmpeg command to add geolocation metadata
+            string arguments = $"-i \"{videoPath}\" -metadata:s:v:0 location=+{latitude:+00.0000;-00.0000}/{longitude:+00.0000;-00.0000} \"{outputPath}\"";
+
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                FileName = "ffmpeg",
+                Arguments = arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+
+            using (Process process = Process.Start(startInfo))
+            {
+                process.WaitForExit();
+
+                // Optionally, handle process output or errors
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+                MessageBox.Show(output);
+            }
+
+            // Additional logic to handle the output file, such as setting creation and modification dates, can be added here
         }
     }
 }

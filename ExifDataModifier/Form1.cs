@@ -12,6 +12,7 @@ using static System.Windows.Forms.VisualStyles.VisualStyleElement.Button;
 using System.Drawing;
 using ExifLib;
 using System.Text.Json;
+using GMap.NET;
 namespace ExifDataModifier
 {
     public partial class Form1 : Form
@@ -22,7 +23,8 @@ namespace ExifDataModifier
         private Dictionary<string, List<string>> fileGroups = new Dictionary<string, List<string>>();
         private bool isShowNotificationFirstTime = false;
         private volatile bool stopRequested = false;
-        string[] allowedExtensions = {
+        private int mapType = 0;
+        string[] supportedFormats = {
     ".jpg", ".jpeg", ".png", ".gif",  // Common image formats
     ".bmp", ".tiff",                 // Less common image formats
     ".webp", ".heic",                 // Modern image formats
@@ -49,7 +51,7 @@ namespace ExifDataModifier
     ".flic",                          // Flic Animation format (legacy)
 
 };
-        string[] imageExtensions =
+        string[] supportedImageFormats =
         {
     ".jpg", ".jpeg", ".png", ".gif",  // Common image formats
     ".bmp", ".tiff",                 // Less common image formats
@@ -66,6 +68,14 @@ namespace ExifDataModifier
     ".dng"
         };
 
+        // All the extensions of file can add GPS to metadata
+        string[] supportedGeoTagFormats =
+        {
+    ".jpg", ".jpeg",
+    ".tiff",
+    ".webp", ".heic",
+        };
+
 
         public Form1()
         {
@@ -78,12 +88,22 @@ namespace ExifDataModifier
             if (File.Exists(jsonFilePath))
             {
                 string json = File.ReadAllText(jsonFilePath);
-                GMap.NET.PointLatLng center = JsonSerializer.Deserialize<GMap.NET.PointLatLng>(json);
-                gMapControl1.Position = center;
+               MapConfig config = JsonSerializer.Deserialize<MapConfig>(json);
+                gMapControl1.Position = config.Center;
+                int mapType = config.MapType;
+
+                gMapControl1.MapProvider = mapType switch
+                {
+                    0 => GMap.NET.MapProviders.GoogleMapProvider.Instance,
+                    1 => GMap.NET.MapProviders.GoogleHybridMapProvider.Instance,
+                    2 => GMap.NET.MapProviders.BingMapProvider.Instance,
+                    3 => GMap.NET.MapProviders.BingHybridMapProvider.Instance,
+                    _ => GMap.NET.MapProviders.GoogleMapProvider.Instance,
+                };
             }
             else
                 gMapControl1.Position = new GMap.NET.PointLatLng(40.712776, -74.005974); // Example: New York City
-                                                                                     // Enable dragging the map:
+                                                                                         // Enable dragging the map:
             gMapControl1.CanDragMap = true;
             gMapControl1.DragButton = MouseButtons.Left; // Use the left mouse button for dragging
 
@@ -152,10 +172,19 @@ namespace ExifDataModifier
                 LoadImagesIntoListView(filePaths);
             else
             {
+                bool isNotSupportedNotification = false;
                 foreach (string filePath in filePaths)
                 {
-                    lvImageLocation.Items.Add(Path.GetFileName(filePath));
+                    if (CheckSupported(filePath, supportedGeoTagFormats))
+                        lvImageLocation.Items.Add(Path.GetFileName(filePath));
+                    else
+                    {
+                        lvImageLocation.Items.Add("(Not supported) " + Path.GetFileName(filePath));
+                        isNotSupportedNotification = true;
+                    }
                 }
+                if (isNotSupportedNotification && tabControl1.SelectedTab == tpLocation)
+                    MessageBox.Show("Some files are not supported for geotagging and will not be processed", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -216,7 +245,7 @@ namespace ExifDataModifier
                 File.SetCreationTime(filePaths[i], newDateTime);
                 File.SetLastWriteTime(filePaths[i], newDateTime);
             }
-            MessageBox.Show("Set time successfully!");
+            MessageBox.Show("Set time successfully!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void buttonClear_Click(object sender, EventArgs e)
@@ -237,7 +266,7 @@ namespace ExifDataModifier
             filePathsDate.Clear();
             if (listBoxFiles.Items.Count == 0)
             {
-                MessageBox.Show("Nothing to apply");
+                MessageBox.Show("Nothing to apply", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
             listBoxExtractedDate.Items.Clear();
@@ -321,9 +350,8 @@ namespace ExifDataModifier
                     tbPath.Text = folderBrowserDialog.SelectedPath;
                     foreach (string file in files)
                     {
-                        string extension = Path.GetExtension(file).ToLower();
                         // Make sure it only add the Image and Video
-                        if (allowedExtensions.Contains(extension))
+                        if (CheckSupported(file, supportedFormats))
                             filePaths.Add(file);
                     }
                     ScanAndGroupFiles(filePaths);
@@ -432,7 +460,7 @@ namespace ExifDataModifier
 
                 if (filePaths.Count != newFileNames.Count)
                 {
-                    MessageBox.Show("Please check the format!");
+                    MessageBox.Show("Please check the format!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
                 for (int i = 0; i < filePaths.Count; i++)
@@ -450,7 +478,7 @@ namespace ExifDataModifier
                     File.Move(filePaths[i], newFilePath);
                 }
 
-                MessageBox.Show("Success!");
+                MessageBox.Show("Success!", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
@@ -541,7 +569,7 @@ namespace ExifDataModifier
                 try
                 {
                     // If not image, load white image
-                    if (!imageExtensions.Contains(Path.GetExtension(path).ToLower()))
+                    if (!CheckSupported(path, supportedImageFormats))
                     {
                         this.Invoke((MethodInvoker)delegate
                         {
@@ -581,7 +609,7 @@ namespace ExifDataModifier
                     // Marshal the exception handling to the UI thread if you need to interact with the UI, e.g., showing a MessageBox
                     this.Invoke((MethodInvoker)delegate
                     {
-                        MessageBox.Show($"Error loading image: {ex.Message}");
+                        MessageBox.Show($"Error loading image: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     });
                 }
             });
@@ -591,6 +619,10 @@ namespace ExifDataModifier
             });
         }
 
+        private bool CheckSupported(string path, string[] supportedFormats)
+        {
+            return supportedFormats.Contains(Path.GetExtension(path).ToLower());
+        }
 
         private Image ResizeImage(Image image, int width, int height)
         {
@@ -659,18 +691,29 @@ namespace ExifDataModifier
 
         private void ApplyLocation()
         {
-           GMap.NET.PointLatLng center = gMapControl1.Position;
+            GMap.NET.PointLatLng center = gMapControl1.Position;
+            String latlng = ConvertPointLatLngToString(center);
+
+            MapConfig config = new MapConfig
+            {
+                Center = center,
+                MapType = mapType
+            };
+
 
             // Save location to json file for later session
-            string json = JsonSerializer.Serialize(center);
+            string json = JsonSerializer.Serialize(config);
             string jsonFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "location.json");
             File.WriteAllText(jsonFilePath, json);
+
 
             foreach (String path in filePaths)
             {
                 double latitude = gMapControl1.Position.Lat;
                 double longitude = gMapControl1.Position.Lng;
-
+                //Function.GeotagVideo(path, latitude, longitude);
+                if (!CheckSupported(path, supportedGeoTagFormats))
+                    continue;
                 using (Image originalImage = Image.FromFile(path))
                 {
                     using (Image geotaggedImage = Function.Geotag(originalImage, latitude, longitude))
@@ -700,29 +743,44 @@ namespace ExifDataModifier
                 }
 
             }
-            DialogResult dialog = MessageBox.Show($"Geotagged image saved in _Geotagged folder, location: {gMapControl1.Position.Lat}, {gMapControl1.Position.Lng}. Clear list?", "Success", MessageBoxButtons.YesNo);
+
+
+            DialogResult dialog = MessageBox.Show($"Geotagged image saved in _Geotagged folder, location: {latlng}. Clear list?", "Success", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
             if (dialog == DialogResult.Yes)
                 buttonClear_Click(null, null);
         }
 
+        private string ConvertPointLatLngToString(PointLatLng center)
+        {
+            return $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}";
+        }
+
         private void gMapControl1_MouseUp(object sender, MouseEventArgs e)
         {
-            var center = gMapControl1.Position;
-            if (tbLatLgn.Text != $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}")
-                tbLatLgn.Text = $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}";
+            GMap.NET.PointLatLng center = gMapControl1.Position;
+            String latlng = ConvertPointLatLngToString(center);
+
+            if (tbLatLgn.Text != latlng)
+                tbLatLgn.Text = latlng;
         }
 
         private void gMapControl1_MouseHover(object sender, EventArgs e)
         {
-            var center = gMapControl1.Position;
-            if (tbLatLgn.Text != $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}")
-                tbLatLgn.Text = $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}";
+            GMap.NET.PointLatLng center = gMapControl1.Position;
+            String latlng = ConvertPointLatLngToString(center);
+
+
+            if (tbLatLgn.Text != latlng)
+                tbLatLgn.Text = latlng;
         }
 
         private void tbLatLgn_TextChanged(object sender, EventArgs e)
         {
-            var center = gMapControl1.Position;
-            if (tbLatLgn.Text != $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}")
+            GMap.NET.PointLatLng center = gMapControl1.Position;
+            String latlngC = ConvertPointLatLngToString(center);
+
+
+            if (tbLatLgn.Text != latlngC)
             {
                 // Move to the location
                 string[] latlng = tbLatLgn.Text.Split(',');
@@ -744,15 +802,18 @@ namespace ExifDataModifier
         private void ptbSatelite_Click(object sender, EventArgs e)
         {
             // Change the map provider sequenccly from GoogleMapProvider, GoogleHybridMapProvider, BingMapProvider, BingHybridMapProvider
-
-            if (gMapControl1.MapProvider == GMap.NET.MapProviders.GoogleMapProvider.Instance)
-                gMapControl1.MapProvider = GMap.NET.MapProviders.GoogleHybridMapProvider.Instance;
-            else if (gMapControl1.MapProvider == GMap.NET.MapProviders.GoogleHybridMapProvider.Instance)
-                gMapControl1.MapProvider = GMap.NET.MapProviders.BingMapProvider.Instance;
-            else if (gMapControl1.MapProvider == GMap.NET.MapProviders.BingMapProvider.Instance)
-                gMapControl1.MapProvider = GMap.NET.MapProviders.BingHybridMapProvider.Instance;
-            else
-                gMapControl1.MapProvider = GMap.NET.MapProviders.GoogleMapProvider.Instance;
+            mapType++;
+            if (mapType > 3)
+                mapType = 0;
+            
+           gMapControl1.MapProvider = mapType switch
+                {
+                    0 => GMap.NET.MapProviders.GoogleMapProvider.Instance,
+                    1 => GMap.NET.MapProviders.GoogleHybridMapProvider.Instance,
+                    2 => GMap.NET.MapProviders.BingMapProvider.Instance,
+                    3 => GMap.NET.MapProviders.BingHybridMapProvider.Instance,
+                    _ => GMap.NET.MapProviders.GoogleMapProvider.Instance,
+                };
 
         }
 
@@ -760,6 +821,8 @@ namespace ExifDataModifier
         {
             DisplayFilePaths();
         }
+
+
     }
 
 }
