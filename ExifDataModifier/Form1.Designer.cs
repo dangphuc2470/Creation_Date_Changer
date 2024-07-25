@@ -216,6 +216,7 @@
             cbShowFullPath.TabIndex = 12;
             cbShowFullPath.Text = "Show full path";
             cbShowFullPath.UseVisualStyleBackColor = true;
+            cbShowFullPath.CheckedChanged += cbShowFullPath_CheckedChanged;
             // 
             // btExtract
             // 
@@ -438,9 +439,10 @@
             // label5
             // 
             label5.AutoSize = true;
-            label5.Location = new Point(34, 17);
+            label5.Font = new Font("Segoe UI", 12F, FontStyle.Bold);
+            label5.Location = new Point(17, 7);
             label5.Name = "label5";
-            label5.Size = new Size(88, 20);
+            label5.Size = new Size(127, 28);
             label5.TabIndex = 1;
             label5.Text = "Scan for file";
             // 
