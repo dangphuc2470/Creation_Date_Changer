@@ -57,6 +57,7 @@ namespace ExifDataModifier
             int minutes = (int)Math.Floor(value);
             value = (value - minutes) * 60 * 100;
             int seconds = (int)Math.Round(value);
+            MessageBox.Show("Degrees: " + degrees + "\n" + "Minutes: " + minutes + "\n" + "Seconds: " + seconds);
             byte[] bytes = new byte[3 * 2 * 4]; // Degrees, minutes, and seconds, each with a numerator and a denominator, each composed of 4 bytes
             int i = 0;
             Array.Copy(BitConverter.GetBytes(degrees), 0, bytes, i, 4); i += 4;
@@ -106,6 +107,34 @@ namespace ExifDataModifier
             }
 
             // Additional logic to handle the output file, such as setting creation and modification dates, can be added here
+        }
+        public static (double Latitude, double Longitude) GetGPS(string filePath)
+        {
+            using (var image = new Bitmap(filePath))
+            {
+                PropertyItem latitudeItem = image.GetPropertyItem(2);
+                PropertyItem longitudeItem = image.GetPropertyItem(4);
+
+                if (latitudeItem != null && longitudeItem != null)
+                {
+                    double latDegrees = BitConverter.ToInt32(latitudeItem.Value, 0) / (double)BitConverter.ToInt32(latitudeItem.Value, 4);
+                    double latMinutes = BitConverter.ToInt32(latitudeItem.Value, 8) / (double)BitConverter.ToInt32(latitudeItem.Value, 12);
+                    double latSeconds = BitConverter.ToInt32(latitudeItem.Value, 16) / (double)BitConverter.ToInt32(latitudeItem.Value, 20);
+
+                    double lonDegrees = BitConverter.ToInt32(longitudeItem.Value, 0) / (double)BitConverter.ToInt32(longitudeItem.Value, 4);
+                    double lonMinutes = BitConverter.ToInt32(longitudeItem.Value, 8) / (double)BitConverter.ToInt32(longitudeItem.Value, 12);
+                    double lonSeconds = BitConverter.ToInt32(longitudeItem.Value, 16) / (double)BitConverter.ToInt32(longitudeItem.Value, 20);
+
+                    double latitude = latDegrees + latMinutes / 60 + latSeconds / 3600;
+                    double longitude = lonDegrees + lonMinutes / 60 + lonSeconds / 3600;
+
+                    return (latitude, longitude);
+                }
+                else
+                {
+                    return (-1000, -1000);
+                }
+            }
         }
     }
 }
