@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Diagnostics;
+using GMap.NET;
 
 namespace ExifDataModifier
 {
@@ -57,7 +58,6 @@ namespace ExifDataModifier
             int minutes = (int)Math.Floor(value);
             value = (value - minutes) * 60 * 100;
             int seconds = (int)Math.Round(value);
-            MessageBox.Show("Degrees: " + degrees + "\n" + "Minutes: " + minutes + "\n" + "Seconds: " + seconds);
             byte[] bytes = new byte[3 * 2 * 4]; // Degrees, minutes, and seconds, each with a numerator and a denominator, each composed of 4 bytes
             int i = 0;
             Array.Copy(BitConverter.GetBytes(degrees), 0, bytes, i, 4); i += 4;
@@ -108,8 +108,9 @@ namespace ExifDataModifier
 
             // Additional logic to handle the output file, such as setting creation and modification dates, can be added here
         }
-        public static (double Latitude, double Longitude) GetGPS(string filePath)
+        public static PointLatLng GetGPS(string filePath)
         {
+            PointLatLng point = new PointLatLng(-1000, -1000);
             using (var image = new Bitmap(filePath))
             {
                 PropertyItem latitudeItem = image.GetPropertyItem(2);
@@ -127,13 +128,9 @@ namespace ExifDataModifier
 
                     double latitude = latDegrees + latMinutes / 60 + latSeconds / 3600;
                     double longitude = lonDegrees + lonMinutes / 60 + lonSeconds / 3600;
-
-                    return (latitude, longitude);
+                    point = new PointLatLng(latitude, longitude);
                 }
-                else
-                {
-                    return (-1000, -1000);
-                }
+               return point;
             }
         }
     }

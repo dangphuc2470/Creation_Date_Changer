@@ -23,6 +23,7 @@ namespace ExifDataModifier
         private List<string> filePaths = new List<string>();
         private List<DateTime> filePathsDate = new List<DateTime>();
         private List<string> newFileNames = new List<string>();
+        private List<MyLocation> locationList = new List<MyLocation>();
         private Dictionary<string, List<string>> fileGroups = new Dictionary<string, List<string>>();
         private bool isShowNotificationFirstTime = false;
         private volatile bool stopRequested = false;
@@ -81,13 +82,15 @@ namespace ExifDataModifier
     ".tiff",
     ".webp", ".heic",
         };
-        private BackgroundWorker backgroundWorker;
+        private BackgroundWorker backgroundWorkerGeotag;
+        private BackgroundWorker backgroundWorkerLoadImage;
+
         private ProgressForm progressForm;
 
         public Form1()
         {
             InitializeComponent();
-            InitializeBackgroundWorker();
+            InitializeBackgroundWorkerGeotag();
             AllowDrop = true;
             gMapControl1.MapProvider = GMap.NET.MapProviders.GoogleMapProvider.Instance;
             GMap.NET.GMaps.Instance.Mode = GMap.NET.AccessMode.ServerOnly;
@@ -182,7 +185,6 @@ namespace ExifDataModifier
             GMapOverlay overlay = new GMapOverlay(customMarkerPath);
             overlay.Markers.Add(marker);
             mapControl.Overlays.Add(overlay);
-            mapControl.Refresh(); // Force the map to redraw
         }
 
         private void GMap_MouseWheel(object sender, MouseEventArgs e)
@@ -233,13 +235,7 @@ namespace ExifDataModifier
                     if (CheckSupported(filePath, supportedGeoTagFormats))
                     {
                         lvImageLocation.Items.Add(Path.GetFileName(filePath));
-                        // Check if the image has GPS data
-                        using (Image image = Image.FromFile(filePath))
-                        {
-                            var gpsData = Function.GetGPS(filePath);
-                            if (gpsData.Latitude != -1000)
-                                CreateMarker(gMapControl1, gpsData.Latitude, gpsData.Longitude, gpsData.Latitude + ", " + gpsData.Longitude, filePath);
-                        }
+                        StartBackgroundWorkLoadImage(filePath);
                     }
                     else
                     {
@@ -252,8 +248,17 @@ namespace ExifDataModifier
                 if (isNotSupportedNotification && tabControl1.SelectedTab == tpLocation)
                     MessageBox.Show("Some files are not supported for geotagging and will not be processed", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+
+
         }
 
+        private void StartBackgroundWorkLoadImage(string filePath)
+        {
+            if (backgroundWorkerLoadImage.IsBusy != true)
+            {
+                backgroundWorkerLoadImage.RunWorkerAsync(filePath);
+            }
+        }
 
         private void ScanAndGroupFiles(List<string> files)
         {
@@ -325,6 +330,7 @@ namespace ExifDataModifier
             lbNameFromDate.Items.Clear();
             lbNameOriginal.Items.Clear();
             lvImageLocation.Items.Clear();
+            locationList.Clear();
         }
 
         private void btExtract_Click(object sender, EventArgs e)
@@ -711,30 +717,30 @@ namespace ExifDataModifier
         }
 
         public static Bitmap ResizeBitmapImageToSquare(Bitmap originalImage, int size)
-{
-    // Determine the dimensions of the square crop
-    int cropSize = Math.Min(originalImage.Width, originalImage.Height);
+        {
+            // Determine the dimensions of the square crop
+            int cropSize = Math.Min(originalImage.Width, originalImage.Height);
 
-    // Calculate the starting point to crop the image from the center
-    int cropX = (originalImage.Width - cropSize) / 2;
-    int cropY = (originalImage.Height - cropSize) / 2;
+            // Calculate the starting point to crop the image from the center
+            int cropX = (originalImage.Width - cropSize) / 2;
+            int cropY = (originalImage.Height - cropSize) / 2;
 
-    // Create a new bitmap with the square dimensions
-    Bitmap squareImage = new Bitmap(size, size);
+            // Create a new bitmap with the square dimensions
+            Bitmap squareImage = new Bitmap(size, size);
 
-    // Draw the cropped portion of the original image onto the new bitmap
-    using (Graphics g = Graphics.FromImage(squareImage))
-    {
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            // Draw the cropped portion of the original image onto the new bitmap
+            using (Graphics g = Graphics.FromImage(squareImage))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-        // Draw the cropped image onto the new square bitmap
-        g.DrawImage(originalImage, new Rectangle(0, 0, size, size), new Rectangle(cropX, cropY, cropSize, cropSize), GraphicsUnit.Pixel);
-    }
+                // Draw the cropped image onto the new square bitmap
+                g.DrawImage(originalImage, new Rectangle(0, 0, size, size), new Rectangle(cropX, cropY, cropSize, cropSize), GraphicsUnit.Pixel);
+            }
 
-    return squareImage;
-}
+            return squareImage;
+        }
 
         public static Bitmap CorrectBitmapImageOrientation(Bitmap originalImage)
         {
@@ -903,13 +909,19 @@ namespace ExifDataModifier
             DisplayFilePaths();
         }
 
-        private void InitializeBackgroundWorker()
+        private void InitializeBackgroundWorkerGeotag()
         {
-            backgroundWorker = new BackgroundWorker();
-            backgroundWorker.WorkerReportsProgress = true;
-            backgroundWorker.DoWork += BackgroundWorker_DoWork;
-            backgroundWorker.ProgressChanged += BackgroundWorker_ProgressChanged;
-            backgroundWorker.RunWorkerCompleted += BackgroundWorker_RunWorkerCompleted;
+            backgroundWorkerGeotag = new BackgroundWorker();
+            backgroundWorkerGeotag.WorkerReportsProgress = true;
+            backgroundWorkerGeotag.DoWork += BackgroundWorkerGeotag_DoWork;
+            backgroundWorkerGeotag.ProgressChanged += BackgroundWorkerGeotag_ProgressChanged;
+            backgroundWorkerGeotag.RunWorkerCompleted += BackgroundWorkerGeotag_RunWorkerCompleted;
+
+            backgroundWorkerLoadImage = new BackgroundWorker();
+            backgroundWorkerLoadImage.DoWork += BackgroundWorkerLoadImage_DoWork;
+            backgroundWorkerLoadImage.RunWorkerCompleted += BackgroundWorkerLoadImage_RunWorkerCompleted;
+            backgroundWorkerLoadImage.WorkerReportsProgress = false;
+            backgroundWorkerLoadImage.WorkerSupportsCancellation = true;
         }
 
         private void StartProcessing()
@@ -917,10 +929,10 @@ namespace ExifDataModifier
             progressForm = new ProgressForm();
             progressForm.Show();
 
-            backgroundWorker.RunWorkerAsync();
+            backgroundWorkerGeotag.RunWorkerAsync();
         }
 
-        private void BackgroundWorker_DoWork(object sender, DoWorkEventArgs e)
+        private void BackgroundWorkerGeotag_DoWork(object sender, DoWorkEventArgs e)
         {
             GMap.NET.PointLatLng center = gMapControl1.Position;
             String latlng = ConvertPointLatLngToString(center);
@@ -963,16 +975,16 @@ namespace ExifDataModifier
                 }
 
                 int progress = (i + 1) * 100 / totalFiles;
-                backgroundWorker.ReportProgress(progress, $"Processing {i + 1} of {totalFiles} files...");
+                backgroundWorkerGeotag.ReportProgress(progress, $"Processing {i + 1} of {totalFiles} files...");
             }
         }
 
-        private void BackgroundWorker_ProgressChanged(object sender, ProgressChangedEventArgs e)
+        private void BackgroundWorkerGeotag_ProgressChanged(object sender, ProgressChangedEventArgs e)
         {
             progressForm.UpdateProgress(e.ProgressPercentage, e.UserState.ToString());
         }
 
-        private void BackgroundWorker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        private void BackgroundWorkerGeotag_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
             progressForm.Close();
 
@@ -981,7 +993,51 @@ namespace ExifDataModifier
                 buttonClear_Click(null, null);
         }
 
+        private void BackgroundWorkerLoadImage_DoWork(object sender, DoWorkEventArgs e)
+        {
+            var filePath = (string)e.Argument;
 
+            using (Image image = Image.FromFile(filePath))
+            {
+                PointLatLng gpsData = Function.GetGPS(filePath);
+                if (gpsData.Lat != -1000 && cbShowImageOnMap.Checked)
+                {
+                    MyLocation location = new MyLocation(gpsData, filePath);
+                    e.Result = location;
+                }
+                else
+                {
+                    e.Result = null;
+                }
+            }
+        }
+
+        private void BackgroundWorkerLoadImage_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        {
+            if (e.Error != null)
+            {
+                MessageBox.Show("An error occurred: " + e.Error.Message);
+            }
+            else if (e.Result != null)
+            {
+                MyLocation location = (MyLocation)e.Result;
+                locationList.Add(location);
+
+            }
+        }
+
+        private void cbShowImageOnMap_CheckedChanged(object sender, EventArgs e)
+        {
+            if (cbShowImageOnMap.Checked == true)
+            {
+                MessageBox.Show(locationList.Count.ToString());
+                    foreach (MyLocation location in locationList)
+                    {
+                        CreateMarker(gMapControl1, location.getLatLng().Lat, location.getLatLng().Lng, location.getLatLngString(), location.getName());
+                    }
+                    gMapControl1.Refresh(); // Force the map to redraw
+            }
+        }
     }
 
 }

@@ -79,6 +79,7 @@
             btLocationApply = new Button();
             gMapControl1 = new GMap.NET.WindowsForms.GMapControl();
             panel6 = new Panel();
+            cbShowImageOnMap = new CheckBox();
             cbLoadImage = new CheckBox();
             btLocationClear = new Button();
             lvImageLocation = new ListView();
@@ -634,6 +635,7 @@
             // 
             // panel6
             // 
+            panel6.Controls.Add(cbShowImageOnMap);
             panel6.Controls.Add(cbLoadImage);
             panel6.Controls.Add(btLocationClear);
             panel6.Controls.Add(lvImageLocation);
@@ -643,6 +645,17 @@
             panel6.Size = new Size(353, 686);
             panel6.TabIndex = 1;
             panel6.SizeChanged += panel6_SizeChanged;
+            // 
+            // cbShowImageOnMap
+            // 
+            cbShowImageOnMap.AutoSize = true;
+            cbShowImageOnMap.Location = new Point(121, 590);
+            cbShowImageOnMap.Name = "cbShowImageOnMap";
+            cbShowImageOnMap.Size = new Size(168, 24);
+            cbShowImageOnMap.TabIndex = 3;
+            cbShowImageOnMap.Text = "Show image on map";
+            cbShowImageOnMap.UseVisualStyleBackColor = true;
+            cbShowImageOnMap.CheckedChanged += cbShowImageOnMap_CheckedChanged;
             // 
             // cbLoadImage
             // 
@@ -773,5 +786,6 @@
         private TextBox tbLatLgn;
         private PictureBox ptbSatelite;
         private CheckBox cbLoadImage;
+        private CheckBox cbShowImageOnMap;
     }
 }
