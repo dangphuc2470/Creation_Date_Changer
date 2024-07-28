@@ -17,6 +17,8 @@ using System.ComponentModel;
 using GMap.NET.WindowsForms.Markers;
 using System.Drawing.Drawing2D;
 using System.Collections.Concurrent;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TrayNotify;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 namespace ExifDataModifier
 {
     public partial class Form1 : Form
@@ -87,11 +89,13 @@ namespace ExifDataModifier
         private BackgroundWorker backgroundWorkerLoadImage;
 
         private ProgressForm progressFormGeoTag;
+        private ProgressForm progressFormLoadImage;
+
 
         public Form1()
         {
             InitializeComponent();
-            InitializeBackgroundWorkerGeotag();
+            InitializeBackgroundWorker();
             AllowDrop = true;
             gMapControl1.MapProvider = GMap.NET.MapProviders.GoogleMapProvider.Instance;
             GMap.NET.GMaps.Instance.Mode = GMap.NET.AccessMode.ServerOnly;
@@ -220,6 +224,7 @@ namespace ExifDataModifier
             lbNameFromDate.Items.Clear();
             lbNameOriginal.Items.Clear();
             lvImageLocation.Items.Clear();
+            imageOnMapList.Clear();
             foreach (string filePath in filePaths)
             {
                 listBoxFiles.Items.Add(filePath);
@@ -259,13 +264,7 @@ namespace ExifDataModifier
 
         }
 
-        private void StartBackgroundWorkLoadImage(string filePath)
-        {
-            if (backgroundWorkerLoadImage.IsBusy != true)
-            {
-                backgroundWorkerLoadImage.RunWorkerAsync(filePath);
-            }
-        }
+       
 
         private void ScanAndGroupFiles(List<string> files)
         {
@@ -916,7 +915,7 @@ namespace ExifDataModifier
             DisplayFilePaths();
         }
 
-        private void InitializeBackgroundWorkerGeotag()
+        private void InitializeBackgroundWorker()
         {
             backgroundWorkerGeotag = new BackgroundWorker();
             backgroundWorkerGeotag.WorkerReportsProgress = true;
@@ -925,10 +924,13 @@ namespace ExifDataModifier
             backgroundWorkerGeotag.RunWorkerCompleted += BackgroundWorkerGeotag_RunWorkerCompleted;
 
             backgroundWorkerLoadImage = new BackgroundWorker();
-            backgroundWorkerLoadImage.DoWork += BackgroundWorkerLoadImage_DoWork;
-            backgroundWorkerLoadImage.RunWorkerCompleted += BackgroundWorkerLoadImage_RunWorkerCompleted;
-            backgroundWorkerLoadImage.WorkerReportsProgress = false;
-            backgroundWorkerLoadImage.WorkerSupportsCancellation = true;
+            backgroundWorkerLoadImage.WorkerReportsProgress = true;
+            backgroundWorkerLoadImage.DoWork += backgroundWorkerLoadImage_DoWork;
+            backgroundWorkerLoadImage.RunWorkerCompleted
+           += backgroundWorkerLoadImage_RunWorkerCompleted;
+            backgroundWorkerLoadImage.ProgressChanged += backgroundWorkerLoadImage_ProgressChanged;
+
+            backgroundWorkerLoadImage.RunWorkerAsync(filePaths);
         }
 
         private void StartProcessing()
@@ -982,7 +984,7 @@ namespace ExifDataModifier
                 }
 
                 int progress = (i + 1) * 100 / totalFiles;
-                backgroundWorkerGeotag.ReportProgress(progress, $"Processing {i + 1} of {totalFiles} files...");
+                backgroundWorkerGeotag.ReportProgress(progress, $"Geotaging {i + 1} of {totalFiles} files...");
             }
         }
 
@@ -1000,36 +1002,63 @@ namespace ExifDataModifier
                 buttonClear_Click(null, null);
         }
 
-        private void BackgroundWorkerLoadImage_DoWork(object sender, DoWorkEventArgs e)
+        private void backgroundWorkerLoadImage_DoWork(object sender, DoWorkEventArgs e)
         {
-            var filePath = (string)e.Argument;
+            int processedFiles = 0;
+            int totalFiles = filePaths.Count;
 
-            using (Image image = Image.FromFile(filePath))
+            foreach (String filePath in filePaths)
             {
-                PointLatLng gpsData = Function.GetGPS(filePath);
-                if (gpsData.Lat != -1000 && cbShowImageOnMap.Checked)
+                // If file not have GPS data, skip it
+                if (!CheckSupported(filePath, supportedGeoTagFormats))
+                    continue;
+
+                using (Image image = Image.FromFile(filePath))
                 {
-                    MyLocation location = new MyLocation(gpsData, filePath);
-                    e.Result = location;
+                    PointLatLng gpsData = Function.GetGPS(filePath);
+                    if (gpsData.Lat != -1000)
+                    {
+                        MyLocation location = new MyLocation(gpsData, filePath);
+                        imageOnMapList.Add(location);
+                    }
                 }
-                else
-                {
-                    e.Result = null;
-                }
+
+                processedFiles++;
+                double progress = processedFiles * 1.0 / totalFiles * 100;
+                backgroundWorkerLoadImage.ReportProgress((int)progress, $"Loading {processedFiles} of {totalFiles} files...");
             }
+
+            // Remove duplicates
+            imageOnMapList = imageOnMapList.GroupBy(x => x.getLatLngString()).Select(x => x.First()).ToList();
+
+            e.Result = imageOnMapList;
         }
 
-        private void BackgroundWorkerLoadImage_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        private void backgroundWorkerLoadImage_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
+            if (progressFormLoadImage != null)
+            progressFormLoadImage.Close();
+
             if (e.Error != null)
             {
-                MessageBox.Show("An error occurred: " + e.Error.Message);
+                // Handle anyerrors during background processing
+              MessageBox.Show("Error occurred during processing: " + e.Error.Message);
+                return;
             }
-            else if (e.Result != null)
+
+            List<MyLocation> imageOnMapList = (List<MyLocation>)e.Result;
+
+            // Add markers and refresh map
+            foreach (MyLocation location in imageOnMapList)
             {
-                MyLocation location = (MyLocation)e.Result;
-                imageOnMapList.Add(location);
+                CreateMarker(gMapControl1, location.getLatLng().Lat, location.getLatLng().Lng, location.getLatLngString(), location.getName());
             }
+            gMapControl1.Refresh();
+        }
+
+        private void backgroundWorkerLoadImage_ProgressChanged(object sender, ProgressChangedEventArgs e)
+        {
+            progressFormLoadImage.UpdateProgress(e.ProgressPercentage, e.UserState.ToString());
         }
 
         private void cbShowImageOnMap_CheckedChanged(object sender, EventArgs e)
@@ -1042,30 +1071,10 @@ namespace ExifDataModifier
 
         private void AddMarker()
         {
-            foreach (String filePath in filePaths)
-            {
-                // If file not have GPS data, skip it
-                if (!CheckSupported(filePath, supportedGeoTagFormats))
-                    continue;
-                using (Image image = Image.FromFile(filePath))
-                {
-                    PointLatLng gpsData = Function.GetGPS(filePath);
-                    if (gpsData.Lat != -1000)
-                    {
-                        MyLocation location = new MyLocation(gpsData, filePath);
-                        imageOnMapList.Add(location);
-                    }
-                }
-            }
-            // Remove the reduntant MyLocation that have the same getLatLngString()
-            imageOnMapList = imageOnMapList.GroupBy(x => x.getLatLngString()).Select(x => x.First()).ToList();
+            progressFormLoadImage = new ProgressForm();
+            progressFormLoadImage.Show();
 
-
-            foreach (MyLocation location in imageOnMapList)
-            {
-                CreateMarker(gMapControl1, location.getLatLng().Lat, location.getLatLng().Lng, location.getLatLngString(), location.getName());
-            }
-            gMapControl1.Refresh();
+            backgroundWorkerLoadImage.RunWorkerAsync();
         }
 
         private void ClearMarker()
