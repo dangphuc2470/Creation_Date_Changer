@@ -16,6 +16,7 @@ using GMap.NET;
 using System.ComponentModel;
 using GMap.NET.WindowsForms.Markers;
 using System.Drawing.Drawing2D;
+using System.Collections.Concurrent;
 namespace ExifDataModifier
 {
     public partial class Form1 : Form
@@ -23,7 +24,7 @@ namespace ExifDataModifier
         private List<string> filePaths = new List<string>();
         private List<DateTime> filePathsDate = new List<DateTime>();
         private List<string> newFileNames = new List<string>();
-        private List<MyLocation> locationList = new List<MyLocation>();
+        private List<MyLocation> imageOnMapList = new List<MyLocation>();
         private Dictionary<string, List<string>> fileGroups = new Dictionary<string, List<string>>();
         private bool isShowNotificationFirstTime = false;
         private volatile bool stopRequested = false;
@@ -85,7 +86,7 @@ namespace ExifDataModifier
         private BackgroundWorker backgroundWorkerGeotag;
         private BackgroundWorker backgroundWorkerLoadImage;
 
-        private ProgressForm progressForm;
+        private ProgressForm progressFormGeoTag;
 
         public Form1()
         {
@@ -218,6 +219,7 @@ namespace ExifDataModifier
             listBoxName.Items.Clear();
             lbNameFromDate.Items.Clear();
             lbNameOriginal.Items.Clear();
+            lvImageLocation.Items.Clear();
             foreach (string filePath in filePaths)
             {
                 listBoxFiles.Items.Add(filePath);
@@ -235,7 +237,7 @@ namespace ExifDataModifier
                     if (CheckSupported(filePath, supportedGeoTagFormats))
                     {
                         lvImageLocation.Items.Add(Path.GetFileName(filePath));
-                        StartBackgroundWorkLoadImage(filePath);
+                        //StartBackgroundWorkLoadImage(filePath)
                     }
                     else
                     {
@@ -247,6 +249,11 @@ namespace ExifDataModifier
                 // Only show message one time
                 if (isNotSupportedNotification && tabControl1.SelectedTab == tpLocation)
                     MessageBox.Show("Some files are not supported for geotagging and will not be processed", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                
+                if (cbShowImageOnMap.Checked == true)
+                {
+                    AddMarker();
+                }
             }
 
 
@@ -330,7 +337,7 @@ namespace ExifDataModifier
             lbNameFromDate.Items.Clear();
             lbNameOriginal.Items.Clear();
             lvImageLocation.Items.Clear();
-            locationList.Clear();
+            imageOnMapList.Clear();
         }
 
         private void btExtract_Click(object sender, EventArgs e)
@@ -926,8 +933,8 @@ namespace ExifDataModifier
 
         private void StartProcessing()
         {
-            progressForm = new ProgressForm();
-            progressForm.Show();
+            progressFormGeoTag = new ProgressForm();
+            progressFormGeoTag.Show();
 
             backgroundWorkerGeotag.RunWorkerAsync();
         }
@@ -981,12 +988,12 @@ namespace ExifDataModifier
 
         private void BackgroundWorkerGeotag_ProgressChanged(object sender, ProgressChangedEventArgs e)
         {
-            progressForm.UpdateProgress(e.ProgressPercentage, e.UserState.ToString());
+            progressFormGeoTag.UpdateProgress(e.ProgressPercentage, e.UserState.ToString());
         }
 
         private void BackgroundWorkerGeotag_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
-            progressForm.Close();
+            progressFormGeoTag.Close();
 
             DialogResult dialog = MessageBox.Show($"Geotagged image saved in _Geotagged folder. Clear list?", "Success", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
             if (dialog == DialogResult.Yes)
@@ -1021,22 +1028,51 @@ namespace ExifDataModifier
             else if (e.Result != null)
             {
                 MyLocation location = (MyLocation)e.Result;
-                locationList.Add(location);
-
+                imageOnMapList.Add(location);
             }
         }
 
         private void cbShowImageOnMap_CheckedChanged(object sender, EventArgs e)
         {
             if (cbShowImageOnMap.Checked == true)
+                AddMarker();
+            else
+                ClearMarker();
+        }
+
+        private void AddMarker()
+        {
+            foreach (String filePath in filePaths)
             {
-                MessageBox.Show(locationList.Count.ToString());
-                    foreach (MyLocation location in locationList)
+                // If file not have GPS data, skip it
+                if (!CheckSupported(filePath, supportedGeoTagFormats))
+                    continue;
+                using (Image image = Image.FromFile(filePath))
+                {
+                    PointLatLng gpsData = Function.GetGPS(filePath);
+                    if (gpsData.Lat != -1000)
                     {
-                        CreateMarker(gMapControl1, location.getLatLng().Lat, location.getLatLng().Lng, location.getLatLngString(), location.getName());
+                        MyLocation location = new MyLocation(gpsData, filePath);
+                        imageOnMapList.Add(location);
                     }
-                    gMapControl1.Refresh(); // Force the map to redraw
+                }
             }
+            // Remove the reduntant MyLocation that have the same getLatLngString()
+            imageOnMapList = imageOnMapList.GroupBy(x => x.getLatLngString()).Select(x => x.First()).ToList();
+
+
+            foreach (MyLocation location in imageOnMapList)
+            {
+                CreateMarker(gMapControl1, location.getLatLng().Lat, location.getLatLng().Lng, location.getLatLngString(), location.getName());
+            }
+            gMapControl1.Refresh();
+        }
+
+        private void ClearMarker()
+        {
+            gMapControl1.Overlays.Clear();
+            imageOnMapList.Clear();
+            gMapControl1.Refresh();
         }
     }
 
