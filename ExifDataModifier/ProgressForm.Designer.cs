@@ -46,9 +46,9 @@
             label1.AutoSize = true;
             label1.Location = new Point(12, 23);
             label1.Name = "label1";
-            label1.Size = new Size(91, 20);
+            label1.Size = new Size(68, 20);
             label1.TabIndex = 1;
-            label1.Text = "Geotagging:";
+            label1.Text = "Progress:";
             // 
             // btCancel
             // 
@@ -62,7 +62,7 @@
             // lbProgress
             // 
             lbProgress.AutoSize = true;
-            lbProgress.Location = new Point(100, 23);
+            lbProgress.Location = new Point(85, 23);
             lbProgress.Name = "lbProgress";
             lbProgress.Size = new Size(50, 20);
             lbProgress.TabIndex = 3;
