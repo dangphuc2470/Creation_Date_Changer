@@ -110,26 +110,35 @@ namespace ExifDataModifier
         }
         public static PointLatLng GetGPS(string filePath)
         {
-            PointLatLng point = new PointLatLng(-1000, -1000);
+            PointLatLng point;
             using (var image = new Bitmap(filePath))
             {
-                PropertyItem latitudeItem = image.GetPropertyItem(2);
-                PropertyItem longitudeItem = image.GetPropertyItem(4);
-
-                if (latitudeItem != null && longitudeItem != null)
+                try
                 {
-                    double latDegrees = BitConverter.ToInt32(latitudeItem.Value, 0) / (double)BitConverter.ToInt32(latitudeItem.Value, 4);
-                    double latMinutes = BitConverter.ToInt32(latitudeItem.Value, 8) / (double)BitConverter.ToInt32(latitudeItem.Value, 12);
-                    double latSeconds = BitConverter.ToInt32(latitudeItem.Value, 16) / (double)BitConverter.ToInt32(latitudeItem.Value, 20);
+                    PropertyItem latitudeItem = image.GetPropertyItem(2);
+                    PropertyItem longitudeItem = image.GetPropertyItem(4);
 
-                    double lonDegrees = BitConverter.ToInt32(longitudeItem.Value, 0) / (double)BitConverter.ToInt32(longitudeItem.Value, 4);
-                    double lonMinutes = BitConverter.ToInt32(longitudeItem.Value, 8) / (double)BitConverter.ToInt32(longitudeItem.Value, 12);
-                    double lonSeconds = BitConverter.ToInt32(longitudeItem.Value, 16) / (double)BitConverter.ToInt32(longitudeItem.Value, 20);
+                    if (latitudeItem != null && longitudeItem != null)
+                    {
+                        double latDegrees = BitConverter.ToInt32(latitudeItem.Value, 0) / (double)BitConverter.ToInt32(latitudeItem.Value, 4);
+                        double latMinutes = BitConverter.ToInt32(latitudeItem.Value, 8) / (double)BitConverter.ToInt32(latitudeItem.Value, 12);
+                        double latSeconds = BitConverter.ToInt32(latitudeItem.Value, 16) / (double)BitConverter.ToInt32(latitudeItem.Value, 20);
 
-                    double latitude = latDegrees + latMinutes / 60 + latSeconds / 3600;
-                    double longitude = lonDegrees + lonMinutes / 60 + lonSeconds / 3600;
-                    point = new PointLatLng(latitude, longitude);
+                        double lonDegrees = BitConverter.ToInt32(longitudeItem.Value, 0) / (double)BitConverter.ToInt32(longitudeItem.Value, 4);
+                        double lonMinutes = BitConverter.ToInt32(longitudeItem.Value, 8) / (double)BitConverter.ToInt32(longitudeItem.Value, 12);
+                        double lonSeconds = BitConverter.ToInt32(longitudeItem.Value, 16) / (double)BitConverter.ToInt32(longitudeItem.Value, 20);
+
+                        double latitude = latDegrees + latMinutes / 60 + latSeconds / 3600;
+                        double longitude = lonDegrees + lonMinutes / 60 + lonSeconds / 3600;
+                        point = new PointLatLng(latitude, longitude);
+                    }
+                    else
+                        point = new PointLatLng(-1000, -1000);
                 }
+                catch {
+                    point = new PointLatLng(-1000, -1000);
+                }
+                
                return point;
             }
         }
