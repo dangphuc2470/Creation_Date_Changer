@@ -79,11 +79,14 @@
             btLocationApply = new Button();
             gMapControl1 = new GMap.NET.WindowsForms.GMapControl();
             panel6 = new Panel();
-            cbShowImageOnMap = new CheckBox();
+            groupBox1 = new GroupBox();
+            rbDisplayImage = new RadioButton();
+            rdGeotag = new RadioButton();
             cbLoadImage = new CheckBox();
             btLocationClear = new Button();
             lvImageLocation = new ListView();
             imageList1 = new ImageList(components);
+            listBox1 = new ListBox();
             tabControl1.SuspendLayout();
             tpDate.SuspendLayout();
             panel5.SuspendLayout();
@@ -97,6 +100,7 @@
             tpLocation.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)ptbSatelite).BeginInit();
             panel6.SuspendLayout();
+            groupBox1.SuspendLayout();
             SuspendLayout();
             // 
             // tabControl1
@@ -589,6 +593,7 @@
             // 
             // tbLatLgn
             // 
+            tbLatLgn.BorderStyle = BorderStyle.FixedSingle;
             tbLatLgn.Location = new Point(362, 590);
             tbLatLgn.Name = "tbLatLgn";
             tbLatLgn.Size = new Size(184, 27);
@@ -597,6 +602,7 @@
             // 
             // btLocationApply
             // 
+            btLocationApply.FlatStyle = FlatStyle.Flat;
             btLocationApply.Location = new Point(358, 635);
             btLocationApply.Name = "btLocationApply";
             btLocationApply.Size = new Size(339, 51);
@@ -635,7 +641,7 @@
             // 
             // panel6
             // 
-            panel6.Controls.Add(cbShowImageOnMap);
+            panel6.Controls.Add(groupBox1);
             panel6.Controls.Add(cbLoadImage);
             panel6.Controls.Add(btLocationClear);
             panel6.Controls.Add(lvImageLocation);
@@ -646,26 +652,50 @@
             panel6.TabIndex = 1;
             panel6.SizeChanged += panel6_SizeChanged;
             // 
-            // cbShowImageOnMap
+            // groupBox1
             // 
-            cbShowImageOnMap.AutoSize = true;
-            cbShowImageOnMap.Location = new Point(121, 590);
-            cbShowImageOnMap.Name = "cbShowImageOnMap";
-            cbShowImageOnMap.Size = new Size(168, 24);
-            cbShowImageOnMap.TabIndex = 3;
-            cbShowImageOnMap.Text = "Show image on map";
-            cbShowImageOnMap.UseVisualStyleBackColor = true;
-            cbShowImageOnMap.CheckedChanged += cbShowImageOnMap_CheckedChanged;
+            groupBox1.Controls.Add(rbDisplayImage);
+            groupBox1.Controls.Add(rdGeotag);
+            groupBox1.Location = new Point(5, 548);
+            groupBox1.Name = "groupBox1";
+            groupBox1.Size = new Size(342, 50);
+            groupBox1.TabIndex = 4;
+            groupBox1.TabStop = false;
+            groupBox1.Text = "Mode";
+            // 
+            // rbDisplayImage
+            // 
+            rbDisplayImage.AutoSize = true;
+            rbDisplayImage.Location = new Point(105, 20);
+            rbDisplayImage.Name = "rbDisplayImage";
+            rbDisplayImage.Size = new Size(131, 24);
+            rbDisplayImage.TabIndex = 1;
+            rbDisplayImage.Text = "Display Images";
+            rbDisplayImage.UseVisualStyleBackColor = true;
+            rbDisplayImage.CheckedChanged += rbDisplayImage_CheckedChanged;
+            // 
+            // rdGeotag
+            // 
+            rdGeotag.AutoSize = true;
+            rdGeotag.Checked = true;
+            rdGeotag.Location = new Point(6, 20);
+            rdGeotag.Name = "rdGeotag";
+            rdGeotag.Size = new Size(79, 24);
+            rdGeotag.TabIndex = 0;
+            rdGeotag.TabStop = true;
+            rdGeotag.Text = "Geotag";
+            rdGeotag.UseVisualStyleBackColor = true;
             // 
             // cbLoadImage
             // 
             cbLoadImage.AutoSize = true;
-            cbLoadImage.Location = new Point(5, 590);
+            cbLoadImage.Location = new Point(5, 577);
             cbLoadImage.Name = "cbLoadImage";
             cbLoadImage.Size = new Size(110, 24);
             cbLoadImage.TabIndex = 2;
             cbLoadImage.Text = "Load image";
             cbLoadImage.UseVisualStyleBackColor = true;
+            cbLoadImage.Visible = false;
             cbLoadImage.CheckedChanged += cbLoadImage_CheckedChanged;
             // 
             // btLocationClear
@@ -684,7 +714,7 @@
             lvImageLocation.Location = new Point(-103, -2);
             lvImageLocation.Margin = new Padding(0);
             lvImageLocation.Name = "lvImageLocation";
-            lvImageLocation.Size = new Size(455, 583);
+            lvImageLocation.Size = new Size(455, 541);
             lvImageLocation.SmallImageList = imageList1;
             lvImageLocation.Sorting = SortOrder.Ascending;
             lvImageLocation.StateImageList = imageList1;
@@ -698,11 +728,20 @@
             imageList1.ImageSize = new Size(100, 100);
             imageList1.TransparentColor = Color.Transparent;
             // 
+            // listBox1
+            // 
+            listBox1.FormattingEnabled = true;
+            listBox1.Location = new Point(643, 728);
+            listBox1.Name = "listBox1";
+            listBox1.Size = new Size(150, 104);
+            listBox1.TabIndex = 13;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(708, 725);
+            Controls.Add(listBox1);
             Controls.Add(tabControl1);
             Name = "Form1";
             Text = "Date Changer";
@@ -727,6 +766,8 @@
             ((System.ComponentModel.ISupportInitialize)ptbSatelite).EndInit();
             panel6.ResumeLayout(false);
             panel6.PerformLayout();
+            groupBox1.ResumeLayout(false);
+            groupBox1.PerformLayout();
             ResumeLayout(false);
         }
 
@@ -785,7 +826,10 @@
         private Button btLocationApply;
         private TextBox tbLatLgn;
         private PictureBox ptbSatelite;
+        private GroupBox groupBox1;
+        private RadioButton rdGeotag;
+        private RadioButton rbDisplayImage;
         private CheckBox cbLoadImage;
-        private CheckBox cbShowImageOnMap;
+        private ListBox listBox1;
     }
 }

@@ -11,4 +11,5 @@ namespace ExifDataModifier
         public GMap.NET.PointLatLng Center { get; set; }
         public int MapType { get; set; }
     }
+
 }
