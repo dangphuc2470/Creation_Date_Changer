@@ -64,9 +64,9 @@
             lbProgress.AutoSize = true;
             lbProgress.Location = new Point(85, 23);
             lbProgress.Name = "lbProgress";
-            lbProgress.Size = new Size(50, 20);
+            lbProgress.Size = new Size(161, 20);
             lbProgress.TabIndex = 3;
-            lbProgress.Text = "label2";
+            lbProgress.Text = "Geotaging 1 of 1 files...";
             // 
             // ProgressForm
             // 
