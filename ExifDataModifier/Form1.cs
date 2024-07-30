@@ -34,8 +34,8 @@ namespace ExifDataModifier
         private bool isShowNotificationFirstTime = false;
         private volatile bool stopRequested = false;
         private int mapType = 0;
-        private PointLatLng defaultLocation = new PointLatLng(40.73061, -73.935242); // New York City
-        private MapConfig mapConfig;
+        public PointLatLng defaultLocation = new PointLatLng(40.73061, -73.935242); // New York City
+        public MapConfig mapConfig;
 
         string[] supportedFormats = {
     ".jpg", ".jpeg", ".png", ".gif",  // Common image formats
@@ -91,6 +91,7 @@ namespace ExifDataModifier
         private BackgroundWorker backgroundWorkerGeotag;
         private BackgroundWorker backgroundWorkerLoadImage;
 
+
         private ProgressForm progressFormGeoTag;
         private ProgressForm progressFormLoadImage;
 
@@ -99,57 +100,11 @@ namespace ExifDataModifier
         {
             InitializeComponent();
             AllowDrop = true;
-            gMapControl1.MapProvider = GMap.NET.MapProviders.GoogleMapProvider.Instance;
-            GMap.NET.GMaps.Instance.Mode = GMap.NET.AccessMode.ServerOnly;
-
-            string jsonFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "location.json");
-            if (File.Exists(jsonFilePath))
-            {
-                string json = File.ReadAllText(jsonFilePath);
-                mapConfig = JsonSerializer.Deserialize<MapConfig>(json);
-                gMapControl1.Position = mapConfig.Center;
-                int mapType = mapConfig.MapType;
-
-                gMapControl1.MapProvider = mapType switch
-                {
-                    0 => GMap.NET.MapProviders.GoogleMapProvider.Instance,
-                    1 => GMap.NET.MapProviders.GoogleHybridMapProvider.Instance,
-                    2 => GMap.NET.MapProviders.BingMapProvider.Instance,
-                    3 => GMap.NET.MapProviders.BingHybridMapProvider.Instance,
-                    _ => GMap.NET.MapProviders.GoogleMapProvider.Instance,
-                };
-            }
-            else
-                gMapControl1.Position = defaultLocation; // Example: New York City
-                                                         // Enable dragging the map:
-            gMapControl1.CanDragMap = true;
-            gMapControl1.DragButton = MouseButtons.Left; // Use the left mouse button for dragging
-
-            // Enable zooming:
-            gMapControl1.MinZoom = 1;  // Minimum zoom level
-            gMapControl1.MaxZoom = 20; // Maximum zoom level
-            gMapControl1.Zoom = 9;     // Initial zoom level
-            gMapControl1.IgnoreMarkerOnMouseWheel = true; // Zoom without centering on markers
-
-            // Optional: Enable mouse wheel zoom without holding down Ctrl
-            gMapControl1.MouseWheelZoomType = GMap.NET.MouseWheelZoomType.MousePositionAndCenter;
-
-            // Optional: Disable the red cross when the map is dragged beyond its boundaries
-            gMapControl1.ShowTileGridLines = false;
-            Init(gMapControl1);
+            FormAction.InitGmap(gMapControl1, this);
             InitializeBackgroundWorker();
-
-
-
         }
 
-        internal void Init(GMapControl gMapControl)
-        {
-            var c = gMapControl;
-            c.MouseWheel += GMap_MouseWheel;
-            c.MouseWheelZoomEnabled = false;
 
-        }
 
         private void CreateMarker(GMapControl mapControl, double lat, double lng, string toolTipText, string customMarkerPath)
         {
@@ -157,8 +112,8 @@ namespace ExifDataModifier
 
             // Load the custom marker image
             Bitmap customMarkerImage = new Bitmap(customMarkerPath);
-            customMarkerImage = CorrectBitmapImageOrientation(customMarkerImage);
-            Bitmap resizedImage = ResizeBitmapImageToSquare(customMarkerImage, 50);
+            customMarkerImage = Function.CorrectBitmapImageOrientation(customMarkerImage);
+            Bitmap resizedImage = Function.ResizeBitmapImageToSquare(customMarkerImage, 50);
 
             // Create a circular path
             GraphicsPath path = new GraphicsPath();
@@ -195,7 +150,7 @@ namespace ExifDataModifier
             mapControl.Overlays.Add(overlay);
         }
 
-        private void GMap_MouseWheel(object sender, MouseEventArgs e)
+        public void GMap_MouseWheel(object sender, MouseEventArgs e)
         {
             if (e.Delta < 0) gMapControl1.Zoom--;
             else gMapControl1.Zoom++;
@@ -236,31 +191,31 @@ namespace ExifDataModifier
                 lbNameOriginal.Items.Add(Path.GetFileName(filePath));
             }
 
-            if (cbLoadImage.Checked)
-                LoadImagesIntoListView(filePaths);
-            else
+            //if (cbLoadImage.Checked)
+            //    Function.LoadImagesIntoListView(filePaths);
+            //else
+            //{
+            bool isNotSupportedNotification = false;
+            foreach (string filePath in filePaths)
             {
-                bool isNotSupportedNotification = false;
-                foreach (string filePath in filePaths)
+                if (Function.CheckSupported(filePath, supportedGeoTagFormats))
                 {
-                    if (CheckSupported(filePath, supportedGeoTagFormats))
-                    {
-                        lvImageLocation.Items.Add(Path.GetFileName(filePath));
-                        //StartBackgroundWorkLoadImage(filePath)
-                    }
-                    else
-                    {
-                        lvImageLocation.Items.Add("(Not supported) " + Path.GetFileName(filePath));
-                        isNotSupportedNotification = true;
-                    }
+                    lvImageLocation.Items.Add(Path.GetFileName(filePath));
+                    //StartBackgroundWorkLoadImage(filePath)
                 }
-
-                // Only show message one time
-                if (isNotSupportedNotification && tabControl1.SelectedTab == tpLocation)
-                    MessageBox.Show("Some files are not supported for geotagging and will not be processed", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-
-                AddMarker();
+                else
+                {
+                    lvImageLocation.Items.Add("(Not supported) " + Path.GetFileName(filePath));
+                    isNotSupportedNotification = true;
+                }
             }
+
+            // Only show message one time
+            if (isNotSupportedNotification && tabControl1.SelectedTab == tpLocation)
+                MessageBox.Show("Some files are not supported for geotagging and will not be processed", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+            StartProcessingAddMarker();
+            //}
 
 
         }
@@ -284,8 +239,8 @@ namespace ExifDataModifier
                         modifiedName += fileName[i];
                 }
 
-                modifiedName = RemoveSuffix(modifiedName, nmIgnore.Value);
-                modifiedName = RemoveFromLast(modifiedName, '*', 1);
+                modifiedName = Function.RemoveSuffix(modifiedName, nmIgnore.Value);
+                modifiedName = Function.RemoveFromLast(modifiedName, '*', 1);
 
                 if (!fileGroups.ContainsKey(modifiedName))
                     fileGroups[modifiedName] = new List<string>();
@@ -312,6 +267,12 @@ namespace ExifDataModifier
 
         private void buttonSetTime_Click(object sender, EventArgs e)
         {
+            if (listBoxExtractedDate.Items.Count == 0)
+            {
+                MessageBox.Show("Please click apply to extract the date first!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
             if (filePaths.Count != filePathsDate.Count)
             {
                 MessageBox.Show("Please check the format!");
@@ -431,7 +392,7 @@ namespace ExifDataModifier
                     foreach (string file in files)
                     {
                         // Make sure it only add the Image and Video
-                        if (CheckSupported(file, supportedFormats))
+                        if (Function.CheckSupported(file, supportedFormats))
                             filePaths.Add(file);
                     }
                     ScanAndGroupFiles(filePaths);
@@ -457,12 +418,12 @@ namespace ExifDataModifier
                 }
 
                 // Remove extension
-                modifiedName = RemoveFromLast(modifiedName, '.', 0);
+                modifiedName = Function.RemoveFromLast(modifiedName, '.', 0);
                 // Remove suffix
-                modifiedName = RemoveSuffix(modifiedName, nmIgnore.Value);
+                modifiedName = Function.RemoveSuffix(modifiedName, nmIgnore.Value);
 
                 // Remove package name of screenshot. Eg: Screenshot_2023-08-17-20-12-32-990_com.tencent.ig
-                modifiedName = RemoveFromLast(modifiedName, '*', 1);
+                modifiedName = Function.RemoveFromLast(modifiedName, '*', 1);
                 filePaths.Clear();
                 foreach (string file in fileGroups[modifiedName])
                 {
@@ -473,13 +434,6 @@ namespace ExifDataModifier
 
         }
 
-        private string RemoveFromLast(string name, char charater, int offset)
-        {
-            int lastCharaterIndex = name.LastIndexOf(charater);
-            if (lastCharaterIndex != -1)
-                return name.Substring(0, lastCharaterIndex + offset);
-            return name;
-        }
 
         private void btAssign_Click(object sender, EventArgs e)
         {
@@ -513,15 +467,8 @@ namespace ExifDataModifier
             cbShowFullPath.Checked = !cbShowFullPath.Checked;
         }
 
-        string RemoveSuffix(string name, decimal numberOfLetterToRemove)
-        {
-            int length = name.Length;
-            string modifiedName = name;
-            if (length > numberOfLetterToRemove)
-                modifiedName = name.Substring(0, (int)(length - numberOfLetterToRemove));
-            return modifiedName;
-        }
 
+        #region Extract Date and set file name
         private void btChangeName_Click(object sender, EventArgs e)
         {
             try
@@ -562,8 +509,20 @@ namespace ExifDataModifier
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message);
+                if (ex.Message == "Cannot create a file when that file already exists.")
+                    MessageBox.Show("Some file name are duplicate, please check again or consider adding sequence number, eg: yourfilenameformat_[nnnn]", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                else
+                    MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
 
+            }
+        }
+
+         private void cbFromDateTaken_CheckedChanged(object sender, EventArgs e)
+        {
+            if (cbFromDateTaken.Checked && cbFromDateTaken.Tag.ToString() == "Uncheck")
+            {
+                MessageBox.Show("This feature does not support RAW image format, press preview again to see the result, supported file will have (T) before the name", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                cbFromDateTaken.Tag = "Check";
             }
         }
 
@@ -609,7 +568,7 @@ namespace ExifDataModifier
                 else
                     newName = prefix + creationTime.ToString(nameFormat) + suffix;
 
-                if (cbFromDateTaken.Checked && CheckSupported(filePaths[i], supportedGeoTagFormats))
+                if (cbFromDateTaken.Checked && Function.CheckSupported(filePaths[i], supportedGeoTagFormats))
                 {
                     using (Image image = Image.FromFile(filePaths[i]))
                     {
@@ -660,236 +619,132 @@ namespace ExifDataModifier
 
         }
 
-        private void LoadImagesIntoListView(List<string> imagePaths)
-        {
-            Parallel.ForEach(imagePaths, (path, state) =>
-            {
-                if (stopRequested)
-                {
-                    state.Stop(); // Yêu cầu dừng vòng lặp song song
-                    return;
-                }
-                try
-                {
-                    // If not image, load white image
-                    if (!CheckSupported(path, supportedImageFormats))
-                    {
-                        this.Invoke((MethodInvoker)delegate
-                        {
-                            int imageIndex = imageList1.Images.Count;
-                            imageList1.Images.Add(new Bitmap(100, 100));
-                            ListViewItem item = new ListViewItem(Path.GetFileNameWithoutExtension(path))
-                            {
-                                ImageIndex = imageIndex
-                            };
-                            lvImageLocation.Items.Add(item);
-                        });
-                        return;
-                    }
 
-                    Image originalImage = Image.FromFile(path);
-                    Image resizedImage = ResizeImageToSquare(originalImage);
+        #endregion
+        // private void LoadImagesIntoListView(List<string> imagePaths)
+        // {
+        //     Parallel.ForEach(imagePaths, (path, state) =>
+        //     {
+        //         if (stopRequested)
+        //         {
+        //             state.Stop(); // Yêu cầu dừng vòng lặp song song
+        //             return;
+        //         }
+        //         try
+        //         {
+        //             // If not image, load white image
+        //             if (!Function.CheckSupported(path, supportedImageFormats))
+        //             {
+        //                 this.Invoke((MethodInvoker)delegate
+        //                 {
+        //                     int imageIndex = imageList1.Images.Count;
+        //                     imageList1.Images.Add(new Bitmap(100, 100));
+        //                     ListViewItem item = new ListViewItem(Path.GetFileNameWithoutExtension(path))
+        //                     {
+        //                         ImageIndex = imageIndex
+        //                     };
+        //                     lvImageLocation.Items.Add(item);
+        //                 });
+        //                 return;
+        //             }
 
-                    // Marshal the UI update back to the UI thread
-                    this.Invoke((MethodInvoker)delegate
-                    {
-                        int imageIndex = imageList1.Images.Count;
-                        //imageList1.Images.Add(resizedImage);
+        //             Image originalImage = Image.FromFile(path);
+        //             Image resizedImage = ResizeImageToSquare(originalImage);
 
-                        // Extract a file name or any other text you want to display next to the image
-                        string fileName = Path.GetFileNameWithoutExtension(path);
-                        // Create a ListViewItem with text and set its ImageIndex
-                        ListViewItem item = new ListViewItem(fileName)
-                        {
-                            ImageIndex = imageIndex
-                        };
-                        lvImageLocation.Items.Add(item); // Add the item to the ListView
-                    });
-                }
-                catch (Exception ex)
-                {
-                    // Handle exceptions (e.g., file not found, invalid image format)
-                    // Marshal the exception handling to the UI thread if you need to interact with the UI, e.g., showing a MessageBox
-                    this.Invoke((MethodInvoker)delegate
-                    {
-                        MessageBox.Show($"Error loading image: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    });
-                }
-            });
-            this.Invoke((MethodInvoker)delegate
-            {
-                lvImageLocation.EndUpdate(); // Ends the update process and repaints the ListView if necessary.
-            });
-        }
+        //             // Marshal the UI update back to the UI thread
+        //             this.Invoke((MethodInvoker)delegate
+        //             {
+        //                 int imageIndex = imageList1.Images.Count;
+        //                 //imageList1.Images.Add(resizedImage);
 
-        private bool CheckSupported(string path, string[] supportedFormats)
-        {
-            return supportedFormats.Contains(Path.GetExtension(path).ToLower());
-        }
+        //                 // Extract a file name or any other text you want to display next to the image
+        //                 string fileName = Path.GetFileNameWithoutExtension(path);
+        //                 // Create a ListViewItem with text and set its ImageIndex
+        //                 ListViewItem item = new ListViewItem(fileName)
+        //                 {
+        //                     ImageIndex = imageIndex
+        //                 };
+        //                 lvImageLocation.Items.Add(item); // Add the item to the ListView
+        //             });
+        //         }
+        //         catch (Exception ex)
+        //         {
+        //             // Handle exceptions (e.g., file not found, invalid image format)
+        //             // Marshal the exception handling to the UI thread if you need to interact with the UI, e.g., showing a MessageBox
+        //             this.Invoke((MethodInvoker)delegate
+        //             {
+        //                 MessageBox.Show($"Error loading image: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        //             });
+        //         }
+        //     });
+        //     this.Invoke((MethodInvoker)delegate
+        //     {
+        //         lvImageLocation.EndUpdate(); // Ends the update process and repaints the ListView if necessary.
+        //     });
+        // }
 
-        private Image ResizeImageToSquare(Image image)
-        {
-            // Correct orientation
-            //image = CorrectImageOrientation(image);
 
-            int size = Math.Min(image.Width, image.Height); // Find the shortest dimension
-            int x = (image.Width - size) / 2;
-            int y = (image.Height - size) / 2;
 
-            // Create a new Bitmap with the desired size
-            Bitmap croppedImage = new Bitmap(size, size);
-            using (Graphics g = Graphics.FromImage(croppedImage))
-            {
-                // Draw the original image, cropped to a square
-                g.DrawImage(image, new Rectangle(0, 0, size, size), new Rectangle(x, y, size, size), GraphicsUnit.Pixel);
-            }
 
-            return croppedImage;
-        }
+        // private Image CorrectImageOrientation(Image img)
+        // {
+        //     if (img.PropertyIdList.Contains(0x0112)) // Check if the image has orientation metadata
+        //     {
+        //         int orientation = (int)img.GetPropertyItem(0x0112).Value[0];
+        //         switch (orientation)
+        //         {
+        //             case 2:
+        //                 img.RotateFlip(RotateFlipType.RotateNoneFlipX); // Horizontal flip
+        //                 break;
+        //             case 3:
+        //                 img.RotateFlip(RotateFlipType.Rotate180FlipNone); // 180° rotation
+        //                 break;
+        //             case 4:
+        //                 img.RotateFlip(RotateFlipType.RotateNoneFlipY); // Vertical flip
+        //                 break;
+        //             case 5:
+        //                 img.RotateFlip(RotateFlipType.Rotate90FlipX);
+        //                 break;
+        //             case 6:
+        //                 img.RotateFlip(RotateFlipType.Rotate90FlipNone); // 90° rotation
+        //                 break;
+        //             case 7:
+        //                 img.RotateFlip(RotateFlipType.Rotate270FlipX);
+        //                 break;
+        //             case 8:
+        //                 img.RotateFlip(RotateFlipType.Rotate270FlipNone); // 270° rotation
+        //                 break;
+        //         }
+        //         // Remove the orientation property to prevent further adjustments
+        //         img.RemovePropertyItem(0x0112);
+        //     }
+        //     return img;
+        // }
 
-        public static Bitmap ResizeBitmapImageToSquare(Bitmap originalImage, int size)
-        {
-            // Determine the dimensions of the square crop
-            int cropSize = Math.Min(originalImage.Width, originalImage.Height);
 
-            // Calculate the starting point to crop the image from the center
-            int cropX = (originalImage.Width - cropSize) / 2;
-            int cropY = (originalImage.Height - cropSize) / 2;
-
-            // Create a new bitmap with the square dimensions
-            Bitmap squareImage = new Bitmap(size, size);
-
-            // Draw the cropped portion of the original image onto the new bitmap
-            using (Graphics g = Graphics.FromImage(squareImage))
-            {
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-
-                // Draw the cropped image onto the new square bitmap
-                g.DrawImage(originalImage, new Rectangle(0, 0, size, size), new Rectangle(cropX, cropY, cropSize, cropSize), GraphicsUnit.Pixel);
-            }
-
-            return squareImage;
-        }
-
-        public static Bitmap CorrectBitmapImageOrientation(Bitmap originalImage)
-        {
-            const int ExifOrientationTag = 0x0112; // The EXIF tag for orientation
-
-            // Check if the image has the orientation property
-            if (Array.IndexOf(originalImage.PropertyIdList, ExifOrientationTag) < 0)
-                return originalImage;
-
-            // Get the orientation property
-            var orientationProperty = originalImage.GetPropertyItem(ExifOrientationTag);
-            int orientationValue = BitConverter.ToUInt16(orientationProperty.Value, 0);
-
-            // Create a new bitmap to apply transformations
-            Bitmap correctedImage = (Bitmap)originalImage.Clone();
-
-            // Apply transformations based on the orientation value
-            switch (orientationValue)
-            {
-                case 1: // Normal (no transformation needed)
-                    break;
-                case 2: // Flip horizontal
-                    correctedImage.RotateFlip(RotateFlipType.RotateNoneFlipX);
-                    break;
-                case 3: // Rotate 180 degrees
-                    correctedImage.RotateFlip(RotateFlipType.Rotate180FlipNone);
-                    break;
-                case 4: // Flip vertical
-                    correctedImage.RotateFlip(RotateFlipType.RotateNoneFlipY);
-                    break;
-                case 5: // Rotate 90 degrees clockwise and flip horizontal
-                    correctedImage.RotateFlip(RotateFlipType.Rotate90FlipX);
-                    break;
-                case 6: // Rotate 90 degrees clockwise
-                    correctedImage.RotateFlip(RotateFlipType.Rotate90FlipNone);
-                    break;
-                case 7: // Rotate 90 degrees counterclockwise and flip horizontal
-                    correctedImage.RotateFlip(RotateFlipType.Rotate270FlipX);
-                    break;
-                case 8: // Rotate 90 degrees counterclockwise
-                    correctedImage.RotateFlip(RotateFlipType.Rotate270FlipNone);
-                    break;
-                default: // Unknown orientation value, return the original image
-                    return originalImage;
-            }
-
-            return correctedImage;
-        }
-
-        private Image CorrectImageOrientation(Image img)
-        {
-            if (img.PropertyIdList.Contains(0x0112)) // Check if the image has orientation metadata
-            {
-                int orientation = (int)img.GetPropertyItem(0x0112).Value[0];
-                switch (orientation)
-                {
-                    case 2:
-                        img.RotateFlip(RotateFlipType.RotateNoneFlipX); // Horizontal flip
-                        break;
-                    case 3:
-                        img.RotateFlip(RotateFlipType.Rotate180FlipNone); // 180° rotation
-                        break;
-                    case 4:
-                        img.RotateFlip(RotateFlipType.RotateNoneFlipY); // Vertical flip
-                        break;
-                    case 5:
-                        img.RotateFlip(RotateFlipType.Rotate90FlipX);
-                        break;
-                    case 6:
-                        img.RotateFlip(RotateFlipType.Rotate90FlipNone); // 90° rotation
-                        break;
-                    case 7:
-                        img.RotateFlip(RotateFlipType.Rotate270FlipX);
-                        break;
-                    case 8:
-                        img.RotateFlip(RotateFlipType.Rotate270FlipNone); // 270° rotation
-                        break;
-                }
-                // Remove the orientation property to prevent further adjustments
-                img.RemovePropertyItem(0x0112);
-            }
-            return img;
-        }
-
-        private void panel6_SizeChanged(object sender, EventArgs e)
-        {
-
-        }
+        #region Location
 
         private void btLocationApply_Click(object sender, EventArgs e)
         {
             if (btLocationApply.Text == "Apply")
-                StartProcessing();
+                StartProcessingGeotag();
             else
                 ClearMarker();
         }
-
-
-
-        private string ConvertPointLatLngToString(PointLatLng center)
-        {
-            return $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}";
-        }
-
         private void gMapControl1_MouseUp(object sender, MouseEventArgs e)
         {
-            GMap.NET.PointLatLng center = gMapControl1.Position;
-            String latlng = ConvertPointLatLngToString(center);
-
-            if (tbLatLgn.Text != latlng)
-                tbLatLgn.Text = latlng;
+            UpdateLatLgnTextBox();
         }
 
         private void gMapControl1_MouseHover(object sender, EventArgs e)
         {
-            GMap.NET.PointLatLng center = gMapControl1.Position;
-            String latlng = ConvertPointLatLngToString(center);
+            UpdateLatLgnTextBox();
+        }
 
+        private void UpdateLatLgnTextBox()
+        {
+            GMap.NET.PointLatLng center = gMapControl1.Position;
+            String latlng = Function.ConvertPointLatLngToString(center);
 
             if (tbLatLgn.Text != latlng)
                 tbLatLgn.Text = latlng;
@@ -898,7 +753,7 @@ namespace ExifDataModifier
         private void tbLatLgn_TextChanged(object sender, EventArgs e)
         {
             GMap.NET.PointLatLng center = gMapControl1.Position;
-            String latlngC = ConvertPointLatLngToString(center);
+            String latlngC = Function.ConvertPointLatLngToString(center);
 
 
             if (tbLatLgn.Text != latlngC)
@@ -944,11 +799,6 @@ namespace ExifDataModifier
 
         }
 
-        private void cbLoadImage_CheckedChanged(object sender, EventArgs e)
-        {
-            DisplayFilePaths();
-        }
-
         private void InitializeBackgroundWorker()
         {
             backgroundWorkerGeotag = new BackgroundWorker();
@@ -965,7 +815,9 @@ namespace ExifDataModifier
             backgroundWorkerLoadImage.ProgressChanged += backgroundWorkerLoadImage_ProgressChanged;
         }
 
-        private void StartProcessing()
+
+        #region Geotagging
+        private void StartProcessingGeotag()
         {
             progressFormGeoTag = new ProgressForm();
             progressFormGeoTag.Show();
@@ -976,8 +828,7 @@ namespace ExifDataModifier
         private void BackgroundWorkerGeotag_DoWork(object sender, DoWorkEventArgs e)
         {
             GMap.NET.PointLatLng center = gMapControl1.Position;
-            String latlng = ConvertPointLatLngToString(center);
-
+            String latlng = Function.ConvertPointLatLngToString(center);
             mapConfig.Center = center;
             mapConfig.MapType = mapType;
             // Save location to json file for later session
@@ -992,7 +843,7 @@ namespace ExifDataModifier
                 double latitude = center.Lat;
                 double longitude = center.Lng;
 
-                if (!CheckSupported(path, supportedGeoTagFormats))
+                if (!Function.CheckSupported(path, supportedGeoTagFormats))
                     continue;
 
                 using (Image originalImage = Image.FromFile(path))
@@ -1032,7 +883,7 @@ namespace ExifDataModifier
         private void BackgroundWorkerGeotag_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
             progressFormGeoTag.Close();
-            AddMarker(false);
+            StartProcessingAddMarker(false);
 
             DialogResult dialog = MessageBox.Show($"Geotagged image saved in _Geotagged folder. Clear list?", "Success", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
 
@@ -1040,7 +891,8 @@ namespace ExifDataModifier
                 buttonClear_Click(null, null);
 
         }
-
+        #endregion
+        #region LoadImage
         private void backgroundWorkerLoadImage_DoWork(object sender, DoWorkEventArgs e)
         {
             int processedFiles = 0;
@@ -1049,7 +901,7 @@ namespace ExifDataModifier
             foreach (String filePath in filePathsToDisplayImage)
             {
                 // If file not have GPS data, skip it
-                if (!CheckSupported(filePath, supportedGeoTagFormats))
+                if (!Function.CheckSupported(filePath, supportedGeoTagFormats))
                     continue;
 
                 using (Image image = Image.FromFile(filePath))
@@ -1101,7 +953,7 @@ namespace ExifDataModifier
             progressFormLoadImage.UpdateProgress(e.ProgressPercentage, e.UserState.ToString());
         }
 
-        private void AddMarker(bool isShowProgress = true)
+        private void StartProcessingAddMarker(bool isShowProgress = true)
         {
             if (rbDisplayImage.Checked == true && isShowProgress)
             {
@@ -1138,7 +990,7 @@ namespace ExifDataModifier
         {
             if (rbDisplayImage.Checked)
             {
-                AddMarker(filePathsToDisplayImage.Count > 0);
+                StartProcessingAddMarker(filePathsToDisplayImage.Count > 0);
                 btLocationApply.Text = "Clear marker";
             }
             else
@@ -1148,6 +1000,11 @@ namespace ExifDataModifier
             }
 
         }
-    }
 
+
+        #endregion
+        #endregion
+
+       
+    }
 }

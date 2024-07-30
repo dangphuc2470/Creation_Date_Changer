@@ -65,6 +65,7 @@
             label5 = new Label();
             tbPath = new TextBox();
             tpFilename = new TabPage();
+            cbFromDateTaken = new CheckBox();
             label11 = new Label();
             rbFromCreation = new RadioButton();
             rbFromModified = new RadioButton();
@@ -83,12 +84,10 @@
             groupBox1 = new GroupBox();
             rbDisplayImage = new RadioButton();
             rdGeotag = new RadioButton();
-            cbLoadImage = new CheckBox();
             btLocationClear = new Button();
             lvImageLocation = new ListView();
             imageList1 = new ImageList(components);
             listBox1 = new ListBox();
-            cbFromDateTaken = new CheckBox();
             tabControl1.SuspendLayout();
             tpDate.SuspendLayout();
             panel5.SuspendLayout();
@@ -480,6 +479,18 @@
             tpFilename.Text = "Filename";
             tpFilename.UseVisualStyleBackColor = true;
             // 
+            // cbFromDateTaken
+            // 
+            cbFromDateTaken.AutoSize = true;
+            cbFromDateTaken.Location = new Point(390, 83);
+            cbFromDateTaken.Name = "cbFromDateTaken";
+            cbFromDateTaken.Size = new Size(211, 24);
+            cbFromDateTaken.TabIndex = 9;
+            cbFromDateTaken.Tag = "Uncheck";
+            cbFromDateTaken.Text = "From date taken if possible";
+            cbFromDateTaken.UseVisualStyleBackColor = true;
+            cbFromDateTaken.CheckedChanged += cbFromDateTaken_CheckedChanged;
+            // 
             // label11
             // 
             label11.AutoSize = true;
@@ -520,7 +531,7 @@
             btFileApply.Name = "btFileApply";
             btFileApply.Size = new Size(94, 29);
             btFileApply.TabIndex = 5;
-            btFileApply.Text = "Apply";
+            btFileApply.Text = "Preview";
             btFileApply.UseVisualStyleBackColor = true;
             btFileApply.Click += btFileApply_Click;
             // 
@@ -586,7 +597,7 @@
             // ptbSatelite
             // 
             ptbSatelite.Image = Properties.Resources.download;
-            ptbSatelite.Location = new Point(362, 541);
+            ptbSatelite.Location = new Point(358, 541);
             ptbSatelite.Name = "ptbSatelite";
             ptbSatelite.Size = new Size(52, 43);
             ptbSatelite.SizeMode = PictureBoxSizeMode.Zoom;
@@ -597,7 +608,7 @@
             // tbLatLgn
             // 
             tbLatLgn.BorderStyle = BorderStyle.FixedSingle;
-            tbLatLgn.Location = new Point(362, 590);
+            tbLatLgn.Location = new Point(358, 590);
             tbLatLgn.Name = "tbLatLgn";
             tbLatLgn.Size = new Size(184, 27);
             tbLatLgn.TabIndex = 4;
@@ -608,7 +619,7 @@
             btLocationApply.FlatStyle = FlatStyle.Flat;
             btLocationApply.Location = new Point(358, 635);
             btLocationApply.Name = "btLocationApply";
-            btLocationApply.Size = new Size(339, 51);
+            btLocationApply.Size = new Size(336, 51);
             btLocationApply.TabIndex = 3;
             btLocationApply.Text = "Apply";
             btLocationApply.UseVisualStyleBackColor = true;
@@ -645,7 +656,6 @@
             // panel6
             // 
             panel6.Controls.Add(groupBox1);
-            panel6.Controls.Add(cbLoadImage);
             panel6.Controls.Add(btLocationClear);
             panel6.Controls.Add(lvImageLocation);
             panel6.Dock = DockStyle.Left;
@@ -653,7 +663,6 @@
             panel6.Name = "panel6";
             panel6.Size = new Size(353, 686);
             panel6.TabIndex = 1;
-            panel6.SizeChanged += panel6_SizeChanged;
             // 
             // groupBox1
             // 
@@ -689,18 +698,6 @@
             rdGeotag.Text = "Geotag";
             rdGeotag.UseVisualStyleBackColor = true;
             // 
-            // cbLoadImage
-            // 
-            cbLoadImage.AutoSize = true;
-            cbLoadImage.Location = new Point(5, 577);
-            cbLoadImage.Name = "cbLoadImage";
-            cbLoadImage.Size = new Size(110, 24);
-            cbLoadImage.TabIndex = 2;
-            cbLoadImage.Text = "Load image";
-            cbLoadImage.UseVisualStyleBackColor = true;
-            cbLoadImage.Visible = false;
-            cbLoadImage.CheckedChanged += cbLoadImage_CheckedChanged;
-            // 
             // btLocationClear
             // 
             btLocationClear.Location = new Point(5, 632);
@@ -714,10 +711,10 @@
             // lvImageLocation
             // 
             lvImageLocation.LargeImageList = imageList1;
-            lvImageLocation.Location = new Point(-103, -2);
+            lvImageLocation.Location = new Point(-169, -2);
             lvImageLocation.Margin = new Padding(0);
             lvImageLocation.Name = "lvImageLocation";
-            lvImageLocation.Size = new Size(455, 541);
+            lvImageLocation.Size = new Size(519, 541);
             lvImageLocation.SmallImageList = imageList1;
             lvImageLocation.Sorting = SortOrder.Ascending;
             lvImageLocation.StateImageList = imageList1;
@@ -738,18 +735,6 @@
             listBox1.Name = "listBox1";
             listBox1.Size = new Size(150, 104);
             listBox1.TabIndex = 13;
-            // 
-            // cbFromDateTaken
-            // 
-            cbFromDateTaken.AutoSize = true;
-            cbFromDateTaken.Checked = true;
-            cbFromDateTaken.CheckState = CheckState.Checked;
-            cbFromDateTaken.Location = new Point(390, 83);
-            cbFromDateTaken.Name = "cbFromDateTaken";
-            cbFromDateTaken.Size = new Size(211, 24);
-            cbFromDateTaken.TabIndex = 9;
-            cbFromDateTaken.Text = "From date taken if possible";
-            cbFromDateTaken.UseVisualStyleBackColor = true;
             // 
             // Form1
             // 
@@ -781,7 +766,6 @@
             tpLocation.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)ptbSatelite).EndInit();
             panel6.ResumeLayout(false);
-            panel6.PerformLayout();
             groupBox1.ResumeLayout(false);
             groupBox1.PerformLayout();
             ResumeLayout(false);
@@ -845,7 +829,6 @@
         private GroupBox groupBox1;
         private RadioButton rdGeotag;
         private RadioButton rbDisplayImage;
-        private CheckBox cbLoadImage;
         private ListBox listBox1;
         private CheckBox cbFromDateTaken;
     }

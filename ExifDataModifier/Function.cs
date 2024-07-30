@@ -6,6 +6,9 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Diagnostics;
 using GMap.NET;
+using GMap.NET.WindowsForms;
+using System.Text.Json;
+using System.Drawing.Drawing2D;
 
 namespace ExifDataModifier
 {
@@ -141,6 +144,177 @@ namespace ExifDataModifier
                 
                return point;
             }
+        }
+    
+        public static string RemoveSuffix(string name, decimal numberOfLetterToRemove)
+        {
+            int length = name.Length;
+            string modifiedName = name;
+            if (length > numberOfLetterToRemove)
+                modifiedName = name.Substring(0, (int)(length - numberOfLetterToRemove));
+            return modifiedName;
+        }
+
+        public static string RemoveFromLast(string name, char charater, int offset)
+        {
+            int lastCharaterIndex = name.LastIndexOf(charater);
+            if (lastCharaterIndex != -1)
+                return name.Substring(0, lastCharaterIndex + offset);
+            return name;
+        }
+
+        public static bool CheckSupported(string path, string[] supportedFormats)
+        {
+            return supportedFormats.Contains(Path.GetExtension(path).ToLower());
+        }
+
+        public static string ConvertPointLatLngToString(PointLatLng center)
+        {
+            return $"{center.Lat.ToString("F6")}, {center.Lng.ToString("F6")}";
+        }
+#region Working with Image
+        public static Image ResizeImageToSquare(Image image)
+        {
+            // Correct orientation
+            //image = CorrectImageOrientation(image);
+
+            int size = Math.Min(image.Width, image.Height); // Find the shortest dimension
+            int x = (image.Width - size) / 2;
+            int y = (image.Height - size) / 2;
+
+            // Create a new Bitmap with the desired size
+            Bitmap croppedImage = new Bitmap(size, size);
+            using (Graphics g = Graphics.FromImage(croppedImage))
+            {
+                // Draw the original image, cropped to a square
+                g.DrawImage(image, new Rectangle(0, 0, size, size), new Rectangle(x, y, size, size), GraphicsUnit.Pixel);
+            }
+
+            return croppedImage;
+        }
+
+        public static Bitmap ResizeBitmapImageToSquare(Bitmap originalImage, int size)
+        {
+            // Determine the dimensions of the square crop
+            int cropSize = Math.Min(originalImage.Width, originalImage.Height);
+
+            // Calculate the starting point to crop the image from the center
+            int cropX = (originalImage.Width - cropSize) / 2;
+            int cropY = (originalImage.Height - cropSize) / 2;
+
+            // Create a new bitmap with the square dimensions
+            Bitmap squareImage = new Bitmap(size, size);
+
+            // Draw the cropped portion of the original image onto the new bitmap
+            using (Graphics g = Graphics.FromImage(squareImage))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+                // Draw the cropped image onto the new square bitmap
+                g.DrawImage(originalImage, new Rectangle(0, 0, size, size), new Rectangle(cropX, cropY, cropSize, cropSize), GraphicsUnit.Pixel);
+            }
+
+            return squareImage;
+        }
+
+        public static Bitmap CorrectBitmapImageOrientation(Bitmap originalImage)
+        {
+            const int ExifOrientationTag = 0x0112; // The EXIF tag for orientation
+
+            // Check if the image has the orientation property
+            if (Array.IndexOf(originalImage.PropertyIdList, ExifOrientationTag) < 0)
+                return originalImage;
+
+            // Get the orientation property
+            var orientationProperty = originalImage.GetPropertyItem(ExifOrientationTag);
+            int orientationValue = BitConverter.ToUInt16(orientationProperty.Value, 0);
+
+            // Create a new bitmap to apply transformations
+            Bitmap correctedImage = (Bitmap)originalImage.Clone();
+
+            // Apply transformations based on the orientation value
+            switch (orientationValue)
+            {
+                case 1: // Normal (no transformation needed)
+                    break;
+                case 2: // Flip horizontal
+                    correctedImage.RotateFlip(RotateFlipType.RotateNoneFlipX);
+                    break;
+                case 3: // Rotate 180 degrees
+                    correctedImage.RotateFlip(RotateFlipType.Rotate180FlipNone);
+                    break;
+                case 4: // Flip vertical
+                    correctedImage.RotateFlip(RotateFlipType.RotateNoneFlipY);
+                    break;
+                case 5: // Rotate 90 degrees clockwise and flip horizontal
+                    correctedImage.RotateFlip(RotateFlipType.Rotate90FlipX);
+                    break;
+                case 6: // Rotate 90 degrees clockwise
+                    correctedImage.RotateFlip(RotateFlipType.Rotate90FlipNone);
+                    break;
+                case 7: // Rotate 90 degrees counterclockwise and flip horizontal
+                    correctedImage.RotateFlip(RotateFlipType.Rotate270FlipX);
+                    break;
+                case 8: // Rotate 90 degrees counterclockwise
+                    correctedImage.RotateFlip(RotateFlipType.Rotate270FlipNone);
+                    break;
+                default: // Unknown orientation value, return the original image
+                    return originalImage;
+            }
+
+            return correctedImage;
+        }
+
+#endregion
+    }
+
+    public class FormAction
+    {
+        public static void InitGmap(GMapControl gMapControl, Form1 form)
+        {
+            gMapControl.MapProvider = GMap.NET.MapProviders.GoogleMapProvider.Instance;
+            GMap.NET.GMaps.Instance.Mode = GMap.NET.AccessMode.ServerOnly;
+
+            string jsonFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "location.json");
+            if (File.Exists(jsonFilePath))
+            {
+                string json = File.ReadAllText(jsonFilePath);
+                form.mapConfig = JsonSerializer.Deserialize<MapConfig>(json);
+                gMapControl.Position = form.mapConfig.Center;
+                int mapType = form.mapConfig.MapType;
+
+                gMapControl.MapProvider = mapType switch
+                {
+                    0 => GMap.NET.MapProviders.GoogleMapProvider.Instance,
+                    1 => GMap.NET.MapProviders.GoogleHybridMapProvider.Instance,
+                    2 => GMap.NET.MapProviders.BingMapProvider.Instance,
+                    3 => GMap.NET.MapProviders.BingHybridMapProvider.Instance,
+                    _ => GMap.NET.MapProviders.GoogleMapProvider.Instance,
+                };
+            }
+            else
+                gMapControl.Position = form.defaultLocation; // Example: New York City
+                                                         // Enable dragging the map:
+            gMapControl.CanDragMap = true;
+            gMapControl.DragButton = MouseButtons.Left; // Use the left mouse button for dragging
+
+            // Enable zooming:
+            gMapControl.MinZoom = 1;  // Minimum zoom level
+            gMapControl.MaxZoom = 20; // Maximum zoom level
+            gMapControl.Zoom = 9;     // Initial zoom level
+            gMapControl.IgnoreMarkerOnMouseWheel = true; // Zoom without centering on markers
+
+            // Optional: Enable mouse wheel zoom without holding down Ctrl
+            gMapControl.MouseWheelZoomType = GMap.NET.MouseWheelZoomType.MousePositionAndCenter;
+
+            // Optional: Disable the red cross when the map is dragged beyond its boundaries
+            gMapControl.ShowTileGridLines = false;
+            var c = gMapControl;
+            c.MouseWheel += form.GMap_MouseWheel;
+            c.MouseWheelZoomEnabled = false;
+
         }
     }
 }
