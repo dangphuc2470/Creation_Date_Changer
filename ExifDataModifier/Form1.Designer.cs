@@ -29,6 +29,7 @@
         private void InitializeComponent()
         {
             components = new System.ComponentModel.Container();
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
             tabControl1 = new TabControl();
             tpDate = new TabPage();
             panel5 = new Panel();
@@ -87,6 +88,7 @@
             lvImageLocation = new ListView();
             imageList1 = new ImageList(components);
             listBox1 = new ListBox();
+            cbFromDateTaken = new CheckBox();
             tabControl1.SuspendLayout();
             tpDate.SuspendLayout();
             panel5.SuspendLayout();
@@ -460,6 +462,7 @@
             // 
             // tpFilename
             // 
+            tpFilename.Controls.Add(cbFromDateTaken);
             tpFilename.Controls.Add(label11);
             tpFilename.Controls.Add(rbFromCreation);
             tpFilename.Controls.Add(rbFromModified);
@@ -491,10 +494,10 @@
             rbFromCreation.AutoSize = true;
             rbFromCreation.Location = new Point(216, 83);
             rbFromCreation.Name = "rbFromCreation";
-            rbFromCreation.Size = new Size(156, 24);
+            rbFromCreation.Size = new Size(152, 24);
             rbFromCreation.TabIndex = 7;
             rbFromCreation.TabStop = true;
-            rbFromCreation.Text = "From creation date";
+            rbFromCreation.Text = "From created date";
             rbFromCreation.UseVisualStyleBackColor = true;
             rbFromCreation.Click += rbFromModified_Click;
             // 
@@ -736,6 +739,18 @@
             listBox1.Size = new Size(150, 104);
             listBox1.TabIndex = 13;
             // 
+            // cbFromDateTaken
+            // 
+            cbFromDateTaken.AutoSize = true;
+            cbFromDateTaken.Checked = true;
+            cbFromDateTaken.CheckState = CheckState.Checked;
+            cbFromDateTaken.Location = new Point(390, 83);
+            cbFromDateTaken.Name = "cbFromDateTaken";
+            cbFromDateTaken.Size = new Size(211, 24);
+            cbFromDateTaken.TabIndex = 9;
+            cbFromDateTaken.Text = "From date taken if possible";
+            cbFromDateTaken.UseVisualStyleBackColor = true;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
@@ -743,6 +758,7 @@
             ClientSize = new Size(708, 725);
             Controls.Add(listBox1);
             Controls.Add(tabControl1);
+            Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "Form1";
             Text = "Date Changer";
             ResizeEnd += Form1_ResizeEnd;
@@ -831,5 +847,6 @@
         private RadioButton rbDisplayImage;
         private CheckBox cbLoadImage;
         private ListBox listBox1;
+        private CheckBox cbFromDateTaken;
     }
 }

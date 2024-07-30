@@ -28,6 +28,7 @@
         /// </summary>
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(ProgressForm));
             progressBar1 = new ProgressBar();
             label1 = new Label();
             btCancel = new Button();
@@ -77,6 +78,7 @@
             Controls.Add(btCancel);
             Controls.Add(label1);
             Controls.Add(progressBar1);
+            Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "ProgressForm";
             Text = "Geotag";
             ResumeLayout(false);
