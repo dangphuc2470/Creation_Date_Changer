@@ -267,6 +267,40 @@ namespace ExifDataModifier
             return correctedImage;
         }
 
+        public static void ChangeTextForSecond(Object obj, string text, int seconds)
+        {
+            //Object can be button or label, textbox, richtextbox, etc
+            if (obj is Button)
+            {
+                Button button = (Button)obj;
+                string originalText = button.Text;
+                button.Text = text;
+                Task.Delay(seconds).ContinueWith(t => button.Text = originalText);
+            }
+            else if (obj is Label)
+            {
+                Label label = (Label)obj;
+                string originalText = label.Text;
+                label.Text = text;
+                Task.Delay(seconds).ContinueWith(t => label.Text = originalText);
+            }
+            else if (obj is TextBox)
+            {
+                TextBox textBox = (TextBox)obj;
+                string originalText = textBox.Text;
+                textBox.Text = text;
+                Task.Delay(seconds).ContinueWith(t => textBox.Text = originalText);
+            }
+            else if (obj is RichTextBox)
+            {
+                RichTextBox richTextBox = (RichTextBox)obj;
+                string originalText = richTextBox.Text;
+                richTextBox.Text = text;
+                Task.Delay(seconds).ContinueWith(t => richTextBox.Text = originalText);
+            }
+        }
+        
+        
 #endregion
     }
 

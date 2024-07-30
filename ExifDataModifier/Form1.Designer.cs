@@ -76,9 +76,15 @@
             lbNameFromDate = new ListBox();
             lbNameOriginal = new ListBox();
             tpLocation = new TabPage();
+            btLocationNext = new Button();
+            rtbLocationIndex = new RichTextBox();
+            tbLocationName = new RichTextBox();
+            btLocationSave = new Button();
+            btLocationPrev = new Button();
             ptbSatelite = new PictureBox();
             tbLatLgn = new TextBox();
             btLocationApply = new Button();
+            label12 = new Label();
             gMapControl1 = new GMap.NET.WindowsForms.GMapControl();
             panel6 = new Panel();
             groupBox1 = new GroupBox();
@@ -88,6 +94,7 @@
             lvImageLocation = new ListView();
             imageList1 = new ImageList(components);
             listBox1 = new ListBox();
+            btSavedLocationRemove = new Button();
             tabControl1.SuspendLayout();
             tpDate.SuspendLayout();
             panel5.SuspendLayout();
@@ -581,9 +588,16 @@
             // 
             // tpLocation
             // 
+            tpLocation.Controls.Add(btLocationSave);
+            tpLocation.Controls.Add(btSavedLocationRemove);
+            tpLocation.Controls.Add(btLocationNext);
+            tpLocation.Controls.Add(rtbLocationIndex);
+            tpLocation.Controls.Add(tbLocationName);
+            tpLocation.Controls.Add(btLocationPrev);
             tpLocation.Controls.Add(ptbSatelite);
             tpLocation.Controls.Add(tbLatLgn);
             tpLocation.Controls.Add(btLocationApply);
+            tpLocation.Controls.Add(label12);
             tpLocation.Controls.Add(gMapControl1);
             tpLocation.Controls.Add(panel6);
             tpLocation.Location = new Point(4, 29);
@@ -593,6 +607,59 @@
             tpLocation.TabIndex = 2;
             tpLocation.Text = "Location";
             tpLocation.UseVisualStyleBackColor = true;
+            // 
+            // btLocationNext
+            // 
+            btLocationNext.Location = new Point(432, 7);
+            btLocationNext.Name = "btLocationNext";
+            btLocationNext.Size = new Size(36, 31);
+            btLocationNext.TabIndex = 7;
+            btLocationNext.Text = ">";
+            btLocationNext.UseVisualStyleBackColor = true;
+            btLocationNext.Click += btLocationNext_Click;
+            // 
+            // rtbLocationIndex
+            // 
+            rtbLocationIndex.BackColor = Color.White;
+            rtbLocationIndex.BorderStyle = BorderStyle.None;
+            rtbLocationIndex.Location = new Point(404, 11);
+            rtbLocationIndex.Name = "rtbLocationIndex";
+            rtbLocationIndex.ReadOnly = true;
+            rtbLocationIndex.Size = new Size(49, 19);
+            rtbLocationIndex.TabIndex = 11;
+            rtbLocationIndex.Tag = "0";
+            rtbLocationIndex.Text = "0/0";
+            // 
+            // tbLocationName
+            // 
+            tbLocationName.BorderStyle = BorderStyle.None;
+            tbLocationName.Location = new Point(469, 11);
+            tbLocationName.Name = "tbLocationName";
+            tbLocationName.Size = new Size(78, 27);
+            tbLocationName.TabIndex = 10;
+            tbLocationName.Tag = "";
+            tbLocationName.Text = "";
+            // 
+            // btLocationSave
+            // 
+            btLocationSave.BackColor = Color.White;
+            btLocationSave.Location = new Point(543, 7);
+            btLocationSave.Name = "btLocationSave";
+            btLocationSave.Size = new Size(61, 31);
+            btLocationSave.TabIndex = 9;
+            btLocationSave.Text = "Save";
+            btLocationSave.UseVisualStyleBackColor = false;
+            btLocationSave.Click += btLocationSave_Click;
+            // 
+            // btLocationPrev
+            // 
+            btLocationPrev.Location = new Point(362, 7);
+            btLocationPrev.Name = "btLocationPrev";
+            btLocationPrev.Size = new Size(36, 31);
+            btLocationPrev.TabIndex = 6;
+            btLocationPrev.Text = "<";
+            btLocationPrev.UseVisualStyleBackColor = true;
+            btLocationPrev.Click += btLocationPrev_Click;
             // 
             // ptbSatelite
             // 
@@ -607,10 +674,10 @@
             // 
             // tbLatLgn
             // 
-            tbLatLgn.BorderStyle = BorderStyle.FixedSingle;
+            tbLatLgn.BorderStyle = BorderStyle.None;
             tbLatLgn.Location = new Point(358, 590);
             tbLatLgn.Name = "tbLatLgn";
-            tbLatLgn.Size = new Size(184, 27);
+            tbLatLgn.Size = new Size(184, 20);
             tbLatLgn.TabIndex = 4;
             tbLatLgn.TextChanged += tbLatLgn_TextChanged;
             // 
@@ -624,6 +691,17 @@
             btLocationApply.Text = "Apply";
             btLocationApply.UseVisualStyleBackColor = true;
             btLocationApply.Click += btLocationApply_Click;
+            // 
+            // label12
+            // 
+            label12.AutoSize = true;
+            label12.BackColor = Color.White;
+            label12.Font = new Font("Segoe UI", 13.8F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            label12.Location = new Point(382, 7);
+            label12.Name = "label12";
+            label12.Size = new Size(162, 31);
+            label12.TabIndex = 13;
+            label12.Text = ".                       .";
             // 
             // gMapControl1
             // 
@@ -736,6 +814,16 @@
             listBox1.Size = new Size(150, 104);
             listBox1.TabIndex = 13;
             // 
+            // btSavedLocationRemove
+            // 
+            btSavedLocationRemove.Location = new Point(602, 7);
+            btSavedLocationRemove.Name = "btSavedLocationRemove";
+            btSavedLocationRemove.Size = new Size(74, 31);
+            btSavedLocationRemove.TabIndex = 14;
+            btSavedLocationRemove.Text = "Remove";
+            btSavedLocationRemove.UseVisualStyleBackColor = true;
+            btSavedLocationRemove.Click += btSavedLocationRemove_Click;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
@@ -831,5 +919,12 @@
         private RadioButton rbDisplayImage;
         private ListBox listBox1;
         private CheckBox cbFromDateTaken;
+        private Button btLocationSave;
+        private Button btLocationNext;
+        private Button btLocationPrev;
+        private RichTextBox tbLocationName;
+        private RichTextBox rtbLocationIndex;
+        private Label label12;
+        private Button btSavedLocationRemove;
     }
 }

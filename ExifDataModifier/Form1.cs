@@ -20,6 +20,7 @@ using System.Collections.Concurrent;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.TrayNotify;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 using System.Text;
+using Newtonsoft.Json;
 namespace ExifDataModifier
 {
     public partial class Form1 : Form
@@ -30,6 +31,7 @@ namespace ExifDataModifier
         private List<DateTime> filePathsDate = new List<DateTime>();
         private List<string> newFileNames = new List<string>();
         private List<MyLocation> imageOnMapList = new List<MyLocation>();
+        private List<MyLocation> savedLocations = new List<MyLocation>();
         private Dictionary<string, List<string>> fileGroups = new Dictionary<string, List<string>>();
         private bool isShowNotificationFirstTime = false;
         private volatile bool stopRequested = false;
@@ -101,6 +103,15 @@ namespace ExifDataModifier
             InitializeComponent();
             AllowDrop = true;
             FormAction.InitGmap(gMapControl1, this);
+
+            string jsonFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "saved_locations.json");
+            if (File.Exists(jsonFilePath))
+            {
+                string json = File.ReadAllText(jsonFilePath);
+                savedLocations = System.Text.Json.JsonSerializer.Deserialize<List<MyLocation>>(json);
+                UpdateIndex(0);
+            }
+
             InitializeBackgroundWorker();
         }
 
@@ -517,7 +528,7 @@ namespace ExifDataModifier
             }
         }
 
-         private void cbFromDateTaken_CheckedChanged(object sender, EventArgs e)
+        private void cbFromDateTaken_CheckedChanged(object sender, EventArgs e)
         {
             if (cbFromDateTaken.Checked && cbFromDateTaken.Tag.ToString() == "Uncheck")
             {
@@ -792,7 +803,7 @@ namespace ExifDataModifier
             };
 
             mapConfig.MapType = mapType;
-            string json = JsonSerializer.Serialize(mapConfig);
+            string json = System.Text.Json.JsonSerializer.Serialize(mapConfig);
             string jsonFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "location.json");
             File.WriteAllText(jsonFilePath, json);
 
@@ -832,7 +843,7 @@ namespace ExifDataModifier
             mapConfig.Center = center;
             mapConfig.MapType = mapType;
             // Save location to json file for later session
-            string json = JsonSerializer.Serialize(mapConfig);
+            string json = System.Text.Json.JsonSerializer.Serialize(mapConfig);
             string jsonFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "location.json");
             File.WriteAllText(jsonFilePath, json);
 
@@ -942,7 +953,7 @@ namespace ExifDataModifier
             // Add markers and refresh map
             foreach (MyLocation location in imageOnMapList)
             {
-                CreateMarker(gMapControl1, location.getLatLng().Lat, location.getLatLng().Lng, location.getLatLngString(), location.getName());
+                CreateMarker(gMapControl1, location.LatLng.Lat, location.LatLng.Lng, location.getLatLngString(), location.Name);
             }
             SimulateMapReload(gMapControl1);
 
@@ -967,7 +978,7 @@ namespace ExifDataModifier
 
         private void AddSingleMarker(MyLocation location)
         {
-            CreateMarker(gMapControl1, location.getLatLng().Lat, location.getLatLng().Lng, location.getLatLngString(), location.getName());
+            CreateMarker(gMapControl1, location.LatLng.Lat, location.LatLng.Lng, location.getLatLngString(), location.Name);
             SimulateMapReload(gMapControl1);
         }
 
@@ -1005,6 +1016,93 @@ namespace ExifDataModifier
         #endregion
         #endregion
 
-       
+
+        private void btLocationSave_Click(object sender, EventArgs e)
+        {
+
+            if (tbLocationName.Text == "")
+            {
+                MessageBox.Show("Please enter the location name!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            MyLocation myLocation = new MyLocation(gMapControl1.Position, tbLocationName.Text);
+            // If the location latlng already exist, find the index and replace it
+            int index = savedLocations.FindIndex(x => x.getLatLngString() == myLocation.getLatLngString());
+            if (index == -1)
+                savedLocations.Add(myLocation);
+            else
+                savedLocations[index] = myLocation;
+
+            int indexTag = int.Parse(rtbLocationIndex.Tag.ToString());
+            rtbLocationIndex.Text = (indexTag + 1) + "/" + savedLocations.Count;
+            WriteSavedLocationToFile();
+            Function.ChangeTextForSecond(btLocationSave, "Saved!", 3);
+        }
+
+        private void btLocationNext_Click(object sender, EventArgs e)
+        {
+            if (savedLocations.Count == 0)
+                return;
+            int index = int.Parse(rtbLocationIndex.Tag.ToString());
+            index++;
+            if (index >= savedLocations.Count)
+                index = 0;
+            UpdateIndex(index);
+            tbLocationName.Text = savedLocations[index].Name;
+            gMapControl1.Position = savedLocations[index].LatLng;
+        }
+
+        private void btLocationPrev_Click(object sender, EventArgs e)
+        {
+            if (savedLocations.Count == 0)
+                return;
+            int index = int.Parse(rtbLocationIndex.Tag.ToString());
+            index--;
+            if (index < 0)
+                index = savedLocations.Count - 1;
+            UpdateIndex(index);
+            tbLocationName.Text = savedLocations[index].Name;
+            gMapControl1.Position = savedLocations[index].LatLng;
+        }
+
+        private void btSavedLocationRemove_Click(object sender, EventArgs e)
+        {
+            int index = int.Parse(rtbLocationIndex.Tag.ToString());
+            savedLocations.RemoveAt(index);
+            WriteSavedLocationToFile();
+            UpdateIndex(0);
+            Function.ChangeTextForSecond(btSavedLocationRemove, "Removed!", 3);
+        }
+
+        private void UpdateIndex(int index)
+        {
+            rtbLocationIndex.Tag = index;
+            if (savedLocations.Count == 0)
+            {
+                rtbLocationIndex.Text = "0/0";
+                tbLocationName.Text = "";
+                return;
+            }
+            if (index >= savedLocations.Count)
+                index = savedLocations.Count - 1;
+            rtbLocationIndex.Text = (index + 1) + "/" + savedLocations.Count;
+        }
+
+        public void WriteSavedLocationToFile()
+        {
+            string json = JsonConvert.SerializeObject(savedLocations, Formatting.Indented);
+            File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "saved_locations.json"), json);
+        }
+
+        public List<MyLocation> ReadSavedLocationFromFile()
+        {
+            string jsonFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "saved_locations.json");
+            if (File.Exists(jsonFilePath))
+            {
+                string json = File.ReadAllText(jsonFilePath);
+                return JsonConvert.DeserializeObject<List<MyLocation>>(json);
+            }
+            return new List<MyLocation>();
+        }
     }
 }

@@ -9,36 +9,18 @@ namespace ExifDataModifier
 {
     public class MyLocation
     {
-        PointLatLng latLng;
-        String name;
-        public MyLocation(PointLatLng latLng, String name)
-        {
-            this.latLng = latLng;
-            this.name = name;
-        }
+        public PointLatLng LatLng { get; set; }
+        public string Name { get; set; }
 
-        public PointLatLng getLatLng()
+        public MyLocation(PointLatLng latLng, string name)
         {
-            return latLng;
-        }
-
-        public String getName()
-        {
-            return name;
-        }
-        public void setName(String name)
-        {
-            this.name = name;
-        }
-
-        public void setLatLng(PointLatLng latLng)
-        {
-            this.latLng = latLng;
+            LatLng = latLng;
+            Name = name;
         }
 
         public string getLatLngString()
         {
-            return latLng.Lat + ", " + latLng.Lng;
+            return LatLng.Lat + ", " + LatLng.Lng;
         }
     }
 }
