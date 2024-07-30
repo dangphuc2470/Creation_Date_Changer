@@ -19,6 +19,7 @@ using System.Drawing.Drawing2D;
 using System.Collections.Concurrent;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.TrayNotify;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement;
+using System.Text;
 namespace ExifDataModifier
 {
     public partial class Form1 : Form
@@ -594,43 +595,66 @@ namespace ExifDataModifier
 
             nameFormat = nameFormat.Substring(startIndex, length);
 
+            List<string> newFileNameToInsertToListview = new List<string>();
             for (int i = 0; i < filePaths.Count; i++)
             {
-                try
+                bool isHaveTakenDate = false;
+                FileInfo fileInfo = new FileInfo(filePaths[i]);
+                DateTime creationTime = fileInfo.CreationTime; // Ngày tạo file
+                DateTime lastModifiedTime = fileInfo.LastWriteTime; // Ngày chỉnh sửa cuối cùng
+                string newName;
+
+                if (rbFromModified.Checked)
+                    newName = prefix + lastModifiedTime.ToString(nameFormat) + suffix;
+                else
+                    newName = prefix + creationTime.ToString(nameFormat) + suffix;
+
+                if (cbFromDateTaken.Checked && CheckSupported(filePaths[i], supportedGeoTagFormats))
                 {
-                    FileInfo fileInfo = new FileInfo(filePaths[i]);
-                    DateTime creationTime = fileInfo.CreationTime; // Ngày tạo file
-                    DateTime lastModifiedTime = fileInfo.LastWriteTime; // Ngày chỉnh sửa cuối cùng
-
-                    string newName;
-                    if (rbFromModified.Checked)
-                        newName = prefix + lastModifiedTime.ToString(nameFormat) + suffix;
-                    else
-                        newName = prefix + creationTime.ToString(nameFormat) + suffix;
-
-                    if (lengthSequence > 0)
+                    using (Image image = Image.FromFile(filePaths[i]))
                     {
-                        // Change position after remove the "<>"
-                        int newStartSequenceIndex = startSequenceIndex - 2;
-                        int newEndSequenceIndex = endSequenceIndex - 2;
-                        string newPrefix = newName.Substring(0, newStartSequenceIndex);
-                        string newSuffix = newName.Substring(newEndSequenceIndex + 1, newName.Length - newEndSequenceIndex - 1);
-                        newPrefix += i.ToString($"D{lengthSequence}");
-                        newName = newPrefix + newSuffix;
+
+                        PropertyItem propItem = null;
+                        try
+                        {
+                            propItem = image.GetPropertyItem(306); // Property tag for Date/Time Original
+                        }
+                        catch
+                        {
+                            Console.WriteLine("Can't find properties");
+                        }
+                        if (propItem != null)
+                        {
+                            string dateTakenString = Encoding.ASCII.GetString(propItem.Value);
+                            string formattedString = dateTakenString.Replace(":", "").Replace(" ", "_").Replace("\0", "");
+                            newName = prefix + formattedString + suffix;
+                            isHaveTakenDate = true;
+                        }
                     }
-                    newFileNames.Add(newName);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    newFileNames.Add("Error");
+
                 }
 
+
+                if (lengthSequence > 0 && newName != "Error")
+                {
+                    // Change position after remove the "<>"
+                    int newStartSequenceIndex = startSequenceIndex - 2;
+                    int newEndSequenceIndex = endSequenceIndex - 2;
+                    string newPrefix = newName.Substring(0, newStartSequenceIndex);
+                    string newSuffix = newName.Substring(newEndSequenceIndex + 1, newName.Length - newEndSequenceIndex - 1);
+                    newPrefix += i.ToString($"D{lengthSequence}");
+                    newName = newPrefix + newSuffix;
+                }
+                newFileNames.Add(newName);
+                if (isHaveTakenDate)
+                    newFileNameToInsertToListview.Add("(T) " + newName);
+                else
+                    newFileNameToInsertToListview.Add(newName);
             }
 
-            for (int i = 0; i < newFileNames.Count; i++)
+            for (int i = 0; i < newFileNameToInsertToListview.Count; i++)
             {
-                lbNameFromDate.Items.Add(newFileNames[i] + Path.GetExtension(filePaths[i]));
+                lbNameFromDate.Items.Add(newFileNameToInsertToListview[i] + Path.GetExtension(filePaths[i]));
             }
 
 
@@ -1113,8 +1137,8 @@ namespace ExifDataModifier
         private void rbDisplayImage_CheckedChanged(object sender, EventArgs e)
         {
             if (rbDisplayImage.Checked)
-            { 
-                AddMarker(filePathsToDisplayImage.Count>0);
+            {
+                AddMarker(filePathsToDisplayImage.Count > 0);
                 btLocationApply.Text = "Clear marker";
             }
             else
