@@ -92,6 +92,7 @@ namespace ExifDataModifier
         };
         private BackgroundWorker backgroundWorkerGeotag;
         private BackgroundWorker backgroundWorkerLoadImage;
+        private BackgroundWorker backgroundWorkerLoadImageDate;
 
 
         private ProgressForm progressFormGeoTag;
@@ -532,7 +533,7 @@ namespace ExifDataModifier
         {
             if (cbFromDateTaken.Checked && cbFromDateTaken.Tag.ToString() == "Uncheck")
             {
-                MessageBox.Show("This feature does not support RAW image format, press preview again to see the result, supported file will have (T) before the name", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("This feature does not support RAW image format, click preview again to see the result, supported file will have (T) after the name to indicate, the final name will not include it.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 cbFromDateTaken.Tag = "Check";
             }
         }
@@ -549,6 +550,12 @@ namespace ExifDataModifier
 
         private void btFileApply_Click(object sender, EventArgs e)
         {
+            if (cbFromDateTaken.Checked)
+            {
+                StartBackgroundWorkLoadImageDate();
+            }
+            else
+           {
             newFileNames.Clear();
             lbNameFromDate.Items.Clear();
             string nameFormat = tbFileNameFormat.Text;
@@ -568,7 +575,6 @@ namespace ExifDataModifier
             List<string> newFileNameToInsertToListview = new List<string>();
             for (int i = 0; i < filePaths.Count; i++)
             {
-                bool isHaveTakenDate = false;
                 FileInfo fileInfo = new FileInfo(filePaths[i]);
                 DateTime creationTime = fileInfo.CreationTime; // Ngày tạo file
                 DateTime lastModifiedTime = fileInfo.LastWriteTime; // Ngày chỉnh sửa cuối cùng
@@ -578,32 +584,6 @@ namespace ExifDataModifier
                     newName = prefix + lastModifiedTime.ToString(nameFormat) + suffix;
                 else
                     newName = prefix + creationTime.ToString(nameFormat) + suffix;
-
-                if (cbFromDateTaken.Checked && Function.CheckSupported(filePaths[i], supportedGeoTagFormats))
-                {
-                    using (Image image = Image.FromFile(filePaths[i]))
-                    {
-
-                        PropertyItem propItem = null;
-                        try
-                        {
-                            propItem = image.GetPropertyItem(306); // Property tag for Date/Time Original
-                        }
-                        catch
-                        {
-                            Console.WriteLine("Can't find properties");
-                        }
-                        if (propItem != null)
-                        {
-                            string dateTakenString = Encoding.ASCII.GetString(propItem.Value);
-                            string formattedString = dateTakenString.Replace(":", "").Replace(" ", "_").Replace("\0", "");
-                            newName = prefix + formattedString + suffix;
-                            isHaveTakenDate = true;
-                        }
-                    }
-
-                }
-
 
                 if (lengthSequence > 0 && newName != "Error")
                 {
@@ -616,18 +596,22 @@ namespace ExifDataModifier
                     newName = newPrefix + newSuffix;
                 }
                 newFileNames.Add(newName);
-                if (isHaveTakenDate)
-                    newFileNameToInsertToListview.Add("(T) " + newName);
-                else
-                    newFileNameToInsertToListview.Add(newName);
+                newFileNameToInsertToListview.Add(newName);
             }
 
             for (int i = 0; i < newFileNameToInsertToListview.Count; i++)
             {
                 lbNameFromDate.Items.Add(newFileNameToInsertToListview[i] + Path.GetExtension(filePaths[i]));
-            }
+            }}
 
 
+        }
+
+        private void StartBackgroundWorkLoadImageDate()
+        {
+            progressFormLoadImage = new ProgressForm();
+            progressFormLoadImage.Show();
+            backgroundWorkerLoadImageDate.RunWorkerAsync();
         }
 
 
@@ -812,19 +796,145 @@ namespace ExifDataModifier
 
         private void InitializeBackgroundWorker()
         {
-            backgroundWorkerGeotag = new BackgroundWorker();
-            backgroundWorkerGeotag.WorkerReportsProgress = true;
+            backgroundWorkerGeotag = new BackgroundWorker
+            {
+                WorkerReportsProgress = true
+            };
             backgroundWorkerGeotag.DoWork += BackgroundWorkerGeotag_DoWork;
             backgroundWorkerGeotag.ProgressChanged += BackgroundWorkerGeotag_ProgressChanged;
             backgroundWorkerGeotag.RunWorkerCompleted += BackgroundWorkerGeotag_RunWorkerCompleted;
 
-            backgroundWorkerLoadImage = new BackgroundWorker();
-            backgroundWorkerLoadImage.WorkerReportsProgress = true;
+
+            backgroundWorkerLoadImage = new BackgroundWorker
+            {
+                WorkerReportsProgress = true
+            };
             backgroundWorkerLoadImage.DoWork += backgroundWorkerLoadImage_DoWork;
             backgroundWorkerLoadImage.RunWorkerCompleted
            += backgroundWorkerLoadImage_RunWorkerCompleted;
             backgroundWorkerLoadImage.ProgressChanged += backgroundWorkerLoadImage_ProgressChanged;
+
+            backgroundWorkerLoadImageDate = new BackgroundWorker
+            {
+                WorkerReportsProgress = true
+            };
+            backgroundWorkerLoadImageDate.DoWork += BackgroundWorkerLoadImageDate_DoWork;
+            backgroundWorkerLoadImageDate.RunWorkerCompleted
+              += BackgroundWorkerLoadImageDate_RunWorkerCompleted;
+            backgroundWorkerLoadImageDate.ProgressChanged += BackgroundWorkerLoadImageDate_ProgressChanged;
+
         }
+        #region LoadImageDate
+        private void BackgroundWorkerLoadImageDate_DoWork(object sender, DoWorkEventArgs e)
+        {
+            newFileNames.Clear();
+            lbNameFromDate.Items.Clear();
+            string nameFormat = tbFileNameFormat.Text;
+            int startIndex = nameFormat.IndexOf("<") + 1;
+            int endIndex = nameFormat.IndexOf(">");
+            int length = endIndex - startIndex;
+
+            string prefix = nameFormat.Substring(0, startIndex - 1);
+            string suffix = nameFormat.Substring(endIndex + 1, nameFormat.Length - endIndex - 1);
+
+            int startSequenceIndex = nameFormat.IndexOf("[");
+            int endSequenceIndex = nameFormat.IndexOf("]");
+            int lengthSequence = endSequenceIndex - startSequenceIndex - 1;
+
+            nameFormat = nameFormat.Substring(startIndex, length);
+
+            List<string> newFileNameToInsertToListview = new List<string>();
+            for (int i = 0; i < filePaths.Count; i++)
+            {
+                bool isHaveTakenDate = false;
+                FileInfo fileInfo = new FileInfo(filePaths[i]);
+                DateTime creationTime = fileInfo.CreationTime; // Ngày tạo file
+                DateTime lastModifiedTime = fileInfo.LastWriteTime; // Ngày chỉnh sửa cuối cùng
+                string newName;
+
+                if (rbFromModified.Checked)
+                    newName = prefix + lastModifiedTime.ToString(nameFormat) + suffix;
+                else
+                    newName = prefix + creationTime.ToString(nameFormat) + suffix;
+
+                if (cbFromDateTaken.Checked && Function.CheckSupported(filePaths[i], supportedGeoTagFormats))
+                {
+                    using (Image image = Image.FromFile(filePaths[i]))
+                    {
+
+                        PropertyItem propItem = null;
+                        try
+                        {
+                            propItem = image.GetPropertyItem(306); // Property tag for Date/Time Original
+                        }
+                        catch
+                        {
+                            Console.WriteLine("Can't find properties");
+                        }
+                        if (propItem != null)
+                        {
+                            string dateTakenString = Encoding.ASCII.GetString(propItem.Value);
+                            string formattedString = dateTakenString.Replace(":", "").Replace(" ", "_").Replace("\0", "");
+                            newName = prefix + formattedString + suffix;
+                            isHaveTakenDate = true;
+                        }
+                    }
+
+                }
+
+
+                if (lengthSequence > 0 && newName != "Error")
+                {
+                    // Change position after remove the "<>"
+                    int newStartSequenceIndex = startSequenceIndex - 2;
+                    int newEndSequenceIndex = endSequenceIndex - 2;
+                    string newPrefix = newName.Substring(0, newStartSequenceIndex);
+                    string newSuffix = newName.Substring(newEndSequenceIndex + 1, newName.Length - newEndSequenceIndex - 1);
+                    newPrefix += i.ToString($"D{lengthSequence}");
+                    newName = newPrefix + newSuffix;
+                }
+                newFileNames.Add(newName);
+                if (isHaveTakenDate)
+                    newFileNameToInsertToListview.Add(newName + " (T)");
+                else
+                    newFileNameToInsertToListview.Add(newName);
+
+                int progress = (i + 1) * 100 / filePaths.Count;
+                backgroundWorkerLoadImageDate.ReportProgress(progress, $"Processing {i + 1} of {filePaths.Count} files...");
+            }
+
+            e.Result = newFileNameToInsertToListview;
+        }
+
+        private void BackgroundWorkerLoadImageDate_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        {
+            if (progressFormLoadImage != null)
+                progressFormLoadImage.Close();
+
+            if (e.Error != null)
+            {
+                // Handle anyerrors during background processing
+                MessageBox.Show("Error occurred during processing: " + e.Error.Message);
+                return;
+            }
+
+            List<string> newFileNameToInsertToListview = (List<string>)e.Result;
+
+            for (int i = 0; i < newFileNameToInsertToListview.Count; i++)
+            {
+                lbNameFromDate.Items.Add(newFileNameToInsertToListview[i] + Path.GetExtension(filePaths[i]));
+            }
+
+        }
+
+        private void BackgroundWorkerLoadImageDate_ProgressChanged(object sender, ProgressChangedEventArgs e)
+        {
+            progressFormLoadImage.UpdateProgress(e.ProgressPercentage, e.UserState.ToString());
+        }
+
+
+
+        #endregion
 
 
         #region Geotagging
@@ -1009,13 +1119,9 @@ namespace ExifDataModifier
                 btLocationApply.Text = "Apply";
                 buttonClear_Click(null, null);
             }
-
         }
 
-
-        #endregion
-        #endregion
-
+        #region Save Location
 
         private void btLocationSave_Click(object sender, EventArgs e)
         {
@@ -1104,5 +1210,11 @@ namespace ExifDataModifier
             }
             return new List<MyLocation>();
         }
+        #endregion
+
+        #endregion
+        #endregion
+
+
     }
 }
