@@ -481,6 +481,7 @@ namespace ExifDataModifier
             // Check the cbShowFullPath two time to make sure it update from the size of ListBox Name (Because it does not placed in tableLayoutPanel2 so it's size does not change automatically)
             cbShowFullPath.Checked = !cbShowFullPath.Checked;
             cbShowFullPath.Checked = !cbShowFullPath.Checked;
+            lvDateFiles.Size = new Size(lvDateName.Width, lvDateName.Height);
         }
 
 
