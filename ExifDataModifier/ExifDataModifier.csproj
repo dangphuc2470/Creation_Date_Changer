@@ -8,7 +8,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Platforms>AnyCPU;x64</Platforms>
+    <ApplicationIcon>ExifDataModifier.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="ExifDataModifier.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="ExifLib.PCL" Version="1.0.1" />

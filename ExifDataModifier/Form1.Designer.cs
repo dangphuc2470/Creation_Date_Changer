@@ -332,6 +332,7 @@
             lvDateName.TabIndex = 4;
             lvDateName.UseCompatibleStateImageBehavior = false;
             lvDateName.View = View.Details;
+            lvDateName.SizeChanged += Form1_ResizeEnd;
             // 
             // listBoxExtractedDate
             // 
@@ -842,7 +843,7 @@
             Controls.Add(tabControl1);
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "Form1";
-            Text = "Date Changer";
+            Text = "Exif Data Modifier";
             ResizeEnd += Form1_ResizeEnd;
             DragDrop += Form1_DragDrop;
             DragEnter += Form1_DragEnter;
