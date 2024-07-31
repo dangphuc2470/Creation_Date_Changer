@@ -25,6 +25,7 @@ namespace ExifDataModifier
         public PointLatLng defaultLocation = new PointLatLng(40.73061, -73.935242); // New York City
         public MapConfig mapConfig = new MapConfig();
         bool isScanFolder = false;
+        private MessageBoxDefaultButton messageBoxDefaultButtonForFile = MessageBoxDefaultButton.Button1;
 
         string[] supportedFormats = {
     ".jpg", ".jpeg", ".png", ".gif",  // Common image formats
@@ -941,14 +942,17 @@ namespace ExifDataModifier
 
             if (notSupportedIndex.Count > 0)
             {
-                DialogResult dialogResult = MessageBox.Show($"There are {notSupportedIndex.Count} items that do not have a taken date. Do you want to ignore them? If no, that item will be renamed based on the choosen date on the left.", "Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                DialogResult dialogResult = MessageBox.Show($"There are {notSupportedIndex.Count} items that do not have a taken date. Do you want to ignore them? If no, that item will be renamed based on the choosen date on the left.", "Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, messageBoxDefaultButtonForFile);
                 if (dialogResult == DialogResult.Yes)
                 {
                     for (int i = 0; i < notSupportedIndex.Count; i++)
                     {
                         newFileNameToInsertToListview[notSupportedIndex[i]] = "(Ignored) " + newFileNameToInsertToListview[notSupportedIndex[i]];
                     }
+                    messageBoxDefaultButtonForFile = MessageBoxDefaultButton.Button1;
                 }
+                else
+                    messageBoxDefaultButtonForFile = MessageBoxDefaultButton.Button2;
             }
 
             for (int i = 0; i < newFileNameToInsertToListview.Count; i++)
