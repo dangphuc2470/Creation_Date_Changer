@@ -272,33 +272,60 @@ namespace ExifDataModifier
             //Object can be button or label, textbox, richtextbox, etc
             if (obj is Button)
             {
-                Button button = (Button)obj;
-                string originalText = button.Text;
-                button.Text = text;
-                Task.Delay(seconds).ContinueWith(t => button.Text = originalText);
+                string originalText = ((Button)obj).Text;
+                ((Button)obj).Text = text;
+                Task.Delay(seconds).ContinueWith(t => ((Button)obj).Invoke(new Action(() => ((Button)obj).Text = originalText)));
             }
+            // else if (obj is Label)
+            // {
+            //     Label label = (Label)obj;
+            //     string originalText = label.Text;
+            //     label.Text = text;
+            //     Task.Delay(seconds).ContinueWith(t => label.Text = originalText);
+            // }
+            // else if (obj is TextBox)
+            // {
+            //     TextBox textBox = (TextBox)obj;
+            //     string originalText = textBox.Text;
+            //     textBox.Text = text;
+            //     Task.Delay(seconds).ContinueWith(t => textBox.Text = originalText);
+            // }
+            // else if (obj is RichTextBox)
+            // {
+            //     RichTextBox richTextBox = (RichTextBox)obj;
+            //     string originalText = richTextBox.Text;
+            //     richTextBox.Text = text;
+            //     Task.Delay(seconds).ContinueWith(t => richTextBox.Text = originalText);
+            // }
             else if (obj is Label)
             {
-                Label label = (Label)obj;
-                string originalText = label.Text;
-                label.Text = text;
-                Task.Delay(seconds).ContinueWith(t => label.Text = originalText);
+                string originalText = ((Label)obj).Text;
+                ((Label)obj).Text = text;
+                Task.Delay(seconds).ContinueWith(t => ((Label)obj).Invoke(new Action(() => ((Label)obj).Text = originalText)));
             }
             else if (obj is TextBox)
             {
-                TextBox textBox = (TextBox)obj;
-                string originalText = textBox.Text;
-                textBox.Text = text;
-                Task.Delay(seconds).ContinueWith(t => textBox.Text = originalText);
+                string originalText = ((TextBox)obj).Text;
+                ((TextBox)obj).Text = text;
+                Task.Delay(seconds).ContinueWith(t => ((TextBox)obj).Invoke(new Action(() => ((TextBox)obj).Text = originalText)));
             }
             else if (obj is RichTextBox)
             {
-                RichTextBox richTextBox = (RichTextBox)obj;
-                string originalText = richTextBox.Text;
-                richTextBox.Text = text;
-                Task.Delay(seconds).ContinueWith(t => richTextBox.Text = originalText);
+                string originalText = ((RichTextBox)obj).Text;
+                ((RichTextBox)obj).Text = text;
+                Task.Delay(seconds).ContinueWith(t => ((RichTextBox)obj).Invoke(new Action(() => ((RichTextBox)obj).Text = originalText)));
             }
         }
+
+        public static string[] GetFilesOnly(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            throw new DirectoryNotFoundException($"The directory '{path}' does not exist.");
+        }
+
+        return Directory.GetFiles(path);
+    }
         
         
 #endregion
