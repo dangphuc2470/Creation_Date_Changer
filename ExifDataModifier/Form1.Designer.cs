@@ -33,7 +33,7 @@
             tabControl1 = new TabControl();
             tpDate = new TabPage();
             panel5 = new Panel();
-            listBoxFiles = new ListBox();
+            lvDateFiles = new IndexListView();
             panel1 = new Panel();
             buttonClear = new Button();
             buttonSetTime = new Button();
@@ -49,8 +49,8 @@
             label3 = new Label();
             panel2 = new Panel();
             tableLayoutPanel2 = new TableLayoutPanel();
-            listBoxName = new ListBox();
-            listBoxExtractedDate = new ListBox();
+            lvDateName = new IndexListView();
+            listBoxExtractedDate = new IndexListView();
             panel4 = new Panel();
             richTextBox1 = new RichTextBox();
             label9 = new Label();
@@ -69,17 +69,18 @@
             label11 = new Label();
             rbFromCreation = new RadioButton();
             rbFromModified = new RadioButton();
-            btFileApply = new Button();
+            btFilePreview = new Button();
             tbFileNameFormat = new TextBox();
             btFileClear = new Button();
-            btChangeName = new Button();
-            lbNameFromDate = new ListBox();
-            lbNameOriginal = new ListBox();
+            btFileChangeName = new Button();
+            lvNameFromDate = new IndexListView();
+            lvNameOriginal = new IndexListView();
             tpLocation = new TabPage();
+            btLocationSave = new Button();
+            btSavedLocationRemove = new Button();
             btLocationNext = new Button();
             rtbLocationIndex = new RichTextBox();
             tbLocationName = new RichTextBox();
-            btLocationSave = new Button();
             btLocationPrev = new Button();
             ptbSatelite = new PictureBox();
             tbLatLgn = new TextBox();
@@ -89,12 +90,11 @@
             panel6 = new Panel();
             groupBox1 = new GroupBox();
             rbDisplayImage = new RadioButton();
-            rdGeotag = new RadioButton();
+            rbGeotag = new RadioButton();
             btLocationClear = new Button();
-            lvImageLocation = new ListView();
+            lvImageLocation = new IndexListView();
             imageList1 = new ImageList(components);
-            listBox1 = new ListBox();
-            btSavedLocationRemove = new Button();
+            listBox1 = new IndexListView();
             tabControl1.SuspendLayout();
             tpDate.SuspendLayout();
             panel5.SuspendLayout();
@@ -122,6 +122,7 @@
             tabControl1.SelectedIndex = 0;
             tabControl1.Size = new Size(708, 725);
             tabControl1.TabIndex = 12;
+            tabControl1.SelectedIndexChanged += tabControl1_SelectedIndexChanged;
             // 
             // tpDate
             // 
@@ -137,7 +138,7 @@
             // 
             // panel5
             // 
-            panel5.Controls.Add(listBoxFiles);
+            panel5.Controls.Add(lvDateFiles);
             panel5.Controls.Add(panel1);
             panel5.Controls.Add(panel3);
             panel5.Controls.Add(panel2);
@@ -149,15 +150,16 @@
             panel5.Size = new Size(694, 485);
             panel5.TabIndex = 17;
             // 
-            // listBoxFiles
+            // lvDateFiles
             // 
-            listBoxFiles.FormattingEnabled = true;
-            listBoxFiles.HorizontalScrollbar = true;
-            listBoxFiles.Location = new Point(24, 148);
-            listBoxFiles.Name = "listBoxFiles";
-            listBoxFiles.Size = new Size(330, 244);
-            listBoxFiles.TabIndex = 0;
-            listBoxFiles.Visible = false;
+            lvDateFiles.FullRowSelect = true;
+            lvDateFiles.Location = new Point(24, 148);
+            lvDateFiles.Name = "lvDateFiles";
+            lvDateFiles.Size = new Size(330, 244);
+            lvDateFiles.TabIndex = 0;
+            lvDateFiles.UseCompatibleStateImageBehavior = false;
+            lvDateFiles.View = View.Details;
+            lvDateFiles.Visible = false;
             // 
             // panel1
             // 
@@ -308,7 +310,7 @@
             tableLayoutPanel2.ColumnCount = 2;
             tableLayoutPanel2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             tableLayoutPanel2.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            tableLayoutPanel2.Controls.Add(listBoxName, 0, 0);
+            tableLayoutPanel2.Controls.Add(lvDateName, 0, 0);
             tableLayoutPanel2.Controls.Add(listBoxExtractedDate, 1, 0);
             tableLayoutPanel2.Dock = DockStyle.Fill;
             tableLayoutPanel2.Location = new Point(1, 125);
@@ -320,24 +322,27 @@
             tableLayoutPanel2.Size = new Size(653, 270);
             tableLayoutPanel2.TabIndex = 13;
             // 
-            // listBoxName
+            // lvDateName
             // 
-            listBoxName.Dock = DockStyle.Fill;
-            listBoxName.FormattingEnabled = true;
-            listBoxName.HorizontalScrollbar = true;
-            listBoxName.Location = new Point(3, 3);
-            listBoxName.Name = "listBoxName";
-            listBoxName.Size = new Size(320, 264);
-            listBoxName.TabIndex = 4;
+            lvDateName.Dock = DockStyle.Fill;
+            lvDateName.FullRowSelect = true;
+            lvDateName.Location = new Point(3, 3);
+            lvDateName.Name = "lvDateName";
+            lvDateName.Size = new Size(320, 264);
+            lvDateName.TabIndex = 4;
+            lvDateName.UseCompatibleStateImageBehavior = false;
+            lvDateName.View = View.Details;
             // 
             // listBoxExtractedDate
             // 
             listBoxExtractedDate.Dock = DockStyle.Fill;
-            listBoxExtractedDate.FormattingEnabled = true;
+            listBoxExtractedDate.FullRowSelect = true;
             listBoxExtractedDate.Location = new Point(329, 3);
             listBoxExtractedDate.Name = "listBoxExtractedDate";
             listBoxExtractedDate.Size = new Size(321, 264);
             listBoxExtractedDate.TabIndex = 3;
+            listBoxExtractedDate.UseCompatibleStateImageBehavior = false;
+            listBoxExtractedDate.View = View.Details;
             // 
             // panel4
             // 
@@ -472,12 +477,12 @@
             tpFilename.Controls.Add(label11);
             tpFilename.Controls.Add(rbFromCreation);
             tpFilename.Controls.Add(rbFromModified);
-            tpFilename.Controls.Add(btFileApply);
+            tpFilename.Controls.Add(btFilePreview);
             tpFilename.Controls.Add(tbFileNameFormat);
             tpFilename.Controls.Add(btFileClear);
-            tpFilename.Controls.Add(btChangeName);
-            tpFilename.Controls.Add(lbNameFromDate);
-            tpFilename.Controls.Add(lbNameOriginal);
+            tpFilename.Controls.Add(btFileChangeName);
+            tpFilename.Controls.Add(lvNameFromDate);
+            tpFilename.Controls.Add(lvNameOriginal);
             tpFilename.Location = new Point(4, 29);
             tpFilename.Name = "tpFilename";
             tpFilename.Padding = new Padding(3);
@@ -517,7 +522,7 @@
             rbFromCreation.TabStop = true;
             rbFromCreation.Text = "From created date";
             rbFromCreation.UseVisualStyleBackColor = true;
-            rbFromCreation.Click += rbFromModified_Click;
+            rbFromCreation.Click += rbModifiedAndCreatedDate_Click;
             // 
             // rbFromModified
             // 
@@ -530,17 +535,17 @@
             rbFromModified.TabStop = true;
             rbFromModified.Text = "From modified date";
             rbFromModified.UseVisualStyleBackColor = true;
-            rbFromModified.Click += rbFromModified_Click;
+            rbFromModified.Click += rbModifiedAndCreatedDate_Click;
             // 
-            // btFileApply
+            // btFilePreview
             // 
-            btFileApply.Location = new Point(365, 46);
-            btFileApply.Name = "btFileApply";
-            btFileApply.Size = new Size(94, 29);
-            btFileApply.TabIndex = 5;
-            btFileApply.Text = "Preview";
-            btFileApply.UseVisualStyleBackColor = true;
-            btFileApply.Click += btFileApply_Click;
+            btFilePreview.Location = new Point(365, 46);
+            btFilePreview.Name = "btFilePreview";
+            btFilePreview.Size = new Size(94, 29);
+            btFilePreview.TabIndex = 5;
+            btFilePreview.Text = "Preview";
+            btFilePreview.UseVisualStyleBackColor = true;
+            btFilePreview.Click += btFilePreview_Click;
             // 
             // tbFileNameFormat
             // 
@@ -560,31 +565,35 @@
             btFileClear.UseVisualStyleBackColor = true;
             btFileClear.Click += buttonClear_Click;
             // 
-            // btChangeName
+            // btFileChangeName
             // 
-            btChangeName.Location = new Point(365, 627);
-            btChangeName.Name = "btChangeName";
-            btChangeName.Size = new Size(309, 44);
-            btChangeName.TabIndex = 2;
-            btChangeName.Text = "Apply name";
-            btChangeName.UseVisualStyleBackColor = true;
-            btChangeName.Click += btChangeName_Click;
+            btFileChangeName.Location = new Point(365, 627);
+            btFileChangeName.Name = "btFileChangeName";
+            btFileChangeName.Size = new Size(309, 44);
+            btFileChangeName.TabIndex = 2;
+            btFileChangeName.Text = "Apply name";
+            btFileChangeName.UseVisualStyleBackColor = true;
+            btFileChangeName.Click += btFileChangeName_Click;
             // 
-            // lbNameFromDate
+            // lvNameFromDate
             // 
-            lbNameFromDate.FormattingEnabled = true;
-            lbNameFromDate.Location = new Point(365, 117);
-            lbNameFromDate.Name = "lbNameFromDate";
-            lbNameFromDate.Size = new Size(309, 504);
-            lbNameFromDate.TabIndex = 1;
+            lvNameFromDate.FullRowSelect = true;
+            lvNameFromDate.Location = new Point(365, 117);
+            lvNameFromDate.Name = "lvNameFromDate";
+            lvNameFromDate.Size = new Size(309, 504);
+            lvNameFromDate.TabIndex = 1;
+            lvNameFromDate.UseCompatibleStateImageBehavior = false;
+            lvNameFromDate.View = View.Details;
             // 
-            // lbNameOriginal
+            // lvNameOriginal
             // 
-            lbNameOriginal.FormattingEnabled = true;
-            lbNameOriginal.Location = new Point(24, 117);
-            lbNameOriginal.Name = "lbNameOriginal";
-            lbNameOriginal.Size = new Size(316, 504);
-            lbNameOriginal.TabIndex = 0;
+            lvNameOriginal.FullRowSelect = true;
+            lvNameOriginal.Location = new Point(24, 117);
+            lvNameOriginal.Name = "lvNameOriginal";
+            lvNameOriginal.Size = new Size(316, 504);
+            lvNameOriginal.TabIndex = 0;
+            lvNameOriginal.UseCompatibleStateImageBehavior = false;
+            lvNameOriginal.View = View.Details;
             // 
             // tpLocation
             // 
@@ -608,6 +617,27 @@
             tpLocation.Text = "Location";
             tpLocation.UseVisualStyleBackColor = true;
             // 
+            // btLocationSave
+            // 
+            btLocationSave.BackColor = Color.White;
+            btLocationSave.Location = new Point(543, 7);
+            btLocationSave.Name = "btLocationSave";
+            btLocationSave.Size = new Size(63, 31);
+            btLocationSave.TabIndex = 9;
+            btLocationSave.Text = "Save";
+            btLocationSave.UseVisualStyleBackColor = false;
+            btLocationSave.Click += btLocationSave_Click;
+            // 
+            // btSavedLocationRemove
+            // 
+            btSavedLocationRemove.Location = new Point(603, 7);
+            btSavedLocationRemove.Name = "btSavedLocationRemove";
+            btSavedLocationRemove.Size = new Size(92, 31);
+            btSavedLocationRemove.TabIndex = 14;
+            btSavedLocationRemove.Text = "Remove";
+            btSavedLocationRemove.UseVisualStyleBackColor = true;
+            btSavedLocationRemove.Click += btSavedLocationRemove_Click;
+            // 
             // btLocationNext
             // 
             btLocationNext.Location = new Point(432, 7);
@@ -625,6 +655,7 @@
             rtbLocationIndex.Location = new Point(404, 11);
             rtbLocationIndex.Name = "rtbLocationIndex";
             rtbLocationIndex.ReadOnly = true;
+            rtbLocationIndex.ScrollBars = RichTextBoxScrollBars.None;
             rtbLocationIndex.Size = new Size(49, 19);
             rtbLocationIndex.TabIndex = 11;
             rtbLocationIndex.Tag = "0";
@@ -635,21 +666,11 @@
             tbLocationName.BorderStyle = BorderStyle.None;
             tbLocationName.Location = new Point(469, 11);
             tbLocationName.Name = "tbLocationName";
+            tbLocationName.ScrollBars = RichTextBoxScrollBars.None;
             tbLocationName.Size = new Size(78, 27);
             tbLocationName.TabIndex = 10;
             tbLocationName.Tag = "";
             tbLocationName.Text = "";
-            // 
-            // btLocationSave
-            // 
-            btLocationSave.BackColor = Color.White;
-            btLocationSave.Location = new Point(543, 7);
-            btLocationSave.Name = "btLocationSave";
-            btLocationSave.Size = new Size(61, 31);
-            btLocationSave.TabIndex = 9;
-            btLocationSave.Text = "Save";
-            btLocationSave.UseVisualStyleBackColor = false;
-            btLocationSave.Click += btLocationSave_Click;
             // 
             // btLocationPrev
             // 
@@ -745,7 +766,7 @@
             // groupBox1
             // 
             groupBox1.Controls.Add(rbDisplayImage);
-            groupBox1.Controls.Add(rdGeotag);
+            groupBox1.Controls.Add(rbGeotag);
             groupBox1.Location = new Point(5, 548);
             groupBox1.Name = "groupBox1";
             groupBox1.Size = new Size(342, 50);
@@ -764,17 +785,17 @@
             rbDisplayImage.UseVisualStyleBackColor = true;
             rbDisplayImage.CheckedChanged += rbDisplayImage_CheckedChanged;
             // 
-            // rdGeotag
+            // rbGeotag
             // 
-            rdGeotag.AutoSize = true;
-            rdGeotag.Checked = true;
-            rdGeotag.Location = new Point(6, 20);
-            rdGeotag.Name = "rdGeotag";
-            rdGeotag.Size = new Size(79, 24);
-            rdGeotag.TabIndex = 0;
-            rdGeotag.TabStop = true;
-            rdGeotag.Text = "Geotag";
-            rdGeotag.UseVisualStyleBackColor = true;
+            rbGeotag.AutoSize = true;
+            rbGeotag.Checked = true;
+            rbGeotag.Location = new Point(6, 20);
+            rbGeotag.Name = "rbGeotag";
+            rbGeotag.Size = new Size(79, 24);
+            rbGeotag.TabIndex = 0;
+            rbGeotag.TabStop = true;
+            rbGeotag.Text = "Geotag";
+            rbGeotag.UseVisualStyleBackColor = true;
             // 
             // btLocationClear
             // 
@@ -788,17 +809,13 @@
             // 
             // lvImageLocation
             // 
-            lvImageLocation.LargeImageList = imageList1;
-            lvImageLocation.Location = new Point(-169, -2);
-            lvImageLocation.Margin = new Padding(0);
+            lvImageLocation.FullRowSelect = true;
+            lvImageLocation.Location = new Point(0, 4);
             lvImageLocation.Name = "lvImageLocation";
-            lvImageLocation.Size = new Size(519, 541);
-            lvImageLocation.SmallImageList = imageList1;
-            lvImageLocation.Sorting = SortOrder.Ascending;
-            lvImageLocation.StateImageList = imageList1;
+            lvImageLocation.Size = new Size(347, 541);
             lvImageLocation.TabIndex = 0;
             lvImageLocation.UseCompatibleStateImageBehavior = false;
-            lvImageLocation.View = View.SmallIcon;
+            lvImageLocation.View = View.Details;
             // 
             // imageList1
             // 
@@ -808,21 +825,13 @@
             // 
             // listBox1
             // 
-            listBox1.FormattingEnabled = true;
+            listBox1.FullRowSelect = true;
             listBox1.Location = new Point(643, 728);
             listBox1.Name = "listBox1";
             listBox1.Size = new Size(150, 104);
             listBox1.TabIndex = 13;
-            // 
-            // btSavedLocationRemove
-            // 
-            btSavedLocationRemove.Location = new Point(602, 7);
-            btSavedLocationRemove.Name = "btSavedLocationRemove";
-            btSavedLocationRemove.Size = new Size(74, 31);
-            btSavedLocationRemove.TabIndex = 14;
-            btSavedLocationRemove.Text = "Remove";
-            btSavedLocationRemove.UseVisualStyleBackColor = true;
-            btSavedLocationRemove.Click += btSavedLocationRemove_Click;
+            listBox1.UseCompatibleStateImageBehavior = false;
+            listBox1.View = View.Details;
             // 
             // Form1
             // 
@@ -864,7 +873,7 @@
         private TabControl tabControl1;
         private TabPage tpDate;
         private Panel panel5;
-        private ListBox listBoxFiles;
+        private IndexListView lvDateFiles;
         private Panel panel1;
         private Button buttonClear;
         private Button buttonSetTime;
@@ -879,8 +888,8 @@
         private Label label3;
         private Panel panel2;
         private TableLayoutPanel tableLayoutPanel2;
-        private ListBox listBoxName;
-        private ListBox listBoxExtractedDate;
+        private IndexListView lvDateName;
+        private IndexListView listBoxExtractedDate;
         private Panel panel4;
         private RichTextBox richTextBox1;
         private Label label9;
@@ -896,18 +905,18 @@
         private TextBox tbPath;
         private TabPage tpFilename;
         private Label label10;
-        private ListBox lbNameFromDate;
-        private ListBox lbNameOriginal;
+        private IndexListView lvNameFromDate;
+        private IndexListView lvNameOriginal;
         private Button btFileClear;
-        private Button btChangeName;
+        private Button btFileChangeName;
         private RadioButton rbFromCreation;
         private RadioButton rbFromModified;
-        private Button btFileApply;
+        private Button btFilePreview;
         private TextBox tbFileNameFormat;
         private Label label11;
         private TabPage tpLocation;
         private ImageList imageList1;
-        private ListView lvImageLocation;
+        private IndexListView lvImageLocation;
         private Panel panel6;
         private Button btLocationClear;
         private GMap.NET.WindowsForms.GMapControl gMapControl1;
@@ -915,9 +924,9 @@
         private TextBox tbLatLgn;
         private PictureBox ptbSatelite;
         private GroupBox groupBox1;
-        private RadioButton rdGeotag;
+        private RadioButton rbGeotag;
         private RadioButton rbDisplayImage;
-        private ListBox listBox1;
+        private IndexListView listBox1;
         private CheckBox cbFromDateTaken;
         private Button btLocationSave;
         private Button btLocationNext;

@@ -1,24 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics.Eventing.Reader;
-using System.Drawing;
-using System.Drawing.Imaging;
-using System.Text.RegularExpressions;
-using System.Windows.Forms;
-using ExifLib;
+﻿using System.Drawing.Imaging;
 using GMap.NET.WindowsForms;
-using static System.Windows.Forms.DataFormats;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.Button;
-using System.Drawing;
-using ExifLib;
-using System.Text.Json;
 using GMap.NET;
 using System.ComponentModel;
 using GMap.NET.WindowsForms.Markers;
 using System.Drawing.Drawing2D;
-using System.Collections.Concurrent;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.TrayNotify;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 using System.Text;
 using Newtonsoft.Json;
 namespace ExifDataModifier
@@ -30,6 +15,7 @@ namespace ExifDataModifier
 
         private List<DateTime> filePathsDate = new List<DateTime>();
         private List<string> newFileNames = new List<string>();
+        private List<int> notSupportedIndex = new List<int>();
         private List<MyLocation> imageOnMapList = new List<MyLocation>();
         private List<MyLocation> savedLocations = new List<MyLocation>();
         private Dictionary<string, List<string>> fileGroups = new Dictionary<string, List<string>>();
@@ -37,7 +23,8 @@ namespace ExifDataModifier
         private volatile bool stopRequested = false;
         private int mapType = 0;
         public PointLatLng defaultLocation = new PointLatLng(40.73061, -73.935242); // New York City
-        public MapConfig mapConfig;
+        public MapConfig mapConfig = new MapConfig();
+        bool isScanFolder = false;
 
         string[] supportedFormats = {
     ".jpg", ".jpeg", ".png", ".gif",  // Common image formats
@@ -97,6 +84,7 @@ namespace ExifDataModifier
 
         private ProgressForm progressFormGeoTag;
         private ProgressForm progressFormLoadImage;
+        private ProgressForm progressFormLoadImageDate;
 
 
         public Form1()
@@ -110,7 +98,8 @@ namespace ExifDataModifier
             {
                 string json = File.ReadAllText(jsonFilePath);
                 savedLocations = System.Text.Json.JsonSerializer.Deserialize<List<MyLocation>>(json);
-                UpdateIndex(0);
+                rtbLocationIndex.Text = "0/" + savedLocations.Count;
+                rtbLocationIndex.Tag = savedLocations.Count;
             }
 
             InitializeBackgroundWorker();
@@ -180,9 +169,11 @@ namespace ExifDataModifier
         private void Form1_DragDrop(object sender, DragEventArgs e)
         {
             //filePaths.Clear();
-            //listBoxFiles.Items.Clear();
+            //listBoxFiles.ClearItems();
             stopRequested = false;
             string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
+            // Remove folder from the array
+            files = files.Where(x => !Directory.Exists(x)).ToArray();
             filePaths.AddRange(files);
             filePathsToDisplayImage.AddRange(files);
             DisplayFilePaths();
@@ -190,17 +181,17 @@ namespace ExifDataModifier
 
         private void DisplayFilePaths()
         {
-            listBoxFiles.Items.Clear();
-            listBoxName.Items.Clear();
-            lbNameFromDate.Items.Clear();
-            lbNameOriginal.Items.Clear();
-            lvImageLocation.Items.Clear();
+            lvDateFiles.ClearItems();
+            lvDateName.ClearItems(); ;
+            lvNameFromDate.ClearItems(); ;
+            lvNameOriginal.ClearItems(); ;
+            lvImageLocation.ClearItems(); ;
             imageOnMapList.Clear();
             foreach (string filePath in filePaths)
             {
-                listBoxFiles.Items.Add(filePath);
-                listBoxName.Items.Add(Path.GetFileName(filePath));
-                lbNameOriginal.Items.Add(Path.GetFileName(filePath));
+                lvDateFiles.AddItem(filePath);
+                lvDateName.AddItem(Path.GetFileName(filePath));
+                lvNameOriginal.AddItem(Path.GetFileName(filePath));
             }
 
             //if (cbLoadImage.Checked)
@@ -212,12 +203,12 @@ namespace ExifDataModifier
             {
                 if (Function.CheckSupported(filePath, supportedGeoTagFormats))
                 {
-                    lvImageLocation.Items.Add(Path.GetFileName(filePath));
+                    lvImageLocation.AddItem(Path.GetFileName(filePath));
                     //StartBackgroundWorkLoadImage(filePath)
                 }
                 else
                 {
-                    lvImageLocation.Items.Add("(Not supported) " + Path.GetFileName(filePath));
+                    lvImageLocation.AddItem("(Not supported) " + Path.GetFileName(filePath));
                     isNotSupportedNotification = true;
                 }
             }
@@ -281,13 +272,13 @@ namespace ExifDataModifier
         {
             if (listBoxExtractedDate.Items.Count == 0)
             {
-                MessageBox.Show("Please click apply to extract the date first!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Click apply to extract the date first!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
             if (filePaths.Count != filePathsDate.Count)
             {
-                MessageBox.Show("Please check the format!");
+                MessageBox.Show("Check the format or your input file name!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
             for (int i = 0; i < filePaths.Count; i++)
@@ -305,27 +296,29 @@ namespace ExifDataModifier
             filePaths.Clear();
             filePathsDate.Clear();
             filePathsToDisplayImage.Clear();
-            listBoxFiles.Items.Clear();
-            listBoxName.Items.Clear();
-            listBoxExtractedDate.Items.Clear();
-            lbNameFromDate.Items.Clear();
-            lbNameOriginal.Items.Clear();
-            lvImageLocation.Items.Clear();
             imageOnMapList.Clear();
+            lvDateFiles.ClearItems();
+            lvDateName.ClearItems();
+            listBoxExtractedDate.ClearItems();
+            lvNameFromDate.ClearItems();
+            lvNameOriginal.ClearItems();
+            lvImageLocation.ClearItems();
+            isScanFolder = false;
         }
 
         private void btExtract_Click(object sender, EventArgs e)
         {
             filePathsDate.Clear();
-            if (listBoxFiles.Items.Count == 0)
+            if (lvDateFiles.Items.Count == 0)
             {
                 MessageBox.Show("Nothing to apply", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
-            listBoxExtractedDate.Items.Clear();
+            listBoxExtractedDate.ClearItems();
             Exception exception = null;
-            foreach (string fileName in listBoxName.Items)
+            foreach (ListViewItem item in lvDateName.Items)
             {
+                string fileName = item.SubItems[1].Text;
                 try
                 {
                     string inputFormat = tbRegex.Text;
@@ -356,19 +349,19 @@ namespace ExifDataModifier
                     string dateTimeStrFormatted = fileName.Substring(firstYearIndex, countYear) + fileName.Substring(firstMonthIndex, countMonth) + fileName.Substring(firstDayIndex, countDay) + "-" + fileName.Substring(firstHourIndex, countHour) + fileName.Substring(firstMinuteIndex, countMinute) + fileName.Substring(firstSecondIndex, countSecond);
                     DateTime dateTime = DateTime.ParseExact(dateTimeStrFormatted, tbDateTimeFormat.Text, null);
                     filePathsDate.Add(dateTime);
-                    listBoxExtractedDate.Items.Add(dateTime.ToString(tbDateTimeFormat.Text));
+                    listBoxExtractedDate.AddItem(dateTime.ToString(tbDateTimeFormat.Text));
                 }
                 catch (Exception ex)
                 {
                     exception = ex;
-                    listBoxExtractedDate.Items.Add("Error");
+                    listBoxExtractedDate.AddItem("Error");
                 }
 
             }
 
             if (exception != null)
             {
-                MessageBox.Show(exception.Message + '\n' + "Check your format!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(exception.Message + '\n' + "Check your format or your original file name!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -376,19 +369,19 @@ namespace ExifDataModifier
         {
             if (cbShowFullPath.Checked)
             {
-                listBoxFiles.Visible = true;
-                listBoxName.Visible = false;
+                lvDateFiles.Visible = true;
+                lvDateName.Visible = false;
             }
             else
             {
-                listBoxFiles.Visible = false;
-                listBoxName.Visible = true;
+                lvDateFiles.Visible = false;
+                lvDateName.Visible = true;
             }
         }
 
         private void listBoxName_SizeChanged(object sender, EventArgs e)
         {
-            listBoxFiles.Size = new Size(listBoxName.Width, listBoxName.Height);
+            lvDateFiles.Size = new Size(lvDateName.Width, lvDateName.Height);
         }
 
         private void btChooseFolder_Click(object sender, EventArgs e)
@@ -415,7 +408,7 @@ namespace ExifDataModifier
         private void btView_Click(object sender, EventArgs e)
         {
             buttonClear_Click(null, null);
-
+            isScanFolder = true;
             if (cbFileGroup.SelectedItem != null)
             {
                 string groupName = cbFileGroup.SelectedItem.ToString(); // Use selected group name
@@ -449,7 +442,17 @@ namespace ExifDataModifier
 
         private void btAssign_Click(object sender, EventArgs e)
         {
-            string groupName = cbFileGroup.SelectedItem.ToString(); // Use selected group name
+            string groupName = "";
+            if (cbFileGroup.Items.Count != 0)
+            {
+                if (cbFileGroup.SelectedItem == null)
+                {
+                    cbFileGroup.SelectedIndex = 0;
+                    groupName = cbFileGroup.SelectedItem.ToString();
+                }
+            }
+            else
+                groupName = Path.GetFileNameWithoutExtension(filePaths[0]);
             string modifiedName = "";
 
             int lastDigitIndex = 0;
@@ -467,7 +470,7 @@ namespace ExifDataModifier
             tbRegex.Text = modifiedName.Substring(0, lastDigitIndex + 1);
             if (!isShowNotificationFirstTime)
             {
-                MessageBox.Show("Assigned, Please update the number in the filename textbox to match the year, month, day,...", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Assigned, update the number in the filename textbox to match the year, month, day,...", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 isShowNotificationFirstTime = true;
             }
         }
@@ -481,7 +484,7 @@ namespace ExifDataModifier
 
 
         #region Extract Date and set file name
-        private void btChangeName_Click(object sender, EventArgs e)
+        private void btFileChangeName_Click(object sender, EventArgs e)
         {
             try
             {
@@ -499,11 +502,14 @@ namespace ExifDataModifier
 
                 if (filePaths.Count != newFileNames.Count)
                 {
-                    MessageBox.Show("Please check the format!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("Check the format!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
                 for (int i = 0; i < filePaths.Count; i++)
                 {
+                    if (notSupportedIndex.Contains(i))
+                        continue;
+
                     string newFileNameWithoutExtension = newFileNames[i];
                     if (newFileNameWithoutExtension == "Error")
                         continue;
@@ -531,86 +537,90 @@ namespace ExifDataModifier
 
         private void cbFromDateTaken_CheckedChanged(object sender, EventArgs e)
         {
+            // Only show one time
             if (cbFromDateTaken.Checked && cbFromDateTaken.Tag.ToString() == "Uncheck")
             {
-                MessageBox.Show("This feature does not support RAW image format, click preview again to see the result, supported file will have (T) after the name to indicate, the final name will not include it.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("This feature does not support RAW image format and some other type, supported file will have (T) after the name to indicate, the final name will not include it.", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 cbFromDateTaken.Tag = "Check";
             }
+            btFilePreview_Click(null, null);
         }
 
         private void tabControl1_Deselected(object sender, TabControlEventArgs e)
         {
-            buttonClear_Click(null, null);
+            //buttonClear_Click(null, null);
         }
 
-        private void rbFromModified_Click(object sender, EventArgs e)
+        private void rbModifiedAndCreatedDate_Click(object sender, EventArgs e)
         {
             rbFromCreation.Checked = !rbFromModified.Checked;
+            btFilePreview_Click(null, null);
         }
 
-        private void btFileApply_Click(object sender, EventArgs e)
+        private void btFilePreview_Click(object sender, EventArgs e)
         {
             if (cbFromDateTaken.Checked)
             {
                 StartBackgroundWorkLoadImageDate();
             }
             else
-           {
-            newFileNames.Clear();
-            lbNameFromDate.Items.Clear();
-            string nameFormat = tbFileNameFormat.Text;
-            int startIndex = nameFormat.IndexOf("<") + 1;
-            int endIndex = nameFormat.IndexOf(">");
-            int length = endIndex - startIndex;
-
-            string prefix = nameFormat.Substring(0, startIndex - 1);
-            string suffix = nameFormat.Substring(endIndex + 1, nameFormat.Length - endIndex - 1);
-
-            int startSequenceIndex = nameFormat.IndexOf("[");
-            int endSequenceIndex = nameFormat.IndexOf("]");
-            int lengthSequence = endSequenceIndex - startSequenceIndex - 1;
-
-            nameFormat = nameFormat.Substring(startIndex, length);
-
-            List<string> newFileNameToInsertToListview = new List<string>();
-            for (int i = 0; i < filePaths.Count; i++)
             {
-                FileInfo fileInfo = new FileInfo(filePaths[i]);
-                DateTime creationTime = fileInfo.CreationTime; // Ngày tạo file
-                DateTime lastModifiedTime = fileInfo.LastWriteTime; // Ngày chỉnh sửa cuối cùng
-                string newName;
+                newFileNames.Clear();
+                lvNameFromDate.ClearItems();
+                string nameFormat = tbFileNameFormat.Text;
+                int startIndex = nameFormat.IndexOf("<") + 1;
+                int endIndex = nameFormat.IndexOf(">");
+                int length = endIndex - startIndex;
 
-                if (rbFromModified.Checked)
-                    newName = prefix + lastModifiedTime.ToString(nameFormat) + suffix;
-                else
-                    newName = prefix + creationTime.ToString(nameFormat) + suffix;
+                string prefix = nameFormat.Substring(0, startIndex - 1);
+                string suffix = nameFormat.Substring(endIndex + 1, nameFormat.Length - endIndex - 1);
 
-                if (lengthSequence > 0 && newName != "Error")
+                int startSequenceIndex = nameFormat.IndexOf("[");
+                int endSequenceIndex = nameFormat.IndexOf("]");
+                int lengthSequence = endSequenceIndex - startSequenceIndex - 1;
+
+                nameFormat = nameFormat.Substring(startIndex, length);
+
+                List<string> newFileNameToInsertToListview = new List<string>();
+                for (int i = 0; i < filePaths.Count; i++)
                 {
-                    // Change position after remove the "<>"
-                    int newStartSequenceIndex = startSequenceIndex - 2;
-                    int newEndSequenceIndex = endSequenceIndex - 2;
-                    string newPrefix = newName.Substring(0, newStartSequenceIndex);
-                    string newSuffix = newName.Substring(newEndSequenceIndex + 1, newName.Length - newEndSequenceIndex - 1);
-                    newPrefix += i.ToString($"D{lengthSequence}");
-                    newName = newPrefix + newSuffix;
-                }
-                newFileNames.Add(newName);
-                newFileNameToInsertToListview.Add(newName);
-            }
+                    FileInfo fileInfo = new FileInfo(filePaths[i]);
+                    DateTime creationTime = fileInfo.CreationTime; // Ngày tạo file
+                    DateTime lastModifiedTime = fileInfo.LastWriteTime; // Ngày chỉnh sửa cuối cùng
+                    string newName;
 
-            for (int i = 0; i < newFileNameToInsertToListview.Count; i++)
-            {
-                lbNameFromDate.Items.Add(newFileNameToInsertToListview[i] + Path.GetExtension(filePaths[i]));
-            }}
+                    if (rbFromModified.Checked)
+                        newName = prefix + lastModifiedTime.ToString(nameFormat) + suffix;
+                    else
+                        newName = prefix + creationTime.ToString(nameFormat) + suffix;
+
+                    if (lengthSequence > 0 && newName != "Error")
+                    {
+                        // Change position after remove the "<>"
+                        int newStartSequenceIndex = startSequenceIndex - 2;
+                        int newEndSequenceIndex = endSequenceIndex - 2;
+                        string newPrefix = newName.Substring(0, newStartSequenceIndex);
+                        string newSuffix = newName.Substring(newEndSequenceIndex + 1, newName.Length - newEndSequenceIndex - 1);
+                        newPrefix += i.ToString($"D{lengthSequence}");
+                        newName = newPrefix + newSuffix;
+                    }
+                    newFileNames.Add(newName);
+                    newFileNameToInsertToListview.Add(newName);
+                }
+
+                for (int i = 0; i < newFileNameToInsertToListview.Count; i++)
+                {
+                    lvNameFromDate.AddItem(newFileNameToInsertToListview[i] + Path.GetExtension(filePaths[i]));
+                }
+            }
 
 
         }
 
         private void StartBackgroundWorkLoadImageDate()
         {
-            progressFormLoadImage = new ProgressForm();
-            progressFormLoadImage.Show();
+            progressFormLoadImageDate = new ProgressForm();
+            progressFormLoadImageDate.Show();
             backgroundWorkerLoadImageDate.RunWorkerAsync();
         }
 
@@ -638,7 +648,7 @@ namespace ExifDataModifier
         //                     {
         //                         ImageIndex = imageIndex
         //                     };
-        //                     lvImageLocation.Items.Add(item);
+        //                     lvImageLocation.AddItem(item);
         //                 });
         //                 return;
         //             }
@@ -659,7 +669,7 @@ namespace ExifDataModifier
         //                 {
         //                     ImageIndex = imageIndex
         //                 };
-        //                 lvImageLocation.Items.Add(item); // Add the item to the ListView
+        //                 lvImageLocation.AddItem(item); // Add the item to the ListView
         //             });
         //         }
         //         catch (Exception ex)
@@ -722,7 +732,12 @@ namespace ExifDataModifier
         private void btLocationApply_Click(object sender, EventArgs e)
         {
             if (btLocationApply.Text == "Apply")
-                StartProcessingGeotag();
+            {
+                if (filePaths.Count != 0)
+                    StartProcessingGeotag();
+                else
+                    MessageBox.Show("No file to process!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
             else
                 ClearMarker();
         }
@@ -824,11 +839,12 @@ namespace ExifDataModifier
             backgroundWorkerLoadImageDate.ProgressChanged += BackgroundWorkerLoadImageDate_ProgressChanged;
 
         }
-        #region LoadImageDate
+        #region LoadImageDate Background
         private void BackgroundWorkerLoadImageDate_DoWork(object sender, DoWorkEventArgs e)
         {
+            notSupportedIndex.Clear();
             newFileNames.Clear();
-            lbNameFromDate.Items.Clear();
+            lvNameFromDate.ClearItems();
             string nameFormat = tbFileNameFormat.Text;
             int startIndex = nameFormat.IndexOf("<") + 1;
             int endIndex = nameFormat.IndexOf(">");
@@ -894,11 +910,14 @@ namespace ExifDataModifier
                     newName = newPrefix + newSuffix;
                 }
                 newFileNames.Add(newName);
-                if (isHaveTakenDate)
-                    newFileNameToInsertToListview.Add(newName + " (T)");
-                else
-                    newFileNameToInsertToListview.Add(newName);
 
+                string nameIncludeT = newName + Path.GetExtension(filePaths[i]);
+                if (isHaveTakenDate)
+                    nameIncludeT += " (T)";
+                else
+                    notSupportedIndex.Add(i);
+
+                newFileNameToInsertToListview.Add(nameIncludeT);
                 int progress = (i + 1) * 100 / filePaths.Count;
                 backgroundWorkerLoadImageDate.ReportProgress(progress, $"Processing {i + 1} of {filePaths.Count} files...");
             }
@@ -908,8 +927,8 @@ namespace ExifDataModifier
 
         private void BackgroundWorkerLoadImageDate_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
-            if (progressFormLoadImage != null)
-                progressFormLoadImage.Close();
+            if (progressFormLoadImageDate != null)
+                progressFormLoadImageDate.Close();
 
             if (e.Error != null)
             {
@@ -920,16 +939,27 @@ namespace ExifDataModifier
 
             List<string> newFileNameToInsertToListview = (List<string>)e.Result;
 
-            for (int i = 0; i < newFileNameToInsertToListview.Count; i++)
+            if (notSupportedIndex.Count > 0)
             {
-                lbNameFromDate.Items.Add(newFileNameToInsertToListview[i] + Path.GetExtension(filePaths[i]));
+                DialogResult dialogResult = MessageBox.Show($"There are {notSupportedIndex.Count} items that do not have a taken date. Do you want to ignore them? If no, that item will be renamed based on the choosen date on the left.", "Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                if (dialogResult == DialogResult.Yes)
+                {
+                    for (int i = 0; i < notSupportedIndex.Count; i++)
+                    {
+                        newFileNameToInsertToListview[notSupportedIndex[i]] = "(Ignored) " + newFileNameToInsertToListview[notSupportedIndex[i]];
+                    }
+                }
             }
 
+            for (int i = 0; i < newFileNameToInsertToListview.Count; i++)
+            {
+                lvNameFromDate.AddItem(newFileNameToInsertToListview[i]);
+            }
         }
 
         private void BackgroundWorkerLoadImageDate_ProgressChanged(object sender, ProgressChangedEventArgs e)
         {
-            progressFormLoadImage.UpdateProgress(e.ProgressPercentage, e.UserState.ToString());
+            progressFormLoadImageDate.UpdateProgress(e.ProgressPercentage, e.UserState.ToString());
         }
 
 
@@ -1095,9 +1125,8 @@ namespace ExifDataModifier
         private void ClearMarker()
         {
             gMapControl1.Overlays.Clear();
-            imageOnMapList.Clear();
-            lvImageLocation.Clear();
             gMapControl1.Refresh();
+            buttonClear_Click(null, null);
         }
 
         private void SimulateMapReload(GMapControl mapControl)
@@ -1117,7 +1146,8 @@ namespace ExifDataModifier
             else
             {
                 btLocationApply.Text = "Apply";
-                buttonClear_Click(null, null);
+                if (tabControl1.SelectedTab == tpLocation)
+                    buttonClear_Click(null, null);
             }
         }
 
@@ -1128,7 +1158,7 @@ namespace ExifDataModifier
 
             if (tbLocationName.Text == "")
             {
-                MessageBox.Show("Please enter the location name!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Enter the location name!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
             MyLocation myLocation = new MyLocation(gMapControl1.Position, tbLocationName.Text);
@@ -1142,7 +1172,9 @@ namespace ExifDataModifier
             int indexTag = int.Parse(rtbLocationIndex.Tag.ToString());
             rtbLocationIndex.Text = (indexTag + 1) + "/" + savedLocations.Count;
             WriteSavedLocationToFile();
-            Function.ChangeTextForSecond(btLocationSave, "Saved!", 3);
+            btLocationNext_Click(null, null);
+            btLocationSave.Text = "Saved!";
+            Task.Delay(2000).ContinueWith(t => btLocationSave.Invoke(new Action(() => btLocationSave.Text = "Save")));
         }
 
         private void btLocationNext_Click(object sender, EventArgs e)
@@ -1173,12 +1205,21 @@ namespace ExifDataModifier
 
         private void btSavedLocationRemove_Click(object sender, EventArgs e)
         {
-            int index = int.Parse(rtbLocationIndex.Tag.ToString());
-            savedLocations.RemoveAt(index);
-            WriteSavedLocationToFile();
-            UpdateIndex(0);
-            Function.ChangeTextForSecond(btSavedLocationRemove, "Removed!", 3);
+            try
+            {
+                int index = int.Parse(rtbLocationIndex.Tag.ToString());
+                savedLocations.RemoveAt(index);
+                WriteSavedLocationToFile();
+                UpdateIndex(0);
+                btSavedLocationRemove.Text = "Removed!";
+                Task.Delay(2000).ContinueWith(t => btSavedLocationRemove.Invoke(new Action(() => btSavedLocationRemove.Text = "Remove")));
+            }
+            catch
+            {
+                return;
+            }
         }
+
 
         private void UpdateIndex(int index)
         {
@@ -1215,6 +1256,13 @@ namespace ExifDataModifier
         #endregion
         #endregion
 
-
+        private void tabControl1_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            rbDisplayImage.Checked = false;
+            rbGeotag.Checked = true;
+            cbFromDateTaken.Checked = false;
+            if (isScanFolder)
+                buttonClear_Click(null, null);
+        }
     }
 }
