@@ -171,6 +171,8 @@ namespace ExifDataModifier
         {
             //filePaths.Clear();
             //listBoxFiles.ClearItems();
+            cbFileGroup.Items.Clear();
+            cbFileGroup.Text = "";
             stopRequested = false;
             string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
             // Remove folder from the array
@@ -447,10 +449,8 @@ namespace ExifDataModifier
             if (cbFileGroup.Items.Count != 0)
             {
                 if (cbFileGroup.SelectedItem == null)
-                {
                     cbFileGroup.SelectedIndex = 0;
-                    groupName = cbFileGroup.SelectedItem.ToString();
-                }
+                groupName = cbFileGroup.SelectedItem.ToString();
             }
             else
                 groupName = Path.GetFileNameWithoutExtension(filePaths[0]);
@@ -943,7 +943,7 @@ namespace ExifDataModifier
 
             if (notSupportedIndex.Count > 0)
             {
-                DialogResult dialogResult = MessageBox.Show($"There are {notSupportedIndex.Count} items that do not have a taken date. Do you want to ignore them? If no, that item will be renamed based on the choosen date on the left.", "Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, messageBoxDefaultButtonForFile);
+                DialogResult dialogResult = MessageBox.Show($"There are {notSupportedIndex.Count} items that do not have taken date. Do you want to ignore them? If no, that item will be renamed based on the choosen date on the left.", "Warning", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, messageBoxDefaultButtonForFile);
                 if (dialogResult == DialogResult.Yes)
                 {
                     for (int i = 0; i < notSupportedIndex.Count; i++)
@@ -959,6 +959,13 @@ namespace ExifDataModifier
             for (int i = 0; i < newFileNameToInsertToListview.Count; i++)
             {
                 lvNameFromDate.AddItem(newFileNameToInsertToListview[i]);
+                // If the file is supported, bold the text
+                // Strike through the item
+                if (newFileNameToInsertToListview[i].Contains("(T)"))
+                {
+                    lvNameFromDate.Items[i].Font = new Font(lvNameFromDate.Font, FontStyle.Bold);
+                }
+
             }
         }
 
@@ -1177,7 +1184,7 @@ namespace ExifDataModifier
             int indexTag = int.Parse(rtbLocationIndex.Tag.ToString());
             rtbLocationIndex.Text = (indexTag + 1) + "/" + savedLocations.Count;
             WriteSavedLocationToFile();
-            btLocationNext_Click(null, null);
+            //btLocationNext_Click(null, null);
             btLocationSave.Text = "Saved!";
             Task.Delay(2000).ContinueWith(t => btLocationSave.Invoke(new Action(() => btLocationSave.Text = "Save")));
         }

@@ -249,7 +249,7 @@
             tbRegex.Name = "tbRegex";
             tbRegex.Size = new Size(357, 27);
             tbRegex.TabIndex = 5;
-            tbRegex.Text = "***********yyyyMMdd*HHmmss";
+            tbRegex.Text = "****yyyyMMdd*HHmmss";
             // 
             // label1
             // 
