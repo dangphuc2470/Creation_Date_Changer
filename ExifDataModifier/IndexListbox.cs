@@ -30,8 +30,9 @@ namespace ExifDataModifier
             Columns.Add(indexColumn);
             Columns.Add(PathColumn);
             View = View.Details;
-FullRowSelect = true;
-this.ItemActivate += new EventHandler(IndexListView_ItemActivate);
+            FullRowSelect = true;
+            this.ItemActivate += new EventHandler(IndexListView_ItemActivate);
+            this.MouseClick += new MouseEventHandler(IndexListView_MouseClick);
         }
 
         public void AddItem(string path)
@@ -60,14 +61,24 @@ this.ItemActivate += new EventHandler(IndexListView_ItemActivate);
             index = 0;
         }
 
-                private void IndexListView_ItemActivate(object sender, EventArgs e)
+        private void IndexListView_ItemActivate(object sender, EventArgs e)
         {
-             if (this.SelectedItems.Count > 0)
+            if (this.SelectedItems.Count > 0)
             {
                 ListViewItem selectedItem = this.SelectedItems[0];
                 ToolTip tt = new ToolTip();
-                tt.Show(selectedItem.SubItems[1].Text, this, selectedItem.Bounds.Left, selectedItem.Bounds.Bottom, 2000);
+                tt.Show(selectedItem.SubItems[1].Text, this, selectedItem.Bounds.Left, selectedItem.Bounds.Bottom, 1000);
             }
         }
+
+        private void IndexListView_MouseClick(object sender, MouseEventArgs e)
+{
+    if (this.SelectedItems.Count > 0)
+    {
+        ListViewItem selectedItem = this.SelectedItems[0];
+        ToolTip tt = new ToolTip();
+        tt.Show(selectedItem.SubItems[1].Text, this, selectedItem.Bounds.Left, selectedItem.Bounds.Bottom, 1000);
+    }
+}
     }
 }
