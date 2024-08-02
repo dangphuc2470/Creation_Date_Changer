@@ -53,6 +53,7 @@
             // 
             // btCancel
             // 
+            btCancel.Enabled = false;
             btCancel.Location = new Point(479, 96);
             btCancel.Name = "btCancel";
             btCancel.Size = new Size(94, 29);

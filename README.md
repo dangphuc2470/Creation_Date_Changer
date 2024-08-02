@@ -129,6 +129,7 @@ This is the right format:
 - This feature will generate new files with GPS data and place it in the _Geotagged folder in the parent directory.
 - Supported geotag extensions: `.jpg`, `.jpeg`, `.tiff`, `.webp`, `.heic`.
 - Display image on map feature is still not well optimized, it may consume a lot of memory when displaying a large number of images.
+- **Bugs:** The progress form will be hidden behind the main form if you move your mouse over the map while processing.
 
 ![Screenshot Description](/screenshot/geotag.png)
 1. **Select Photos**: Choose all photos that you want to add GPS data.
