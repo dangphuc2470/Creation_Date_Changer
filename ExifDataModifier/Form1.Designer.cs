@@ -94,7 +94,6 @@
             btLocationClear = new Button();
             lvImageLocation = new IndexListView();
             imageList1 = new ImageList(components);
-            listBox1 = new IndexListView();
             tabControl1.SuspendLayout();
             tpDate.SuspendLayout();
             panel5.SuspendLayout();
@@ -120,7 +119,7 @@
             tabControl1.Location = new Point(0, 0);
             tabControl1.Name = "tabControl1";
             tabControl1.SelectedIndex = 0;
-            tabControl1.Size = new Size(708, 725);
+            tabControl1.Size = new Size(708, 727);
             tabControl1.TabIndex = 12;
             tabControl1.SelectedIndexChanged += tabControl1_SelectedIndexChanged;
             // 
@@ -131,7 +130,7 @@
             tpDate.Location = new Point(4, 29);
             tpDate.Name = "tpDate";
             tpDate.Padding = new Padding(3);
-            tpDate.Size = new Size(700, 692);
+            tpDate.Size = new Size(700, 694);
             tpDate.TabIndex = 0;
             tpDate.Text = "Date";
             tpDate.UseVisualStyleBackColor = true;
@@ -143,7 +142,7 @@
             panel5.Controls.Add(panel3);
             panel5.Controls.Add(panel2);
             panel5.Dock = DockStyle.Bottom;
-            panel5.Location = new Point(3, 204);
+            panel5.Location = new Point(3, 206);
             panel5.Margin = new Padding(3, 3, 3, 20);
             panel5.Name = "panel5";
             panel5.Padding = new Padding(20);
@@ -487,7 +486,7 @@
             tpFilename.Location = new Point(4, 29);
             tpFilename.Name = "tpFilename";
             tpFilename.Padding = new Padding(3);
-            tpFilename.Size = new Size(700, 692);
+            tpFilename.Size = new Size(700, 694);
             tpFilename.TabIndex = 1;
             tpFilename.Text = "Filename";
             tpFilename.UseVisualStyleBackColor = true;
@@ -613,7 +612,7 @@
             tpLocation.Location = new Point(4, 29);
             tpLocation.Name = "tpLocation";
             tpLocation.Padding = new Padding(3);
-            tpLocation.Size = new Size(700, 692);
+            tpLocation.Size = new Size(700, 694);
             tpLocation.TabIndex = 2;
             tpLocation.Text = "Location";
             tpLocation.UseVisualStyleBackColor = true;
@@ -686,7 +685,7 @@
             // ptbSatelite
             // 
             ptbSatelite.Image = Properties.Resources.download;
-            ptbSatelite.Location = new Point(358, 541);
+            ptbSatelite.Location = new Point(358, 561);
             ptbSatelite.Name = "ptbSatelite";
             ptbSatelite.Size = new Size(52, 43);
             ptbSatelite.SizeMode = PictureBoxSizeMode.Zoom;
@@ -697,7 +696,7 @@
             // tbLatLgn
             // 
             tbLatLgn.BorderStyle = BorderStyle.None;
-            tbLatLgn.Location = new Point(358, 590);
+            tbLatLgn.Location = new Point(358, 612);
             tbLatLgn.Name = "tbLatLgn";
             tbLatLgn.Size = new Size(184, 20);
             tbLatLgn.TabIndex = 4;
@@ -705,10 +704,11 @@
             // 
             // btLocationApply
             // 
+            btLocationApply.Dock = DockStyle.Bottom;
             btLocationApply.FlatStyle = FlatStyle.Flat;
-            btLocationApply.Location = new Point(358, 635);
+            btLocationApply.Location = new Point(356, 640);
             btLocationApply.Name = "btLocationApply";
-            btLocationApply.Size = new Size(336, 51);
+            btLocationApply.Size = new Size(341, 51);
             btLocationApply.TabIndex = 3;
             btLocationApply.Text = "Apply";
             btLocationApply.UseVisualStyleBackColor = true;
@@ -748,7 +748,7 @@
             gMapControl1.ScaleMode = GMap.NET.WindowsForms.ScaleModes.Integer;
             gMapControl1.SelectedAreaFillColor = Color.FromArgb(33, 65, 105, 225);
             gMapControl1.ShowTileGridLines = false;
-            gMapControl1.Size = new Size(341, 686);
+            gMapControl1.Size = new Size(341, 688);
             gMapControl1.TabIndex = 2;
             gMapControl1.Zoom = 0D;
             gMapControl1.MouseMove += gMapControl1_MouseUp;
@@ -761,7 +761,7 @@
             panel6.Dock = DockStyle.Left;
             panel6.Location = new Point(3, 3);
             panel6.Name = "panel6";
-            panel6.Size = new Size(353, 686);
+            panel6.Size = new Size(353, 688);
             panel6.TabIndex = 1;
             // 
             // groupBox1
@@ -800,9 +800,10 @@
             // 
             // btLocationClear
             // 
-            btLocationClear.Location = new Point(5, 632);
+            btLocationClear.Dock = DockStyle.Bottom;
+            btLocationClear.Location = new Point(0, 637);
             btLocationClear.Name = "btLocationClear";
-            btLocationClear.Size = new Size(345, 51);
+            btLocationClear.Size = new Size(353, 51);
             btLocationClear.TabIndex = 1;
             btLocationClear.Text = "Clear";
             btLocationClear.UseVisualStyleBackColor = true;
@@ -824,22 +825,11 @@
             imageList1.ImageSize = new Size(100, 100);
             imageList1.TransparentColor = Color.Transparent;
             // 
-            // listBox1
-            // 
-            listBox1.FullRowSelect = true;
-            listBox1.Location = new Point(643, 728);
-            listBox1.Name = "listBox1";
-            listBox1.Size = new Size(150, 104);
-            listBox1.TabIndex = 13;
-            listBox1.UseCompatibleStateImageBehavior = false;
-            listBox1.View = View.Details;
-            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(708, 725);
-            Controls.Add(listBox1);
+            ClientSize = new Size(708, 727);
             Controls.Add(tabControl1);
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "Form1";
@@ -927,7 +917,6 @@
         private GroupBox groupBox1;
         private RadioButton rbGeotag;
         private RadioButton rbDisplayImage;
-        private IndexListView listBox1;
         private CheckBox cbFromDateTaken;
         private Button btLocationSave;
         private Button btLocationNext;
