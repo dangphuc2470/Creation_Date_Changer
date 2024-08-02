@@ -93,6 +93,7 @@ namespace ExifDataModifier
             InitializeComponent();
             AllowDrop = true;
             FormAction.InitGmap(gMapControl1, this);
+            UpdateLatLgnTextBox();
 
             string jsonFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "saved_locations.json");
             if (File.Exists(jsonFilePath))
@@ -753,12 +754,8 @@ namespace ExifDataModifier
             else
                 ClearMarker();
         }
-        private void gMapControl1_MouseUp(object sender, MouseEventArgs e)
-        {
-            UpdateLatLgnTextBox();
-        }
 
-        private void gMapControl1_MouseHover(object sender, EventArgs e)
+        private void gMapControl1_OnMapDrag()
         {
             UpdateLatLgnTextBox();
         }
@@ -1286,5 +1283,7 @@ namespace ExifDataModifier
             if (isScanFolder)
                 buttonClear_Click(null, null);
         }
+
+        
     }
 }
