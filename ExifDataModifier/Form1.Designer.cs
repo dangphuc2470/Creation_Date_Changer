@@ -751,7 +751,7 @@
             gMapControl1.Size = new Size(341, 688);
             gMapControl1.TabIndex = 2;
             gMapControl1.Zoom = 0D;
-            gMapControl1.MouseMove += gMapControl1_MouseUp;
+            gMapControl1.OnMapDrag += gMapControl1_OnMapDrag;
             // 
             // panel6
             // 
