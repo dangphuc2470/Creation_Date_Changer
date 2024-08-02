@@ -482,6 +482,16 @@ namespace ExifDataModifier
             cbShowFullPath.Checked = !cbShowFullPath.Checked;
             cbShowFullPath.Checked = !cbShowFullPath.Checked;
             lvDateFiles.Size = new Size(lvDateName.Width, lvDateName.Height);
+
+            tbLatLgn.Location = new Point(
+            358,
+            ClientSize.Height - btLocationApply.Height - tbLatLgn.Height - 40);
+            ptbSatelite.Location = new Point(358, tbLatLgn.Location.Y - ptbSatelite.Height - 2);
+
+            lvImageLocation.Size = new Size(
+                lvImageLocation.Size.Width,
+                ClientSize.Height - 150);
+            groupBox1.Location = new Point(5, lvImageLocation.Size.Height + 8);
         }
 
 
