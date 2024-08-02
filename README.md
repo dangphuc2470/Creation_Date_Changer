@@ -39,6 +39,9 @@ This application allows you to change the creation and modified date of files ba
 # How to Use
 
 ## I. Change created and modified date
+ <span style="color:red" >**Important Note**</span>
+- **This feature will overwrite the original file, please make sure to backup your files before using it.**
+
 ![Screenshot Description](/screenshot/created_modified.png)
 ### A. Standard Method
 1. **Select Photos**: Choose all photos sharing the same filename format.
@@ -93,6 +96,11 @@ This is the right format:
     Screenrecorder-2023-08-07-20-28-19-266.mp4
 
 ## II. Change filename
+ <span style="color:red" >**Important Note**</span>
+- **This feature will overwrite the original file, please make sure to backup your files before using it.**
+- Get date taken feature is not well optimized, it may not work well with a large number of images.
+- Extensions that have taken date exif data: `.jpg`, `.jpeg`, `.tiff`, `.webp`, `.heic`.
+
 ![Screenshot Description](/screenshot/filename.png)
 1. **Select Photos**: Choose all photos that you want to change the filename.
 2. **Drag and Drop**: Import them into the program by dragging and dropping.
@@ -103,17 +111,19 @@ This is the right format:
 4. **Preview**: Click "Preview" to see the new filename.
 5. **Apply Changes**: Click "Apply name" to confirm the adjustments.
 
-### Note 
-- Extensions that have taken date exif data: `.jpg`, `.jpeg`, `.tiff`, `.webp`, `.heic`.
-- Noted that get date taken feature is not well optimized, it may not work well with a large number of images.
 
 ## III. Geotag and Display image on map
+ <span style="color:green" fontweight="bold">**Note**</span>
+- This feature will generate new files with GPS data and place it in the _Geotagged folder in the parent directory.
+- Supported geotag extensions: `.jpg`, `.jpeg`, `.tiff`, `.webp`, `.heic`.
+- Display image on map feature is still not well optimized, it may consume a lot of memory when displaying a large number of images.
+
 ![Screenshot Description](/screenshot/geotag.png)
 1. **Select Photos**: Choose all photos that you want to add GPS data.
 2. **Drag and Drop**: Import them into the program by dragging and dropping.
 3. **Add GPS Data**: 
     - Use your right mouse to move the map, mouse wheel to zoom in and out to determine the location. Or you can copy the latitude and longitude from any maps and paste it into the input box.
-    - Click "Apply" to add GPS data to the image, geotagged images will be saved in _Geotagged folder in parent directory.
+    - Click "Apply" to add GPS data to the image.
     - The first image of the list will be displayed on the map.
 4. **Additionally**: 
     - Type the name of current place and click "Save" to save the location to the list. You can use the "Remove" button to remove it.
@@ -122,9 +132,6 @@ This is the right format:
 5. **Display Image on Map**: Clear the list, click "Display images" then drag and drop geotagged images into the program to display them on the map.
 ![Screenshot Description](/screenshot/display.png)
 
-### Note
-- Supported geotag extensions: `.jpg`, `.jpeg`, `.tiff`, `.webp`, `.heic`.
-- Noted that Display image on map feature is still not well optimized, it may not work well with a large number of images.
 
 
 # License
