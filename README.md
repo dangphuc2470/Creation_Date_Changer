@@ -25,6 +25,7 @@ This application allows you to change the creation and modified date of files ba
 
 **Version 1.2: [Release](https://github.com/dangphuc2470/Creation_Date_Changer/releases)**
 
+
 # Change log
 **[1.2] - 2024/08/01**
 - Feature: Display image on map, Geotag
@@ -37,6 +38,17 @@ This application allows you to change the creation and modified date of files ba
 - Feature: Change created and modified date
 
 # How to Use
+
+**A. Normal method**
+1. Download the zip file in the release section.
+2. Extract the zip file.
+3. Run the `ExifDataModifier.exe` file.
+
+**B. Run from source code**
+1. Install .NET desktop development workload in Visual Studio if you haven't installed it.
+2. Clone the repository.
+3. Open the solution file in Visual Studio.
+4. Run the project.
 
 ## I. Change created and modified date
  <span style="color:red" >**Important Note**</span>
