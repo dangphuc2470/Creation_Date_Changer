@@ -116,12 +116,24 @@ This is the right format:
 ![Screenshot Description](/screenshot/filename.png)
 1. **Select Photos**: Choose all photos that you want to change the filename.
 2. **Drag and Drop**: Import them into the program by dragging and dropping.
-3. **Select Option**: Choose the desired option: 
+3. **Choose Format**: 
+    - Input the filename format, you can choose to not include date or sequence number by removing them in the format. Click template to use the default format.
+        - `<your date format>`: The date will be extracted from the file's metadata.
+        - `[sequence number]`: Start from 1 and increase by 1 for each file.
+    
+eg: 
+```
+    IMG_<yyyyMMdd_HHmmss>_[nnnn]
+    Picture_<yyyyMMdd_HHmmss>
+    P[nnnn]
+    IMG<yyyyMMdd_HHmmss>
+``` 
+4. **Select Option**: Choose the desired option: 
     - **Creation Date**: Change the filename based on the creation date.
     - **Modified Date**: Change the filename based on the modified date.
     - **Date Taken**: Change the filename based on the date taken, a message box will appear if have any image does not have the date taken. You can choose Yes to ignore it or No to still change the filename.  Supported image will have ("T") at the end to indicate, that will not be included in the final filename.
-4. **Preview**: Click "Preview" to see the new filename.
-5. **Apply Changes**: Click "Apply name" to confirm the adjustments.
+5. **Preview**: Click "Preview" to see the new filename.
+6. **Apply Changes**: Click "Apply name" to confirm the adjustments.
 
 
 ## III. Geotag and Display image on map
