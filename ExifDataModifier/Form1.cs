@@ -578,52 +578,92 @@ namespace ExifDataModifier
             }
             else
             {
-                newFileNames.Clear();
-                lvNameFromDate.ClearItems();
-                string nameFormat = tbFileNameFormat.Text;
-                int startIndex = nameFormat.IndexOf("<") + 1;
-                int endIndex = nameFormat.IndexOf(">");
-                int length = endIndex - startIndex;
-
-                string prefix = nameFormat.Substring(0, startIndex - 1);
-                string suffix = nameFormat.Substring(endIndex + 1, nameFormat.Length - endIndex - 1);
-
-                int startSequenceIndex = nameFormat.IndexOf("[");
-                int endSequenceIndex = nameFormat.IndexOf("]");
-                int lengthSequence = endSequenceIndex - startSequenceIndex - 1;
-
-                nameFormat = nameFormat.Substring(startIndex, length);
-
-                List<string> newFileNameToInsertToListview = new List<string>();
-                for (int i = 0; i < filePaths.Count; i++)
+                try
                 {
-                    FileInfo fileInfo = new FileInfo(filePaths[i]);
-                    DateTime creationTime = fileInfo.CreationTime; // Ngày tạo file
-                    DateTime lastModifiedTime = fileInfo.LastWriteTime; // Ngày chỉnh sửa cuối cùng
-                    string newName;
+                    newFileNames.Clear();
+                    lvNameFromDate.ClearItems();
+                    string nameFormat = tbFileNameFormat.Text;
 
-                    if (rbFromModified.Checked)
-                        newName = prefix + lastModifiedTime.ToString(nameFormat) + suffix;
-                    else
-                        newName = prefix + creationTime.ToString(nameFormat) + suffix;
+                    int startIndex = nameFormat.IndexOf("<") + 1;
+                    int endIndex = nameFormat.IndexOf(">");
+                    int lengthDate = endIndex - startIndex;
 
-                    if (lengthSequence > 0 && newName != "Error")
+                    string prefix;
+                    string suffix;
+                    if (nameFormat.Contains("<") && nameFormat.Contains(">"))
                     {
-                        // Change position after remove the "<>"
-                        int newStartSequenceIndex = startSequenceIndex - 2;
-                        int newEndSequenceIndex = endSequenceIndex - 2;
-                        string newPrefix = newName.Substring(0, newStartSequenceIndex);
-                        string newSuffix = newName.Substring(newEndSequenceIndex + 1, newName.Length - newEndSequenceIndex - 1);
-                        newPrefix += i.ToString($"D{lengthSequence}");
-                        newName = newPrefix + newSuffix;
+                        prefix = nameFormat.Substring(0, startIndex - 1);
+                        suffix = nameFormat.Substring(endIndex + 1, nameFormat.Length - endIndex - 1);
                     }
-                    newFileNames.Add(newName);
-                    newFileNameToInsertToListview.Add(newName);
-                }
+                    else
+                    {
+                        prefix = nameFormat;
+                        suffix = "";
+                        lengthDate = 0;
+                    }
 
-                for (int i = 0; i < newFileNameToInsertToListview.Count; i++)
+                    int startSequenceIndex = nameFormat.IndexOf("[");
+                    int endSequenceIndex = nameFormat.IndexOf("]");
+                    int lengthSequence = endSequenceIndex - startSequenceIndex - 1;
+
+                    nameFormat = nameFormat.Substring(startIndex, lengthDate);
+
+                    List<string> newFileNameToInsertToListview = new List<string>();
+                    for (int i = 0; i < filePaths.Count; i++)
+                    {
+                        FileInfo fileInfo = new FileInfo(filePaths[i]);
+                        DateTime creationTime = fileInfo.CreationTime; // Ngày tạo file
+                        DateTime lastModifiedTime = fileInfo.LastWriteTime; // Ngày chỉnh sửa cuối cùng
+                        string newName;
+
+                        if (lengthDate != 0) // If not have "<>", then use the given name
+                        {
+                            //if (!DateTimeFormatValidator.IsValidFormat(nameFormat))
+                            //   {
+                            //    MessageBox.Show("Invalid date format!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            //    return;
+                            //}
+                            if (rbFromModified.Checked)
+                                newName = prefix + lastModifiedTime.ToString(nameFormat) + suffix;
+                            else
+                                newName = prefix + creationTime.ToString(nameFormat) + suffix;
+                        }
+                        else newName = prefix;
+
+                        if (lengthSequence > 0 && newName != "Error")
+                        {
+                            // Change position after remove the "<>"
+                            int newStartSequenceIndex;
+                            int newEndSequenceIndex;
+                            if (lengthDate != 0)
+                            {
+                                newStartSequenceIndex = startSequenceIndex - 2;
+                                newEndSequenceIndex = endSequenceIndex - 2;
+                            }
+                            else
+                            {
+                                newStartSequenceIndex = startSequenceIndex;
+                                newEndSequenceIndex = endSequenceIndex;
+                            }
+
+                            string newPrefix = newName.Substring(0, newStartSequenceIndex);
+                            string newSuffix = newName.Substring(newEndSequenceIndex + 1, newName.Length - newEndSequenceIndex - 1);
+                            newPrefix += i.ToString($"D{lengthSequence}");
+                            newName = newPrefix + newSuffix;
+                        }
+                        newFileNames.Add(newName);
+                        newFileNameToInsertToListview.Add(newName);
+                    }
+
+
+                    for (int i = 0; i < newFileNameToInsertToListview.Count; i++)
+                    {
+                        lvNameFromDate.AddItem(newFileNameToInsertToListview[i] + Path.GetExtension(filePaths[i]));
+                    }
+                }
+                catch (Exception ex)
                 {
-                    lvNameFromDate.AddItem(newFileNameToInsertToListview[i] + Path.GetExtension(filePaths[i]));
+                    MessageBox.Show("Time format should only have two letters!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
 
@@ -1284,6 +1324,9 @@ namespace ExifDataModifier
                 buttonClear_Click(null, null);
         }
 
-        
+        private void btFilenameTemplate_Click(object sender, EventArgs e)
+        {
+            tbFileNameFormat.Text = "IMG_<yyyyMMdd_HHmmss>_[nnnn]";
+        }
     }
 }

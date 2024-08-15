@@ -94,6 +94,7 @@
             btLocationClear = new Button();
             lvImageLocation = new IndexListView();
             imageList1 = new ImageList(components);
+            btFilenameTemplate = new Button();
             tabControl1.SuspendLayout();
             tpDate.SuspendLayout();
             panel5.SuspendLayout();
@@ -473,6 +474,7 @@
             // 
             // tpFilename
             // 
+            tpFilename.Controls.Add(btFilenameTemplate);
             tpFilename.Controls.Add(cbFromDateTaken);
             tpFilename.Controls.Add(label11);
             tpFilename.Controls.Add(rbFromCreation);
@@ -825,6 +827,16 @@
             imageList1.ImageSize = new Size(100, 100);
             imageList1.TransparentColor = Color.Transparent;
             // 
+            // btFilenameTemplate
+            // 
+            btFilenameTemplate.Location = new Point(465, 46);
+            btFilenameTemplate.Name = "btFilenameTemplate";
+            btFilenameTemplate.Size = new Size(94, 29);
+            btFilenameTemplate.TabIndex = 10;
+            btFilenameTemplate.Text = "Template";
+            btFilenameTemplate.UseVisualStyleBackColor = true;
+            btFilenameTemplate.Click += btFilenameTemplate_Click;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
@@ -925,5 +937,6 @@
         private RichTextBox rtbLocationIndex;
         private Label label12;
         private Button btSavedLocationRemove;
+        private Button btFilenameTemplate;
     }
 }
