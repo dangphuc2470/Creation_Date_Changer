@@ -6,6 +6,7 @@ using GMap.NET.WindowsForms.Markers;
 using System.Drawing.Drawing2D;
 using System.Text;
 using Newtonsoft.Json;
+using System.Globalization;
 namespace ExifDataModifier
 {
     public partial class Form1 : Form
@@ -326,32 +327,50 @@ namespace ExifDataModifier
                 try
                 {
                     string inputFormat = tbRegex.Text;
-                    // Lấy vị trí và số lượng cho năm
-                    int firstYearIndex = inputFormat.IndexOf("y");
-                    int countYear = inputFormat.LastIndexOf("y") - firstYearIndex + 1;
+                    (int startIndex, int count) ExtractComponent(string format, string componentChar)
+                    {
+                        int startIndex = format.IndexOf(componentChar);
+                        if (startIndex == -1) return (-1, 0); // Component not found
 
-                    // Lấy vị trí và số lượng cho tháng
-                    int firstMonthIndex = inputFormat.IndexOf("M");
-                    int countMonth = inputFormat.LastIndexOf("M") - firstMonthIndex + 1;
+                        int count = 0;
+                        for (int i = startIndex; i < format.Length && format[i] == componentChar[0]; i++)
+                        {
+                            count++;
+                        }
+                        return (startIndex, count);
+                    }
 
-                    // Lấy vị trí và số lượng cho ngày
-                    int firstDayIndex = inputFormat.IndexOf("d");
-                    int countDay = inputFormat.LastIndexOf("d") - firstDayIndex + 1;
+                    // Extract components
+                    var (yearStart, yearCount) = ExtractComponent(inputFormat, "y");
+                    var (monthStart, monthCount) = ExtractComponent(inputFormat, "M");
+                    var (dayStart, dayCount) = ExtractComponent(inputFormat, "d");
+                    var (hourStart, hourCount) = ExtractComponent(inputFormat, "H");
+                    var (minuteStart, minuteCount) = ExtractComponent(inputFormat, "m");
+                    var (secondStart, secondCount) = ExtractComponent(inputFormat, "s");
 
-                    // Lấy vị trí và số lượng cho giờ
-                    int firstHourIndex = inputFormat.IndexOf("H");
-                    int countHour = inputFormat.LastIndexOf("H") - firstHourIndex + 1;
+                    // Check if essential components are found (e.g., year, month, day)
+                    if (yearStart == -1 || monthStart == -1 || dayStart == -1)
+                    {
+                        throw new FormatException("Invalid input format: Year, month, and day are required.");
+                    }
 
-                    // Lấy vị trí và số lượng cho phút
-                    int firstMinuteIndex = inputFormat.IndexOf("m");
-                    int countMinute = inputFormat.LastIndexOf("m") - firstMinuteIndex + 1;
+                    // Construct the date/time string (handle missing components)
+                    string dateTimeStrFormatted = "";
+                    if (yearStart != -1) dateTimeStrFormatted += fileName.Substring(yearStart, yearCount);
+                    if (monthStart != -1) dateTimeStrFormatted += fileName.Substring(monthStart, monthCount);
+                    if (dayStart != -1) dateTimeStrFormatted += fileName.Substring(dayStart, dayCount);
 
-                    // Lấy vị trí và số lượng cho giây
-                    int firstSecondIndex = inputFormat.IndexOf("s");
-                    int countSecond = inputFormat.LastIndexOf("s") - firstSecondIndex + 1;
-                    // Chuyển đổi chuỗi sang DateTime
-                    string dateTimeStrFormatted = fileName.Substring(firstYearIndex, countYear) + fileName.Substring(firstMonthIndex, countMonth) + fileName.Substring(firstDayIndex, countDay) + "-" + fileName.Substring(firstHourIndex, countHour) + fileName.Substring(firstMinuteIndex, countMinute) + fileName.Substring(firstSecondIndex, countSecond);
-                    DateTime dateTime = DateTime.ParseExact(dateTimeStrFormatted, tbDateTimeFormat.Text, null);
+                    if (hourStart != -1) dateTimeStrFormatted += "-" + fileName.Substring(hourStart, hourCount);
+                    else dateTimeStrFormatted += "-00";
+                    if (minuteStart != -1) dateTimeStrFormatted += fileName.Substring(minuteStart, minuteCount);
+                    else dateTimeStrFormatted += "00";
+                    if (secondStart != -1) dateTimeStrFormatted += fileName.Substring(secondStart, secondCount);
+                    else dateTimeStrFormatted += "00";
+
+
+                    // Parse the DateTime
+                    DateTime dateTime = DateTime.ParseExact(dateTimeStrFormatted, tbDateTimeFormat.Text, CultureInfo.InvariantCulture); // Use InvariantCulture
+
                     filePathsDate.Add(dateTime);
                     listBoxExtractedDate.AddItem(dateTime.ToString(tbDateTimeFormat.Text));
                 }
