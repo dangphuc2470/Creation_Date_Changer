@@ -46,6 +46,7 @@ dependencies:
   path: ^1.9.0
   desktop_drop: ^0.4.4
   cross_file: ^0.3.4+2
+  exif: ^3.3.0
 
 dev_dependencies:
   flutter_test:
