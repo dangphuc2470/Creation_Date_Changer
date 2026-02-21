@@ -9,7 +9,7 @@ class SettingsProvider extends ChangeNotifier {
   // Preferences
   String defaultChangeDateFormat = '****yyyyMMdd*HHmmss';
   String defaultRenameFormat = 'IMG_<yyyyMMdd_HHmmss>_[nnnn]';
-  bool useOpenStreetMap = true;
+  String mapProvider = 'google_roadmap';
   List<LensTemplate> lensTemplates = [];
 
   bool get isLoaded => _isLoaded;
@@ -22,7 +22,7 @@ class SettingsProvider extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     defaultChangeDateFormat = _prefs.getString('defaultChangeDateFormat') ?? '****yyyyMMdd*HHmmss';
     defaultRenameFormat = _prefs.getString('defaultRenameFormat') ?? 'IMG_<yyyyMMdd_HHmmss>_[nnnn]';
-    useOpenStreetMap = _prefs.getBool('useOpenStreetMap') ?? true;
+    mapProvider = _prefs.getString('mapProvider') ?? 'google_roadmap';
     
     final lensesJson = _prefs.getStringList('lensTemplates');
     if (lensesJson != null) {
@@ -67,9 +67,9 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> updateMapProvider(bool useOsm) async {
-    useOpenStreetMap = useOsm;
-    await _prefs.setBool('useOpenStreetMap', useOsm);
+  Future<void> updateMapProvider(String provider) async {
+    mapProvider = provider;
+    await _prefs.setString('mapProvider', provider);
     notifyListeners();
   }
 }

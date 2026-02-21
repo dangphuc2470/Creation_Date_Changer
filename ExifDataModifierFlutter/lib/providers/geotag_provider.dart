@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import '../models/location_point.dart';
 import 'package:native_exif/native_exif.dart';
 
@@ -31,8 +33,18 @@ class GeotagItem {
   });
 }
 
+class TaggedHistoryItem {
+  final String path;
+  final double latitude;
+  final double longitude;
+
+  TaggedHistoryItem(
+      {required this.path, required this.latitude, required this.longitude});
+}
+
 class GeotagProvider extends ChangeNotifier {
   List<GeotagItem> items = [];
+  List<TaggedHistoryItem> historyMarkers = [];
   List<LocationPoint> timelineLocations = [];
   bool isProcessing = false;
   int currentProcessing = 0;
@@ -44,6 +56,43 @@ class GeotagProvider extends ChangeNotifier {
   int maxInterpolationGapMinutes = 120; // Default 2 hours
   String? loadedTimelineFileName;
   LocationPoint? lastPinnedLocation;
+
+  Future<String> _getExifToolExecutable() async {
+    // 1. Try system path
+    try {
+      final result = await Process.run('exiftool', ['-ver']);
+      if (result.exitCode == 0) return 'exiftool';
+    } catch (_) {}
+
+    // 2. Try C:\exiftool\exiftool.exe
+    if (Platform.isWindows) {
+      final cPath = 'C:\\exiftool\\exiftool.exe';
+      if (await File(cPath).exists()) return cPath;
+    }
+
+    // 3. Try extracted asset
+    try {
+      final appDir = await getApplicationSupportDirectory();
+      final exeFile = File(p.join(appDir.path, 'exiftool.exe'));
+
+      if (!(await exeFile.exists())) {
+        final data = await rootBundle.load('assets/bin/exiftool.exe');
+        final bytes = data.buffer.asUint8List();
+        await exeFile.writeAsBytes(bytes);
+
+        // If there's an exiftool_files folder, we might need it too,
+        // but let's see if the executable alone works (standalone version)
+      }
+      return exeFile.path;
+    } catch (e) {
+      return 'exiftool'; // Fallback to name and hope for the best
+    }
+  }
+
+  void clearHistory() {
+    historyMarkers.clear();
+    notifyListeners();
+  }
 
   void setMaxInterpolationGapMinutes(int val) {
     maxInterpolationGapMinutes = val;
@@ -103,23 +152,31 @@ class GeotagProvider extends ChangeNotifier {
       if (!items.any((item) => item.path == file.path)) {
         bool hasGps = false;
         try {
-          if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
-            final result = await Process.run('exiftool', ['-GPSLatitude', '-GPSLongitude', file.path]);
-            if (result.stdout.toString().trim().isNotEmpty) {
-              hasGps = true;
-            }
-          } else {
-            final exif = await Exif.fromPath(file.path);
-            final attr = await exif.getAttributes();
-            if (attr != null && attr.containsKey('GPSLatitude') && attr.containsKey('GPSLongitude')) {
-              hasGps = true;
-            }
-            await exif.close();
+          final exif = await Exif.fromPath(file.path);
+          final attr = await exif.getAttributes();
+          if (attr != null &&
+              (attr.containsKey('GPSLatitude') ||
+                  attr.containsKey('GPSLongitude'))) {
+            hasGps = true;
           }
+          await exif.close();
         } catch (e) {
-          // ignore error reading initial exif
+          // If native_exif fails, try exiftool on desktop as fallback
+          if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+            try {
+              final exe = await _getExifToolExecutable();
+              final result = await Process.run(
+                  exe, ['-GPSLatitude', '-GPSLongitude', file.path]);
+              if (result.stdout.toString().trim().isNotEmpty) {
+                hasGps = true;
+              }
+            } catch (_) {
+              // ignore error reading initial exif with exiftool
+            }
+          }
+          // ignore error reading initial exif with native_exif if not desktop or exiftool also failed
         }
-        
+
         items.add(GeotagItem(
           file: file,
           path: file.path,
@@ -168,7 +225,8 @@ class GeotagProvider extends ChangeNotifier {
   Future<void> loadTimelineData(String jsonData, String filename) async {
     try {
       final List<dynamic> parsedList = jsonDecode(jsonData);
-      timelineLocations = parsedList.map((e) => LocationPoint.fromGeotagJson(e)).toList();
+      timelineLocations =
+          parsedList.map((e) => LocationPoint.fromGeotagJson(e)).toList();
       // Ensure sorted
       timelineLocations.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       loadedTimelineFileName = filename;
@@ -198,57 +256,61 @@ class GeotagProvider extends ChangeNotifier {
       }
 
       if (timelineLocations.isEmpty) {
-         if (!item.hasExistingGps || overrideExistingGps) {
-           if (lastPinnedLocation != null) {
-              item.location = LocationPoint(
-                latitude: lastPinnedLocation!.latitude,
-                longitude: lastPinnedLocation!.longitude,
-                timestamp: DateTime.now(),
-              );
-              item.isError = false;
-              item.errorMessage = 'Manual Location applied (Auto)';
-              item.isManualLocation = true;
-           } else {
-             item.location = null; 
-             item.isError = true;
-             item.errorMessage = 'Waiting for timeline or map selection';
-           }
-         }
-         continue;
+        if (!item.hasExistingGps || overrideExistingGps) {
+          if (lastPinnedLocation != null) {
+            item.location = LocationPoint(
+              latitude: lastPinnedLocation!.latitude,
+              longitude: lastPinnedLocation!.longitude,
+              timestamp: DateTime.now(),
+            );
+            item.isError = false;
+            item.errorMessage = 'Manual Location applied (Auto)';
+            item.isManualLocation = true;
+          } else {
+            item.location = null;
+            item.isError = true;
+            item.errorMessage = 'Waiting for timeline or map selection';
+          }
+        }
+        continue;
       }
 
       try {
         final stat = await item.file.stat();
         // Use modified as approximation for taken if EXIF not read yet
         DateTime fileTime = stat.modified.add(timeOffset);
-        
+
         // Find points for interpolation
         if (fileTime.isBefore(timelineLocations.first.timestamp)) {
           // File is older than our first timeline point
-          final diff = timelineLocations.first.timestamp.difference(fileTime).abs();
+          final diff =
+              timelineLocations.first.timestamp.difference(fileTime).abs();
           if (diff.inMinutes <= 30) {
             item.location = timelineLocations.first;
             item.isError = false;
             item.errorMessage = null;
           } else {
-             item.location = null;
-             item.isError = true;
-             item.errorMessage = 'No nearest timeline location found within 30 minutes.';
+            item.location = null;
+            item.isError = true;
+            item.errorMessage =
+                'No nearest timeline location found within 30 minutes.';
           }
           continue;
         }
 
         if (fileTime.isAfter(timelineLocations.last.timestamp)) {
           // File is newer than our last timeline point
-          final diff = fileTime.difference(timelineLocations.last.timestamp).abs();
+          final diff =
+              fileTime.difference(timelineLocations.last.timestamp).abs();
           if (diff.inMinutes <= 30) {
             item.location = timelineLocations.last;
             item.isError = false;
             item.errorMessage = null;
           } else {
-             item.location = null;
-             item.isError = true;
-             item.errorMessage = 'No nearest timeline location found within 30 minutes.';
+            item.location = null;
+            item.isError = true;
+            item.errorMessage =
+                'No nearest timeline location found within 30 minutes.';
           }
           continue;
         }
@@ -269,39 +331,44 @@ class GeotagProvider extends ChangeNotifier {
         if (prevPoint != null && nextPoint != null) {
           // Check if distance between two points is within reasonable timeframe (e.g. less than 2 hours apart)
           // to avoid interpolating over huge gaps
-          if (nextPoint.timestamp.difference(prevPoint.timestamp).inMinutes > maxInterpolationGapMinutes) {
-             // Too big of a gap, fallback to nearest point logic
-             final prevDiff = fileTime.difference(prevPoint.timestamp).abs();
-             final nextDiff = nextPoint.timestamp.difference(fileTime).abs();
-             LocationPoint closest = prevDiff < nextDiff ? prevPoint : nextPoint;
-             Duration minDiff = prevDiff < nextDiff ? prevDiff : nextDiff;
+          if (nextPoint.timestamp.difference(prevPoint.timestamp).inMinutes >
+              maxInterpolationGapMinutes) {
+            // Too big of a gap, fallback to nearest point logic
+            final prevDiff = fileTime.difference(prevPoint.timestamp).abs();
+            final nextDiff = nextPoint.timestamp.difference(fileTime).abs();
+            LocationPoint closest = prevDiff < nextDiff ? prevPoint : nextPoint;
+            Duration minDiff = prevDiff < nextDiff ? prevDiff : nextDiff;
 
-             if (minDiff.inMinutes <= 30) {
-                item.location = closest;
-                item.isError = false;
-                item.errorMessage = null;
-             } else {
-                item.location = null;
-                item.isError = true;
-                item.errorMessage = 'Too much time gap between points for interpolation (Gap > $maxInterpolationGapMinutes mins)';
-             }
-             continue;
+            if (minDiff.inMinutes <= 30) {
+              item.location = closest;
+              item.isError = false;
+              item.errorMessage = null;
+            } else {
+              item.location = null;
+              item.isError = true;
+              item.errorMessage =
+                  'Too much time gap between points for interpolation (Gap > $maxInterpolationGapMinutes mins)';
+            }
+            continue;
           }
 
           // Interpolate!
-          int totalDiffSc = nextPoint.timestamp.difference(prevPoint.timestamp).inSeconds;
+          int totalDiffSc =
+              nextPoint.timestamp.difference(prevPoint.timestamp).inSeconds;
           if (totalDiffSc == 0) {
-             item.location = prevPoint; // Exact same time
-             item.isError = false;
-             item.errorMessage = null;
-             continue;
+            item.location = prevPoint; // Exact same time
+            item.isError = false;
+            item.errorMessage = null;
+            continue;
           }
-          
+
           int elapsedSc = fileTime.difference(prevPoint.timestamp).inSeconds;
           double ratio = elapsedSc / totalDiffSc; // 0.0 to 1.0
 
-          double interpLat = prevPoint.latitude + (nextPoint.latitude - prevPoint.latitude) * ratio;
-          double interpLng = prevPoint.longitude + (nextPoint.longitude - prevPoint.longitude) * ratio;
+          double interpLat = prevPoint.latitude +
+              (nextPoint.latitude - prevPoint.latitude) * ratio;
+          double interpLng = prevPoint.longitude +
+              (nextPoint.longitude - prevPoint.longitude) * ratio;
 
           item.location = LocationPoint(
             latitude: interpLat,
@@ -326,38 +393,23 @@ class GeotagProvider extends ChangeNotifier {
 
   Future<void> applyChanges() async {
     isProcessing = true;
-    
+
     // Count how many items need to be processed
-    var itemsToProcess = items.where((item) => item.isChecked && item.location != null && !item.isError).toList();
+    var itemsToProcess = items
+        .where(
+            (item) => item.isChecked && item.location != null && !item.isError)
+        .toList();
     totalProcessing = itemsToProcess.length;
     currentProcessing = 0;
-    
+
     notifyListeners();
 
     for (var item in itemsToProcess) {
       if (item.isChecked && item.location != null && !item.isError) {
         try {
-          if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
-            // native_exif doesn't fully support macOS/desktop writing, so we fallback to exiftool
-            final lat = item.location!.latitude.abs();
-            final latRef = item.location!.latitude >= 0 ? "N" : "S";
-            final lng = item.location!.longitude.abs();
-            final lngRef = item.location!.longitude >= 0 ? "E" : "W";
-            
-            final result = await Process.run('exiftool', [
-              '-GPSLatitude=$lat',
-              '-GPSLatitudeRef=$latRef',
-              '-GPSLongitude=$lng',
-              '-GPSLongitudeRef=$lngRef',
-              '-overwrite_original',
-              item.path
-            ]);
-            
-            if (result.exitCode != 0) {
-              throw Exception('ExifTool error: ${result.stderr}');
-            }
-          } else {
-            // Use native_exif for Android/iOS
+          // Try native_exif first on all platforms
+          bool nativeSuccess = false;
+          try {
             final exif = await Exif.fromPath(item.path);
             await exif.writeAttributes({
               'GPSLatitude': item.location!.latitude.abs().toString(),
@@ -366,11 +418,49 @@ class GeotagProvider extends ChangeNotifier {
               'GPSLongitudeRef': item.location!.longitude >= 0 ? 'E' : 'W',
             });
             await exif.close();
+            nativeSuccess = true;
+          } catch (e) {
+            // Fallback for desktop platforms if native_exif fails
+            if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+              final lat = item.location!.latitude.abs();
+              final latRef = item.location!.latitude >= 0 ? "N" : "S";
+              final lng = item.location!.longitude.abs();
+              final lngRef = item.location!.longitude >= 0 ? "E" : "W";
+
+              final exe = await _getExifToolExecutable();
+              final result = await Process.run(exe, [
+                '-GPSLatitude=$lat',
+                '-GPSLatitudeRef=$latRef',
+                '-GPSLongitude=$lng',
+                '-GPSLongitudeRef=$lngRef',
+                '-overwrite_original',
+                item.path
+              ]);
+
+              if (result.exitCode != 0) {
+                throw Exception('ExifTool error: ${result.stderr}');
+              }
+              nativeSuccess = true;
+            } else {
+              // If not desktop and native_exif failed, rethrow the error
+              rethrow;
+            }
           }
-          
+
+          if (!nativeSuccess)
+            throw Exception('Failed to write EXIF data using any method.');
+
           item.isSuccess = true;
           item.isError = false;
           item.errorMessage = null;
+
+          // Add to history markers (update if already exists)
+          historyMarkers.removeWhere((m) => m.path == item.path);
+          historyMarkers.add(TaggedHistoryItem(
+            path: item.path,
+            latitude: item.location!.latitude,
+            longitude: item.location!.longitude,
+          ));
         } catch (e) {
           item.isError = true;
           item.isSuccess = false;
@@ -383,12 +473,12 @@ class GeotagProvider extends ChangeNotifier {
 
     isProcessing = false;
     notifyListeners();
-    
+
     // Auto clear list on success
     if (autoClearList && !items.any((item) => item.isError)) {
       // Delay to let the user see the visual feedback before it clears
       Future.delayed(const Duration(seconds: 1), () {
-         clearFiles();
+        clearFiles();
       });
     }
   }

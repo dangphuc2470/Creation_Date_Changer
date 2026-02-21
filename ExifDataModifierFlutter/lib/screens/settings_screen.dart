@@ -66,13 +66,24 @@ class SettingsScreen extends StatelessWidget {
                 children: [
                   Text('Geotag & Map', style: Theme.of(context).textTheme.titleLarge),
                   const Divider(),
-                  SwitchListTile(
-                    title: const Text('Use OpenStreetMap (OSM)'),
-                    subtitle: const Text('If disabled, uses default FlutterMap placeholder tiles or other configured styles.'),
-                    value: provider.useOpenStreetMap,
-                    onChanged: (val) {
-                      context.read<SettingsProvider>().updateMapProvider(val);
-                    },
+                  ListTile(
+                    title: const Text('Map Provider'),
+                    subtitle: const Text('Select the default map style.'),
+                    trailing: DropdownButton<String>(
+                      value: provider.mapProvider,
+                      items: const [
+                        DropdownMenuItem(value: 'google_roadmap', child: Text('Google Maps')),
+                        DropdownMenuItem(value: 'google_satellite', child: Text('Google Satellite')),
+                        DropdownMenuItem(value: 'bing_roadmap', child: Text('Bing Maps')),
+                        DropdownMenuItem(value: 'bing_satellite', child: Text('Bing Satellite')),
+                        DropdownMenuItem(value: 'osm', child: Text('OpenStreetMap')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          context.read<SettingsProvider>().updateMapProvider(val);
+                        }
+                      },
+                    ),
                   ),
                 ],
               ),
