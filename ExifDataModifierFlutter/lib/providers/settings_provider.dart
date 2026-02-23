@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/lens_template.dart';
@@ -11,6 +12,9 @@ class SettingsProvider extends ChangeNotifier {
   String defaultRenameFormat = 'IMG_<yyyyMMdd_HHmmss>_[nnnn]';
   String mapProvider = 'google_roadmap';
   List<LensTemplate> lensTemplates = [];
+  Map<String, String> lensMappings =
+      {}; // Key: "focal_aperture", Value: "lensId"
+  int geotagTimezone = 7;
 
   bool get isLoaded => _isLoaded;
 
@@ -20,20 +24,65 @@ class SettingsProvider extends ChangeNotifier {
 
   Future<void> _initPrefs() async {
     _prefs = await SharedPreferences.getInstance();
-    defaultChangeDateFormat = _prefs.getString('defaultChangeDateFormat') ?? '****yyyyMMdd*HHmmss';
-    defaultRenameFormat = _prefs.getString('defaultRenameFormat') ?? 'IMG_<yyyyMMdd_HHmmss>_[nnnn]';
+    defaultChangeDateFormat =
+        _prefs.getString('defaultChangeDateFormat') ?? '****yyyyMMdd*HHmmss';
+    defaultRenameFormat = _prefs.getString('defaultRenameFormat') ??
+        'IMG_<yyyyMMdd_HHmmss>_[nnnn]';
     mapProvider = _prefs.getString('mapProvider') ?? 'google_roadmap';
-    
+    geotagTimezone = _prefs.getInt('geotagTimezone') ?? 7;
+
     final lensesJson = _prefs.getStringList('lensTemplates');
     if (lensesJson != null) {
       lensTemplates = lensesJson.map((e) => LensTemplate.fromJson(e)).toList();
     } else {
-      // Add a default template from user's example
+      // Add default templates based on user's manual lenses
       lensTemplates = [
-        LensTemplate(id: 'default1', name: 'Carl Zeiss Jena 135mm f/3.5', make: 'Carl Zeiss', model: 'Carl Zeiss Jena 135mm f/3.5', focalLength: 135.0, fNumber: 3.5),
+        LensTemplate(
+            id: 'takumar300',
+            name: 'Super-Takumar 300mm f/4',
+            make: 'Asahi Pentax',
+            model: 'Super-Takumar 300mm f/4',
+            focalLength: 300.0,
+            fNumber: 4.0),
+        LensTemplate(
+            id: 'czj135',
+            name: 'Carl Zeiss Jena MC Sonnar 135mm f/3.5',
+            make: 'Carl Zeiss Jena',
+            model: 'Carl Zeiss Jena MC Sonnar 135mm f/3.5',
+            focalLength: 135.0,
+            fNumber: 3.5),
+        LensTemplate(
+            id: 'canon50stm',
+            name: 'EF50mm f/1.8 STM',
+            make: 'Canon',
+            model: 'EF50mm f/1.8 STM',
+            focalLength: 50.0,
+            fNumber: 1.8),
+        LensTemplate(
+            id: 'canon70300is',
+            name: 'EF70-300mm f/4-5.6 IS USM',
+            make: 'Canon',
+            model: 'EF70-300mm f/4-5.6 IS USM',
+            focalLength: 70.0,
+            fNumber: 4.0),
+        LensTemplate(
+            id: 'sigma2470macro',
+            name: 'Sigma 24-70mm f/2.8 EX DG Macro',
+            make: 'Sigma',
+            model: 'Sigma 24-70mm f/2.8 EX DG Macro',
+            focalLength: 24.0,
+            fNumber: 2.8),
       ];
     }
-    
+
+    final mappingsJson = _prefs.getString('lensMappings');
+    if (mappingsJson != null) {
+      lensMappings = Map<String, String>.from(json.decode(mappingsJson));
+    } else {
+      // Default mapping for Carl Zeiss
+      lensMappings = {'0.0_0.0': 'carlzeiss'};
+    }
+
     _isLoaded = true;
     notifyListeners();
   }
@@ -46,7 +95,10 @@ class SettingsProvider extends ChangeNotifier {
 
   Future<void> removeLensTemplate(String id) async {
     lensTemplates.removeWhere((element) => element.id == id);
+    // Also remove any mappings pointing to this lens
+    lensMappings.removeWhere((key, value) => value == id);
     await _saveLensTemplates();
+    await _saveLensMappings();
     notifyListeners();
   }
 
@@ -71,5 +123,25 @@ class SettingsProvider extends ChangeNotifier {
     mapProvider = provider;
     await _prefs.setString('mapProvider', provider);
     notifyListeners();
+  }
+
+  Future<void> updateGeotagTimezone(int tz) async {
+    geotagTimezone = tz;
+    await _prefs.setInt('geotagTimezone', tz);
+    notifyListeners();
+  }
+
+  Future<void> updateLensMapping(String exifSignature, String? lensId) async {
+    if (lensId == null) {
+      lensMappings.remove(exifSignature);
+    } else {
+      lensMappings[exifSignature] = lensId;
+    }
+    await _saveLensMappings();
+    notifyListeners();
+  }
+
+  Future<void> _saveLensMappings() async {
+    await _prefs.setString('lensMappings', json.encode(lensMappings));
   }
 }
