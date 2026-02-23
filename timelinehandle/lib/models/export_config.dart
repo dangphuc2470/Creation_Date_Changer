@@ -1,5 +1,6 @@
 enum ExportMode {
   yearMonthDay,
+  dailyFiles,
   dateRange,
 }
 
@@ -9,12 +10,14 @@ class ExportConfig {
   final DateTime? startDate;
   final DateTime endDate;
   final String outputPath;
+  final double timezoneOffset;
 
   ExportConfig({
     required this.mode,
     this.startDate,
     DateTime? endDate,
     required this.outputPath,
+    this.timezoneOffset = 0.0,
   }) : endDate = endDate ?? DateTime.now();
 
   /// Get date range description

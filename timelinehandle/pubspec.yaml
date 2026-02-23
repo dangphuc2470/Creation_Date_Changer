@@ -36,18 +36,18 @@ dependencies:
   cupertino_icons: ^1.0.6
   
   # Map visualization
-  flutter_map: ^6.1.0
+  flutter_map: ^8.2.2
   google_maps_flutter: ^2.5.3
   latlong2: ^0.9.0
   
   # File handling
   xml: ^6.5.0
   path_provider: ^2.1.2
-  file_picker: ^6.1.1
+  file_picker: ^10.3.10
   path: ^1.8.3
   
   # Utilities
-  intl: ^0.19.0
+  intl: ^0.20.2
   shared_preferences: ^2.2.2
 
 dev_dependencies:
@@ -59,7 +59,7 @@ dev_dependencies:
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
-  flutter_lints: ^3.0.0
+  flutter_lints: ^6.0.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

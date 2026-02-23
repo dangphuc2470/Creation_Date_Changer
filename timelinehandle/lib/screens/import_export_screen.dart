@@ -6,6 +6,10 @@ import '../models/export_config.dart';
 import '../services/timeline_parser.dart';
 import '../services/gpx_parser.dart';
 import '../services/export_service.dart';
+import '../services/batch_import_service.dart';
+import 'conflict_resolver_screen.dart';
+import '../services/settings_service.dart';
+import 'package:path/path.dart' as path;
 
 class ImportExportScreen extends StatefulWidget {
   const ImportExportScreen({super.key});
@@ -19,8 +23,8 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
   bool _isLoading = false;
   String _statusMessage = 'No data loaded';
   double _progress = 0.0;
-  
-  ExportMode _exportMode = ExportMode.yearMonthDay;
+
+  ExportMode _exportMode = ExportMode.dailyFiles;
   DateTime? _startDate;
   DateTime _endDate = DateTime.now();
   String? _outputPath;
@@ -55,6 +59,11 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
           _loadedPoints.addAll(points);
           _isLoading = false;
           _statusMessage = 'Loaded ${points.length} points from Timeline.json';
+          // Set default output folder
+          if (_outputPath == null) {
+            final parentDir = path.dirname(result.files.single.path!);
+            _outputPath = path.join(path.dirname(parentDir), 'output');
+          }
         });
       } catch (e) {
         setState(() {
@@ -83,11 +92,78 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
           _loadedPoints.addAll(points);
           _isLoading = false;
           _statusMessage = 'Loaded ${points.length} points from GPX';
+          // Set default output folder
+          if (_outputPath == null) {
+            final parentDir = path.dirname(result.files.single.path!);
+            _outputPath = path.join(path.dirname(parentDir), 'output');
+          }
         });
       } catch (e) {
         setState(() {
           _isLoading = false;
           _statusMessage = 'Error: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _pickBatchFolder() async {
+    final result = await FilePicker.platform.getDirectoryPath();
+    if (result != null) {
+      setState(() {
+        _isLoading = true;
+        _statusMessage = 'Scanning folder...';
+        _progress = 0.0;
+      });
+
+      try {
+        final groups = await BatchImportService.scanDirectory(
+          result,
+          (progress, message) {
+            setState(() {
+              _progress = progress;
+              _statusMessage = message;
+            });
+          },
+        );
+
+        if (groups.isEmpty) {
+          setState(() {
+            _isLoading = false;
+            _statusMessage = 'No valid GPX or JSON files found in folder';
+          });
+          return;
+        }
+
+        if (mounted) {
+          final List<LocationPoint>? finalPoints =
+              await Navigator.push<List<LocationPoint>>(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ConflictResolverScreen(groups: groups),
+            ),
+          );
+
+          if (finalPoints != null && finalPoints.isNotEmpty) {
+            setState(() {
+              _loadedPoints.addAll(finalPoints);
+              _statusMessage =
+                  'Imported ${finalPoints.length} points from folder';
+              // Set default output folder
+              if (_outputPath == null) {
+                _outputPath = path.join(path.dirname(result), 'output');
+              }
+            });
+          }
+        }
+
+        setState(() {
+          _isLoading = false;
+        });
+      } catch (e) {
+        setState(() {
+          _isLoading = false;
+          _statusMessage = 'Error scanning folder: $e';
         });
       }
     }
@@ -124,11 +200,13 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
     });
 
     try {
+      final offset = await SettingsService.getTimezoneOffset();
       final config = ExportConfig(
         mode: _exportMode,
         startDate: _startDate,
         endDate: _endDate,
         outputPath: _outputPath!,
+        timezoneOffset: offset,
       );
 
       final result = await ExportService.export(
@@ -144,12 +222,15 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
 
       setState(() {
         _isLoading = false;
-        _statusMessage = 'Exported ${result.pointsExported} points to ${result.filesCreated} files';
+        _statusMessage =
+            'Exported ${result.pointsExported} points to ${result.filesCreated} files';
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export complete: ${result.filesCreated} files created')),
+          SnackBar(
+              content: Text(
+                  'Export complete: ${result.filesCreated} files created')),
         );
       }
     } catch (e) {
@@ -164,146 +245,171 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Import Data', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _isLoading ? null : _pickTimelineFile,
-                          icon: const Icon(Icons.file_upload),
-                          label: const Text('Import Timeline.json'),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Import Data',
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _isLoading ? null : _pickTimelineFile,
+                            icon: const Icon(Icons.file_upload),
+                            label: const Text('Import Timeline.json'),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _isLoading ? null : _pickGpxFile,
-                          icon: const Icon(Icons.file_upload),
-                          label: const Text('Import GPX'),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _isLoading ? null : _pickGpxFile,
+                            icon: const Icon(Icons.file_upload),
+                            label: const Text('Import GPX'),
+                          ),
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ElevatedButton.icon(
+                      onPressed: _isLoading ? null : _pickBatchFolder,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor:
+                            Theme.of(context).colorScheme.primaryContainer,
+                        foregroundColor:
+                            Theme.of(context).colorScheme.onPrimaryContainer,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text('Time Filter', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ListTile(
-                          title: Text(_startDate == null ? 'Start: All' : 'Start: ${DateFormat('yyyy-MM-dd').format(_startDate!)}'),
-                          trailing: const Icon(Icons.calendar_today),
-                          onTap: () async {
-                            final date = await showDatePicker(
-                              context: context,
-                              initialDate: _startDate ?? DateTime.now(),
-                              firstDate: DateTime(2000),
-                              lastDate: DateTime.now(),
-                            );
-                            if (date != null) {
-                              setState(() => _startDate = date);
-                            }
-                          },
+                      icon: const Icon(Icons.drive_folder_upload),
+                      label: const Text('Batch Import Folder (GPX/JSON)'),
+                    ),
+                    const SizedBox(height: 16),
+                    Text('Time Filter',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ListTile(
+                            title: Text(_startDate == null
+                                ? 'Start: All'
+                                : 'Start: ${DateFormat('yyyy-MM-dd').format(_startDate!)}'),
+                            trailing: const Icon(Icons.calendar_today),
+                            onTap: () async {
+                              final date = await showDatePicker(
+                                context: context,
+                                initialDate: _startDate ?? DateTime.now(),
+                                firstDate: DateTime(2000),
+                                lastDate: DateTime.now(),
+                              );
+                              if (date != null) {
+                                setState(() => _startDate = date);
+                              }
+                            },
+                          ),
                         ),
-                      ),
-                      Expanded(
-                        child: ListTile(
-                          title: Text('End: ${DateFormat('yyyy-MM-dd').format(_endDate)}'),
-                          trailing: const Icon(Icons.calendar_today),
-                          onTap: () async {
-                            final date = await showDatePicker(
-                              context: context,
-                              initialDate: _endDate,
-                              firstDate: _startDate ?? DateTime(2000),
-                              lastDate: DateTime.now(),
-                            );
-                            if (date != null) {
-                              setState(() => _endDate = date);
-                            }
-                          },
+                        Expanded(
+                          child: ListTile(
+                            title: Text(
+                                'End: ${DateFormat('yyyy-MM-dd').format(_endDate)}'),
+                            trailing: const Icon(Icons.calendar_today),
+                            onTap: () async {
+                              final date = await showDatePicker(
+                                context: context,
+                                initialDate: _endDate,
+                                firstDate: _startDate ?? DateTime(2000),
+                                lastDate: DateTime.now(),
+                              );
+                              if (date != null) {
+                                setState(() => _endDate = date);
+                              }
+                            },
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Export Settings', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 16),
-                  SegmentedButton<ExportMode>(
-                    segments: const [
-                      ButtonSegment(
-                        value: ExportMode.yearMonthDay,
-                        label: Text('Year/Month/Day'),
-                        icon: Icon(Icons.folder_open),
-                      ),
-                      ButtonSegment(
-                        value: ExportMode.dateRange,
-                        label: Text('Date Range'),
-                        icon: Icon(Icons.date_range),
-                      ),
-                    ],
-                    selected: {_exportMode},
-                    onSelectionChanged: (Set<ExportMode> newSelection) {
-                      setState(() {
-                        _exportMode = newSelection.first;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  ListTile(
-                    title: Text(_outputPath ?? 'No output folder selected'),
-                    subtitle: const Text('Output folder'),
-                    trailing: const Icon(Icons.folder),
-                    onTap: _pickOutputFolder,
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: _isLoading ? null : _export,
-                    icon: const Icon(Icons.save),
-                    label: const Text('Export'),
-                  ),
-                ],
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Export Settings',
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 16),
+                    SegmentedButton<ExportMode>(
+                      segments: const [
+                        ButtonSegment(
+                          value: ExportMode.dailyFiles,
+                          label: Text('Daily Files'),
+                          icon: Icon(Icons.calendar_view_day),
+                        ),
+                        ButtonSegment(
+                          value: ExportMode.yearMonthDay,
+                          label: Text('Year/Month/Day'),
+                          icon: Icon(Icons.folder_open),
+                        ),
+                        ButtonSegment(
+                          value: ExportMode.dateRange,
+                          label: Text('Date Range'),
+                          icon: Icon(Icons.date_range),
+                        ),
+                      ],
+                      selected: {_exportMode},
+                      onSelectionChanged: (Set<ExportMode> newSelection) {
+                        setState(() {
+                          _exportMode = newSelection.first;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    ListTile(
+                      title: Text(_outputPath ?? 'No output folder selected'),
+                      subtitle: const Text('Output folder'),
+                      trailing: const Icon(Icons.folder),
+                      onTap: _pickOutputFolder,
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: _isLoading ? null : _export,
+                      icon: const Icon(Icons.save),
+                      label: const Text('Export'),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          if (_isLoading)
-            LinearProgressIndicator(value: _progress),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Status', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Text(_statusMessage),
-                  const SizedBox(height: 8),
-                  Text('Loaded points: ${_loadedPoints.length}'),
-                ],
+            const SizedBox(height: 16),
+            if (_isLoading) LinearProgressIndicator(value: _progress),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Status',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Text(_statusMessage),
+                    const SizedBox(height: 8),
+                    Text('Loaded points: ${_loadedPoints.length}'),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

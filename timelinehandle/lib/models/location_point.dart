@@ -24,7 +24,7 @@ class LocationPoint {
     final parts = pointStr.split('°, ');
     final lat = double.parse(parts[0]);
     final lon = double.parse(parts[1].replaceAll('°', ''));
-    
+
     return LocationPoint(
       latitude: lat,
       longitude: lon,
@@ -48,13 +48,37 @@ class LocationPoint {
   }
 
   /// Convert to simplified JSON for geotagging
-  Map<String, dynamic> toGeotagJson() {
+  Map<String, dynamic> toGeotagJson([double? offset]) {
+    String timeStr;
+    if (offset != null && offset != 0) {
+      // Create a local-looking time by adding offset to UTC
+      final adjustedTime =
+          timestamp.toUtc().add(Duration(minutes: (offset * 60).toInt()));
+      String isoStr = adjustedTime.toIso8601String();
+
+      // Remove 'Z' if it exists to append our own offset
+      if (isoStr.endsWith('Z')) {
+        isoStr = isoStr.substring(0, isoStr.length - 1);
+      }
+      timeStr = isoStr + _formatOffset(offset);
+    } else {
+      timeStr = timestamp.toUtc().toIso8601String();
+    }
+
     return {
-      'time': timestamp.toIso8601String(),
+      'time': timeStr,
       'lat': latitude,
       'lon': longitude,
       if (elevation != null) 'ele': elevation,
     };
+  }
+
+  String _formatOffset(double offset) {
+    final absOffset = offset.abs();
+    final hours = absOffset.floor();
+    final minutes = ((absOffset - hours) * 60).round();
+    final sign = offset >= 0 ? '+' : '-';
+    return '$sign${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}';
   }
 
   /// Create from geotag JSON

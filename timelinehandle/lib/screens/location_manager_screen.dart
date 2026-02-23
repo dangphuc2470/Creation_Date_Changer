@@ -2,31 +2,42 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import '../services/location_manager.dart';
+import '../models/location_point.dart';
 
 class LocationManagerScreen extends StatefulWidget {
-  const LocationManagerScreen({super.key});
+  final List<DateInfo> dates;
+  final String? loadedPath;
+  final Function(List<DateInfo>, String) onDatesLoaded;
+  final Set<String> activePathIds;
+  final Function(DateInfo, List<LocationPoint>) onTogglePath;
+
+  const LocationManagerScreen({
+    super.key,
+    required this.dates,
+    required this.loadedPath,
+    required this.onDatesLoaded,
+    required this.activePathIds,
+    required this.onTogglePath,
+  });
 
   @override
   State<LocationManagerScreen> createState() => _LocationManagerScreenState();
 }
 
 class _LocationManagerScreenState extends State<LocationManagerScreen> {
-  List<DateInfo> _dates = [];
   bool _isLoading = false;
-  String? _loadedPath;
 
   Future<void> _loadExportedData() async {
     final result = await FilePicker.platform.getDirectoryPath();
     if (result != null) {
       setState(() {
         _isLoading = true;
-        _loadedPath = result;
       });
 
       try {
         final dates = await LocationManager.scanExportedData(result);
+        widget.onDatesLoaded(dates, result);
         setState(() {
-          _dates = dates;
           _isLoading = false;
         });
       } catch (e) {
@@ -46,10 +57,7 @@ class _LocationManagerScreenState extends State<LocationManagerScreen> {
     try {
       final points = await LocationManager.loadLocationFile(dateInfo.filePath);
       if (mounted) {
-        // TODO: Navigate to map viewer with these points
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Loaded ${points.length} points for ${DateFormat('yyyy-MM-dd').format(dateInfo.date)}')),
-        );
+        widget.onTogglePath(dateInfo, points);
       }
     } catch (e) {
       if (mounted) {
@@ -74,10 +82,12 @@ class _LocationManagerScreenState extends State<LocationManagerScreen> {
                 icon: const Icon(Icons.folder_open),
                 label: const Text('Load Exported Data'),
               ),
-              if (_loadedPath != null) ...[
+              if (widget.loadedPath != null) ...[
                 const SizedBox(height: 8),
-                Text('Loaded from: $_loadedPath', style: Theme.of(context).textTheme.bodySmall),
-                Text('${_dates.length} dates found', style: Theme.of(context).textTheme.bodySmall),
+                Text('Loaded from: ${widget.loadedPath}',
+                    style: Theme.of(context).textTheme.bodySmall),
+                Text('${widget.dates.length} dates found',
+                    style: Theme.of(context).textTheme.bodySmall),
               ],
             ],
           ),
@@ -86,27 +96,49 @@ class _LocationManagerScreenState extends State<LocationManagerScreen> {
           const Expanded(
             child: Center(child: CircularProgressIndicator()),
           )
-        else if (_dates.isEmpty)
+        else if (widget.dates.isEmpty)
           const Expanded(
             child: Center(
-              child: Text('No data loaded. Click "Load Exported Data" to begin.'),
+              child:
+                  Text('No data loaded. Click "Load Exported Data" to begin.'),
             ),
           )
         else
           Expanded(
             child: ListView.builder(
-              itemCount: _dates.length,
+              itemCount: widget.dates.length,
               itemBuilder: (context, index) {
-                final dateInfo = _dates[index];
+                final dateInfo = widget.dates[index];
+                final isActive =
+                    widget.activePathIds.contains(dateInfo.filePath);
+
                 return Card(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  elevation: isActive ? 4 : 1,
+                  shape: isActive
+                      ? RoundedRectangleBorder(
+                          side: BorderSide(
+                              color: Theme.of(context).colorScheme.primary,
+                              width: 2),
+                          borderRadius: BorderRadius.circular(12),
+                        )
+                      : null,
                   child: ListTile(
-                    leading: const Icon(Icons.location_on),
+                    leading: CircleAvatar(
+                      backgroundColor: isActive
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
+                      child: Icon(
+                        isActive ? Icons.check : Icons.location_on,
+                        color: isActive ? Colors.white : null,
+                      ),
+                    ),
                     title: Text(DateFormat('yyyy-MM-dd').format(dateInfo.date)),
                     subtitle: Text('${dateInfo.pointCount} location points'),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.map),
+                    trailing: TextButton(
                       onPressed: () => _viewOnMap(dateInfo),
+                      child: Text(isActive ? 'SELECTED' : 'VIEW'),
                     ),
                     onTap: () => _viewOnMap(dateInfo),
                   ),
