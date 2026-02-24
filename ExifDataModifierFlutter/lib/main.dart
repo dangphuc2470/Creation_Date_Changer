@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 import 'providers/app_state_provider.dart';
 import 'providers/change_date_provider.dart';
 import 'providers/change_filename_provider.dart';
+import 'providers/batch_geotag_provider.dart';
 import 'providers/geotag_provider.dart';
 import 'providers/lens_metadata_provider.dart';
 import 'providers/settings_provider.dart';
+import 'screens/batch_geotag_screen.dart';
 import 'screens/change_date_screen.dart';
 import 'screens/change_filename_screen.dart';
 import 'screens/geotag_screen.dart';
@@ -21,6 +23,7 @@ void main() {
         ChangeNotifierProvider(create: (_) => ChangeDateProvider()),
         ChangeNotifierProvider(create: (_) => ChangeFilenameProvider()),
         ChangeNotifierProvider(create: (_) => GeotagProvider()),
+        ChangeNotifierProvider(create: (_) => BatchGeotagProvider()),
         ChangeNotifierProvider(create: (_) => LensMetadataProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
       ],
@@ -59,6 +62,7 @@ class MainLayoutScreen extends StatelessWidget {
     ChangeDateScreen(),
     ChangeFilenameScreen(),
     GeotagScreen(),
+    BatchGeotagScreen(),
     LensMetadataScreen(),
     SettingsScreen(),
   ];
@@ -88,6 +92,10 @@ class MainLayoutScreen extends StatelessWidget {
                 NavigationRailDestination(
                   icon: Icon(Icons.map),
                   label: Text('Geotag'),
+                ),
+                NavigationRailDestination(
+                  icon: Icon(Icons.photo_library_outlined),
+                  label: Text('Batch Geotag'),
                 ),
                 NavigationRailDestination(
                   icon: Icon(Icons.camera),
@@ -125,6 +133,10 @@ class MainLayoutScreen extends StatelessWidget {
           NavigationDestination(
             icon: Icon(Icons.map),
             label: 'Geotag',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.photo_library_outlined),
+            label: 'Batch Geotag',
           ),
           NavigationDestination(
             icon: Icon(Icons.camera),
