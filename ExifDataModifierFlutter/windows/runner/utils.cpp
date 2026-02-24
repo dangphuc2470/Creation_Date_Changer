@@ -7,18 +7,29 @@
 
 #include <iostream>
 
+// Redirects stdout/stderr to the currently attached console.
+// Must be called AFTER a successful AttachConsole or AllocConsole.
+static void RedirectIOToConsole() {
+  FILE *unused;
+  freopen_s(&unused, "CONOUT$", "w", stdout);
+  freopen_s(&unused, "CONOUT$", "w", stderr);
+  freopen_s(&unused, "CONIN$",  "r", stdin);
+  std::ios::sync_with_stdio(true);
+  FlutterDesktopResyncOutputStreams();
+}
+
 void CreateAndAttachConsole() {
   if (::AllocConsole()) {
-    FILE *unused;
-    if (freopen_s(&unused, "CONOUT$", "w", stdout)) {
-      _dup2(_fileno(stdout), 1);
-    }
-    if (freopen_s(&unused, "CONOUT$", "w", stderr)) {
-      _dup2(_fileno(stdout), 2);
-    }
-    std::ios::sync_with_stdio();
-    FlutterDesktopResyncOutputStreams();
+    RedirectIOToConsole();
   }
+}
+
+bool AttachParentConsole() {
+  if (::AttachConsole(ATTACH_PARENT_PROCESS)) {
+    RedirectIOToConsole();
+    return true;
+  }
+  return false;
 }
 
 std::vector<std::string> GetCommandLineArguments() {

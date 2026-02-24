@@ -14,6 +14,7 @@ import 'screens/change_filename_screen.dart';
 import 'screens/geotag_screen.dart';
 import 'screens/lens_metadata_screen.dart';
 import 'screens/settings_screen.dart';
+import 'services/app_notifier.dart';
 
 void main() {
   runApp(
@@ -49,10 +50,103 @@ class ExifModifierApp extends StatelessWidget {
             seedColor: Colors.deepPurple, brightness: Brightness.dark),
         useMaterial3: true,
       ),
-      themeMode: ThemeMode.system, // Uses device settings to choose light/dark
-      home: const MainLayoutScreen(),
+      themeMode: ThemeMode.system,
+      home: const _NotifListener(child: MainLayoutScreen()),
     );
   }
+}
+
+/// Wraps the root screen and listens to [AppNotifier] to show SnackBars.
+class _NotifListener extends StatefulWidget {
+  const _NotifListener({required this.child});
+  final Widget child;
+
+  @override
+  State<_NotifListener> createState() => _NotifListenerState();
+}
+
+class _NotifListenerState extends State<_NotifListener> {
+  @override
+  void initState() {
+    super.initState();
+    AppNotifier.notifier.addListener(_onNotif);
+  }
+
+  @override
+  void dispose() {
+    AppNotifier.notifier.removeListener(_onNotif);
+    super.dispose();
+  }
+
+  void _onNotif() {
+    final notif = AppNotifier.notifier.value;
+    if (notif == null || !mounted) return;
+
+    final (bg, icon) = switch (notif.type) {
+      AppNotifType.error => (const Color(0xFFC62828), Icons.error_outline),
+      AppNotifType.warning => (
+          const Color(0xFFE65100),
+          Icons.warning_amber_rounded
+        ),
+      AppNotifType.success => (
+          const Color(0xFF2E7D32),
+          Icons.check_circle_outline
+        ),
+      AppNotifType.info => (const Color(0xFF4527A0), Icons.info_outline),
+    };
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: bg,
+        duration: notif.type == AppNotifType.error
+            ? const Duration(seconds: 8)
+            : const Duration(seconds: 4),
+        content: Row(
+          children: [
+            Icon(icon, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                notif.message,
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        action: notif.detail != null
+            ? SnackBarAction(
+                label: 'Details',
+                textColor: Colors.white70,
+                onPressed: () => _showDetailDialog(notif),
+              )
+            : null,
+      ),
+    );
+  }
+
+  void _showDetailDialog(AppNotif notif) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(notif.message),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            notif.detail ?? '',
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class MainLayoutScreen extends StatelessWidget {

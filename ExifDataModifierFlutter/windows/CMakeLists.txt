@@ -106,3 +106,11 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# Copy exiftool_files directory directly to output (bypassing Flutter asset system for speed).
+set(EXIFTOOL_FILES_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../assets/bin/exiftool_files")
+if(EXISTS "${EXIFTOOL_FILES_SRC}")
+  install(DIRECTORY "${EXIFTOOL_FILES_SRC}"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()

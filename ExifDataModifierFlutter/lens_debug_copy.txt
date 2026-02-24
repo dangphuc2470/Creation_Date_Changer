@@ -1,0 +1,4 @@
+[2026-02-24T22:21:57.122759] === scanFiles called ===
+[2026-02-24T22:21:57.129450] Total files passed in: 55
+[2026-02-24T22:21:57.216311] Valid JPG/JPEG files: 0
+[2026-02-24T22:21:57.228009] No valid files — returning early

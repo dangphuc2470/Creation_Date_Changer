@@ -1,0 +1,22 @@
+﻿
+[ +128 ms] Artifact Instance of 'MaterialFonts' is not required, skipping update.
+[ +516 ms] -- Generating done (0.5s)
+[ +132 ms] MSBuild version 18.3.0-release-26070-10+3972042b7 for .NET Framework
+[ +204 ms] Project 
+"C:\Users\HP\Downloads\Code\CDC\ExifDataModifierFlutter\build\windows\x64\INSTALL.vcxproj" on node 1 
+(default targets).
+[ +104 ms] Project 
+"C:\Users\HP\Downloads\Code\CDC\ExifDataModifierFlutter\build\windows\x64\INSTALL.vcxproj" (1) is 
+building 
+"C:\Users\HP\Downloads\Code\CDC\ExifDataModifierFlutter\build\windows\x64\ALL_BUILD.vcxproj" (3) on 
+node 1 (default targets).
+[+1370 ms]   [ +142 ms] Artifact Instance of 'MaterialFonts' is not required, skipping update.
+[+2701 ms]   [+2701 ms] Skipping target: unpack_windows
+[ +999 ms]   [ +999 ms] Skipping target: kernel_snapshot_program
+[ +341 ms]   [ +341 ms] Skipping target: debug_bundle_windows-x64_assets
+[ +204 ms]   [ +204 ms] exiting with code 0
+[ +104 ms] FinalizeBuildStatus:
+[ +210 ms]   -- Installing: C:/Users/HP/Downloads/Code/CDC/ExifDataModifierFlutter/build/windows/x64/
+runner/Debug/data/flutter_assets/NativeAssetsManifest.json
+
+

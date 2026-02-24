@@ -8,6 +8,10 @@
 // it for both the runner and the Flutter library.
 void CreateAndAttachConsole();
 
+// Attaches to the parent process console (e.g. the terminal running
+// 'flutter run') and redirects stdout/stderr into it.
+bool AttachParentConsole();
+
 // Takes a null-terminated wchar_t* encoded in UTF-16 and returns a std::string
 // encoded in UTF-8. Returns an empty std::string on failure.
 std::string Utf8FromUtf16(const wchar_t* utf16_string);

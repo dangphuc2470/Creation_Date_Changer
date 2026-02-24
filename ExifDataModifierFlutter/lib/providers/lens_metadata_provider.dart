@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/lens_template.dart';
+import '../services/app_notifier.dart';
 
 class LensGroup {
   final double focalLength;
@@ -80,18 +81,81 @@ class LensMetadataProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Debug logger ─────────────────────────────────────────────────────────
+  /// Shorten an exception to a one-liner for toast display.
+  static String _shortMsg(Object e) {
+    final s = e.toString();
+    final nl = s.indexOf('\n');
+    return nl > 0 ? s.substring(0, nl) : s;
+  }
+
+  static File? _logFile;
+  static File _getLogFile() {
+    if (_logFile != null) return _logFile!;
+    // Ghi cạnh file .exe đang chạy → build\windows\x64\runner\Debug\lens_debug.log
+    final exeDir = p.dirname(Platform.resolvedExecutable);
+    _logFile = File(p.join(exeDir, 'lens_debug.log'));
+    return _logFile!;
+  }
+
+  static void _log(String msg) {
+    try {
+      final f = _getLogFile();
+      final ts = DateTime.now().toIso8601String();
+      f.writeAsStringSync('[$ts] $msg\n', mode: FileMode.append, flush: true);
+    } catch (_) {}
+  }
+
+  // Supported image extensions for lens metadata scanning
+  static const _supportedExts = {
+    'jpg',
+    'jpeg',
+    'arw',
+    'cr2',
+    'cr3',
+    'nef',
+    'raf',
+    'orf',
+    'dng',
+    'rw2',
+    'srw',
+    'pef',
+    'x3f',
+    'tif',
+    'tiff',
+  };
+
   Future<void> scanFiles(List<File> files,
       {List<LensTemplate>? availableTemplates,
       Map<String, String>? mappings}) async {
     isScanning = true;
     notifyListeners();
 
+    // Log all unique extensions found in the folder before filtering
+    _log('=== scanFiles called ===');
+    _log('Total files passed in: ${files.length}');
+    final extCounts = <String, int>{};
+    for (final f in files) {
+      final ext = f.path.split('.').last.toLowerCase();
+      extCounts[ext] = (extCounts[ext] ?? 0) + 1;
+    }
+    _log('Extensions found: $extCounts');
+
     final validFiles = files.where((f) {
-      final ext = f.path.toLowerCase();
-      return ext.endsWith('.jpg') || ext.endsWith('.jpeg');
+      final ext = f.path.split('.').last.toLowerCase();
+      return _supportedExts.contains(ext);
     }).toList();
 
+    _log('Valid image files (after filter): ${validFiles.length}');
+    if (validFiles.isNotEmpty) {
+      _log('First 3 files:');
+      for (final f in validFiles.take(3)) {
+        _log('  ${f.path}  (exists=${f.existsSync()})');
+      }
+    }
+
     if (validFiles.isEmpty) {
+      _log('No valid files — returning early');
       isScanning = false;
       notifyListeners();
       return;
@@ -101,24 +165,52 @@ class LensMetadataProvider extends ChangeNotifier {
 
     try {
       final exe = await _getExifToolExecutable();
+      _log('ExifTool exe: $exe');
 
-      // Batch read focal length and f-number using CSV output
-      // -n: numeric values for easier parsing
+      // Write file paths to a temp argfile to bypass Windows 8191-char limit
+      final tempDir = await getTemporaryDirectory();
+      final argFile = File(
+          '${tempDir.path}/lens_scan_${DateTime.now().millisecondsSinceEpoch}.txt');
+      await argFile.writeAsString(
+        validFiles.map((f) => f.path).join('\n'),
+        flush: true,
+      );
+      _log('Argfile: ${argFile.path}  (${validFiles.length} paths)');
+
+      // Flags go directly as args; file list comes from -@ argfile
       final result = await Process.run(exe, [
         '-FocalLength',
         '-FNumber',
         '-n',
         '-csv',
-        ...validFiles.map((f) => f.path),
+        '-@',
+        argFile.path,
       ]);
 
-      if (result.exitCode == 0) {
+      // Cleanup temp file
+      if (await argFile.exists()) await argFile.delete();
+
+      _log('exitCode: ${result.exitCode}');
+      _log('stdout (${result.stdout.toString().length} chars):');
+      _log(result.stdout
+          .toString()
+          .substring(0, result.stdout.toString().length.clamp(0, 2000)));
+      if (result.stderr.toString().isNotEmpty) {
+        _log(
+            'stderr: ${result.stderr.toString().substring(0, result.stderr.toString().length.clamp(0, 1000))}');
+      }
+
+      if (result.exitCode == 0 || result.exitCode == 1) {
+        // exitCode 1 = minor warning but CSV is still valid
         final lines = result.stdout.toString().split('\n');
+        _log('CSV rows (incl header): ${lines.length}');
         if (lines.length > 1) {
           final headers = _parseCsvLine(lines[0]);
           final fileIdx = headers.indexOf('SourceFile');
           final focalIdx = headers.indexOf('FocalLength');
           final fNumIdx = headers.indexOf('FNumber');
+          _log(
+              'CSV headers: $headers  fileIdx=$fileIdx focalIdx=$focalIdx fNumIdx=$fNumIdx');
 
           for (int i = 1; i < lines.length; i++) {
             final line = lines[i].trim();
@@ -165,10 +257,19 @@ class LensMetadataProvider extends ChangeNotifier {
                   originalExif: "Focal: ${focalLength}mm, f/$fNumber",
                 ));
           }
+          _log('Groups built: ${groupMap.length}');
         }
+      } else {
+        _log('ExifTool fatal (exit ${result.exitCode}) — no groups created');
+        AppNotifier.error(
+          'ExifTool failed (exit ${result.exitCode})',
+          exception: result.stderr.toString().isNotEmpty ? result.stderr : null,
+        );
       }
-    } catch (e) {
-      // Fallback
+    } catch (e, st) {
+      _log('EXCEPTION in scanFiles: $e');
+      _log('Stack: $st');
+      AppNotifier.error('Scan failed: ${_shortMsg(e)}', exception: e);
     }
 
     groups = groupMap.values.toList();
@@ -290,24 +391,35 @@ class LensMetadataProvider extends ChangeNotifier {
   Future<String> _getExifToolExecutable() async {
     try {
       final result = await Process.run('exiftool', ['-ver']);
-      if (result.exitCode == 0) return 'exiftool';
-    } catch (_) {}
+      if (result.exitCode == 0) {
+        _log('ExifTool found in PATH');
+        return 'exiftool';
+      }
+    } catch (e) {
+      _log('ExifTool not in PATH: $e');
+    }
 
     if (Platform.isWindows) {
       final cPath = 'C:\\exiftool\\exiftool.exe';
-      if (await File(cPath).exists()) return cPath;
+      if (await File(cPath).exists()) {
+        _log('ExifTool found at C:\\exiftool\\exiftool.exe');
+        return cPath;
+      }
     }
 
     try {
       final appDir = await getApplicationSupportDirectory();
       final exeFile = File(p.join(appDir.path, 'exiftool.exe'));
       if (!(await exeFile.exists())) {
+        _log('Extracting exiftool.exe to ${exeFile.path}');
         final data = await rootBundle.load('assets/bin/exiftool.exe');
         final bytes = data.buffer.asUint8List();
         await exeFile.writeAsBytes(bytes);
       }
+      _log('ExifTool at appDir: ${exeFile.path}');
       return exeFile.path;
     } catch (e) {
+      _log('ExifTool fallback failed: $e');
       return 'exiftool';
     }
   }
