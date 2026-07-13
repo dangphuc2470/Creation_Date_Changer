@@ -48,7 +48,7 @@ class _ConflictResolverScreenState extends State<ConflictResolverScreen> {
         actions: [
           ElevatedButton.icon(
             onPressed: () {
-              Navigator.pop(context, _getFinalPoints());
+              Navigator.pop(context, _groups);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.primary,

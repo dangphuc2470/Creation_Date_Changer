@@ -24,9 +24,9 @@ class ImportExportScreen extends StatefulWidget {
 }
 
 class _ImportExportScreenState extends State<ImportExportScreen> {
-  List<LocationPoint> _loadedPoints = [];
+  int _lastImportedCount = 0;
   bool _isLoading = false;
-  String _statusMessage = 'No data loaded';
+  String _statusMessage = 'No active imports';
   double _progress = 0.0;
 
   ExportMode _exportMode = ExportMode.dailyFiles;
@@ -60,16 +60,29 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
           },
         );
 
-        setState(() {
-          _loadedPoints.addAll(points);
-          _isLoading = false;
-          _statusMessage = 'Loaded ${points.length} points from Timeline.json';
-          // Set default output folder
-          if (_outputPath == null) {
-            final parentDir = path.dirname(result.files.single.path!);
-            _outputPath = path.join(path.dirname(parentDir), 'output');
-          }
-        });
+        if (points.isNotEmpty && mounted) {
+          final appState = context.read<AppStateProvider>();
+          await appState.saveImportedPoints(points, 'timeline');
+          
+          // Reload geotag providers with the new points
+          context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
+          context.read<BatchGeotagProvider>().loadTimelineLocationsFromAppDb();
+
+          setState(() {
+            _lastImportedCount = points.length;
+            _isLoading = false;
+            _statusMessage = 'Successfully imported ${points.length} points to App Database!';
+            if (_outputPath == null) {
+              final parentDir = path.dirname(result.files.single.path!);
+              _outputPath = path.join(path.dirname(parentDir), 'output');
+            }
+          });
+        } else {
+          setState(() {
+            _isLoading = false;
+            _statusMessage = 'No points found in the selected date range in Timeline.json';
+          });
+        }
       } catch (e) {
         setState(() {
           _isLoading = false;
@@ -93,16 +106,29 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
 
       try {
         final points = await GpxParser.parseFile(result.files.single.path!);
-        setState(() {
-          _loadedPoints.addAll(points);
-          _isLoading = false;
-          _statusMessage = 'Loaded ${points.length} points from GPX';
-          // Set default output folder
-          if (_outputPath == null) {
-            final parentDir = path.dirname(result.files.single.path!);
-            _outputPath = path.join(path.dirname(parentDir), 'output');
-          }
-        });
+        if (points.isNotEmpty && mounted) {
+          final appState = context.read<AppStateProvider>();
+          await appState.saveImportedPoints(points, 'gpx');
+
+          // Reload geotag providers with the new points
+          context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
+          context.read<BatchGeotagProvider>().loadTimelineLocationsFromAppDb();
+
+          setState(() {
+            _lastImportedCount = points.length;
+            _isLoading = false;
+            _statusMessage = 'Successfully imported ${points.length} points from GPX to App Database!';
+            if (_outputPath == null) {
+              final parentDir = path.dirname(result.files.single.path!);
+              _outputPath = path.join(path.dirname(parentDir), 'output');
+            }
+          });
+        } else {
+          setState(() {
+            _isLoading = false;
+            _statusMessage = 'No points found in the GPX file';
+          });
+        }
       } catch (e) {
         setState(() {
           _isLoading = false;
@@ -141,20 +167,32 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
         }
 
         if (mounted) {
-          final List<LocationPoint>? finalPoints =
-              await Navigator.push<List<LocationPoint>>(
+          final List<FileGroup>? finalGroups =
+              await Navigator.push<List<FileGroup>>(
             context,
             MaterialPageRoute(
               builder: (context) => ConflictResolverScreen(groups: groups),
             ),
           );
 
-          if (finalPoints != null && finalPoints.isNotEmpty) {
+          if (finalGroups != null && finalGroups.isNotEmpty) {
+            final appState = context.read<AppStateProvider>();
+            await appState.saveBatchGroups(finalGroups);
+
+            // Reload geotag providers with the new points
+            context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
+            context.read<BatchGeotagProvider>().loadTimelineLocationsFromAppDb();
+
+            int totalPts = 0;
+            for (final g in finalGroups) {
+              for (final f in g.files) {
+                if (f.isSelected) totalPts += f.points.length;
+              }
+            }
+
             setState(() {
-              _loadedPoints.addAll(finalPoints);
-              _statusMessage =
-                  'Imported ${finalPoints.length} points from folder';
-              // Set default output folder
+              _lastImportedCount = totalPts;
+              _statusMessage = 'Successfully imported all files to App Database!';
               if (_outputPath == null) {
                 _outputPath = path.join(path.dirname(result), 'output');
               }
@@ -183,41 +221,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
     }
   }
 
-  Future<void> _importToDatabase() async {
-    if (_loadedPoints.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No points loaded. Please pick a file first.')),
-      );
-      return;
-    }
 
-    setState(() {
-      _isLoading = true;
-      _statusMessage = 'Importing to App Database...';
-    });
-
-    try {
-      final appState = context.read<AppStateProvider>();
-      await appState.saveImportedPoints(_loadedPoints);
-
-      // Reload geotag providers with the new points
-      if (mounted) {
-        await context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
-        await context.read<BatchGeotagProvider>().loadTimelineLocationsFromAppDb();
-      }
-
-      setState(() {
-        _isLoading = false;
-        _statusMessage = 'Imported ${_loadedPoints.length} points to App Database successfully!';
-        _loadedPoints.clear(); // Clear local cache after successful import
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _statusMessage = 'Import to DB failed: $e';
-      });
-    }
-  }
 
   Future<void> _export() async {
     if (_outputPath == null) {
@@ -348,22 +352,6 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                         icon: const Icon(Icons.drive_folder_upload),
                         label: const Text('Batch Import Folder (GPX/JSON)'),
                       ),
-                      if (_loadedPoints.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: _isLoading ? null : _importToDatabase,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            icon: const Icon(Icons.save_alt),
-                            label: Text('Save ${_loadedPoints.length} Points to App Database'),
-                          ),
-                        ),
-                      ],
                       const SizedBox(height: 16),
                       Text('Time Filter',
                           style: Theme.of(context).textTheme.titleMedium),
@@ -478,7 +466,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
                       const SizedBox(height: 8),
                       Text(_statusMessage),
                       const SizedBox(height: 8),
-                      Text('Loaded points: ${_loadedPoints.length}'),
+                      Text('Last imported count: $_lastImportedCount points'),
                     ],
                   ),
                 ),

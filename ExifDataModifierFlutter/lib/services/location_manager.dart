@@ -1,17 +1,29 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import '../models/location_point.dart';
+import '../utils/geo_utils.dart';
 
 class DateInfo {
   final DateTime date;
   final int pointCount;
   final String filePath;
+  final double distance;
+  final String state; // "original", "edited", "snapped"
+  final String source; // "merge", "timeline", "gpx"
+  final bool hasTimelineBackup;
+  final bool hasGpxBackup;
   
   DateInfo({
     required this.date,
     required this.pointCount,
     required this.filePath,
+    required this.distance,
+    required this.state,
+    required this.source,
+    required this.hasTimelineBackup,
+    required this.hasGpxBackup,
   });
 }
 
@@ -25,58 +37,70 @@ class LocationManager {
     if (!await rootDir.exists()) {
       return dates;
     }
+
+    final originalDir = Directory(rootPath.replaceAll(
+      path.join('timelines', 'active'),
+      path.join('timelines', 'original'),
+    ));
     
-    // Scan Year/Month/Day structure
-    await for (final yearEntity in rootDir.list()) {
-      if (yearEntity is! Directory) continue;
-      
-      final yearName = path.basename(yearEntity.path);
-      final year = int.tryParse(yearName);
-      if (year == null) continue;
-      
-      await for (final monthEntity in yearEntity.list()) {
-        if (monthEntity is! Directory) continue;
+    await for (final entity in rootDir.list()) {
+      if (entity is File && entity.path.endsWith('.json')) {
+        final fileName = path.basename(entity.path);
+        if (fileName.contains('_timeline') || fileName.contains('_gpx')) {
+          continue; // skip original segments if placed here
+        }
         
-        final monthName = path.basename(monthEntity.path);
-        final month = int.tryParse(monthName);
-        if (month == null) continue;
+        final dateStr = fileName.replaceAll('.json', '');
+        final parts = dateStr.split('-');
+        if (parts.length != 3) continue;
+        final year = int.tryParse(parts[0]);
+        final month = int.tryParse(parts[1]);
+        final day = int.tryParse(parts[2]);
+        if (year == null || month == null || day == null) continue;
         
-        await for (final dayEntity in monthEntity.list()) {
-          if (dayEntity is! Directory) continue;
+        try {
+          final jsonString = await entity.readAsString();
+          final decoded = jsonDecode(jsonString);
+          final points = LocationPoint.parseAnyJson(decoded);
           
-          final dayName = path.basename(dayEntity.path);
-          final day = int.tryParse(dayName);
-          if (day == null) continue;
+          final distance = GeoUtils.calculateTrackDistance(points);
+
+          // Extract state & source from GeoJSON properties
+          String state = 'original';
+          String source = 'merge';
+          if (decoded is Map<String, dynamic>) {
+            final properties = decoded['properties'] as Map<String, dynamic>? ?? {};
+            state = properties['state'] as String? ?? 'original';
+            source = properties['source'] as String? ?? 'merge';
+          }
           
-          // Check for locations.json
-          final locationsFile = File(path.join(dayEntity.path, 'locations.json'));
-          if (await locationsFile.exists()) {
-            final points = await _loadLocationFile(locationsFile.path);
-            dates.add(DateInfo(
-              date: DateTime(year, month, day),
-              pointCount: points.length,
-              filePath: locationsFile.path,
-            ));
+          // Check for backups in original folder
+          bool hasTimeline = false;
+          bool hasGpx = false;
+          if (await originalDir.exists()) {
+            hasTimeline = await File(path.join(originalDir.path, '${dateStr}_timeline.json')).exists();
+            hasGpx = await File(path.join(originalDir.path, '${dateStr}_gpx.json')).exists();
+          }
+
+          dates.add(DateInfo(
+            date: DateTime(year, month, day),
+            pointCount: points.length,
+            filePath: entity.path,
+            distance: distance,
+            state: state,
+            source: source,
+            hasTimelineBackup: hasTimeline,
+            hasGpxBackup: hasGpx,
+          ));
+        } catch (e) {
+          if (kDebugMode) {
+            print('Error scanning file ${entity.path}: $e');
           }
         }
       }
     }
     
-    // Also check for date range files
-    await for (final entity in rootDir.list()) {
-      if (entity is File && entity.path.endsWith('.json')) {
-        final points = await _loadLocationFile(entity.path);
-        if (points.isNotEmpty) {
-          dates.add(DateInfo(
-            date: points.first.timestamp,
-            pointCount: points.length,
-            filePath: entity.path,
-          ));
-        }
-      }
-    }
-    
-    // Sort by date
+    // Sort by date descending
     dates.sort((a, b) => b.date.compareTo(a.date));
     
     return dates;

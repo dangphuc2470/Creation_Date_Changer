@@ -127,9 +127,13 @@ class LocationPoint {
   }
 
   /// Convert a list of points to a GeoJSON FeatureCollection
-  static Map<String, dynamic> toGeoJson(List<LocationPoint> points, [double? offset]) {
+  static Map<String, dynamic> toGeoJson(List<LocationPoint> points, [double? offset, String state = 'original', String source = 'merge']) {
     return {
       'type': 'FeatureCollection',
+      'properties': {
+        'state': state,
+        'source': source,
+      },
       'features': points.map((p) => p.toGeoJsonFeature(offset)).toList(),
     };
   }
