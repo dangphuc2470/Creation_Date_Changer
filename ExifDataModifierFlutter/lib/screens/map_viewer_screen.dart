@@ -1568,65 +1568,129 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   }
 
   Widget _buildTimelineItem(BuildContext context, TimelineItem item, double timezoneOffset) {
+    const blueAxis = Color(0xFF1A73E8);
+    const axisDotSize = 10.0;
+    const axisColumnWidth = 56.0;
+
     if (item is StayPointItem) {
-      final durationStr = _formatDuration(item.duration);
-      final timeStr = '${_formatPointTime(item.startTime, timezoneOffset)} - ${_formatPointTime(item.endTime, timezoneOffset)} ($durationStr)';
+      final startTime = _formatPointTime(item.startTime, timezoneOffset);
+      final coordStr = '${item.center.latitude.toStringAsFixed(5)}, ${item.center.longitude.toStringAsFixed(5)}';
+
       return InkWell(
-        onTap: () {
-          _animatedMapMove(item.center, 16.5);
-        },
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.2)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.location_on, color: Theme.of(context).colorScheme.primary, size: 24),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Stay Point (${item.points.length} pts)',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.primary,
-                        fontSize: 13,
+        onTap: () => _animatedMapMove(item.center, 16.5),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // ── Left axis column ──────────────────────────────────
+                SizedBox(
+                  width: axisColumnWidth,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Brown place icon
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF795548),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.place, color: Colors.white, size: 20),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      timeStr,
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Centroid: ${item.center.latitude.toStringAsFixed(6)}, ${item.center.longitude.toStringAsFixed(6)}',
-                      style: TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      const SizedBox(height: 4),
+                      // Blue dot marker
+                      Container(
+                        width: axisDotSize,
+                        height: axisDotSize,
+                        decoration: const BoxDecoration(
+                          color: blueAxis,
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+
+                // ── Content ───────────────────────────────────────────
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Place name box + address
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        'Stay Point (${item.points.length} pts)',
+                                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.arrow_drop_down, size: 18),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                coordStr,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // Time + more button
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              startTime,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Icon(Icons.more_vert, size: 18,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
     } else if (item is MoveSegmentItem) {
       final durationStr = _formatDuration(item.duration);
-      final timeStr = '${_formatPointTime(item.startTime, timezoneOffset)} - ${_formatPointTime(item.endTime, timezoneOffset)} ($durationStr)';
       final distStr = item.distance < 1000
           ? '${item.distance.toStringAsFixed(0)} m'
           : '${(item.distance / 1000).toStringAsFixed(2)} km';
+
       return InkWell(
         onTap: () {
           if (item.points.isNotEmpty) {
@@ -1634,75 +1698,83 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               item.points.map((p) => p.latLng).toList(),
             );
             _mapController.fitCamera(
-              CameraFit.bounds(
-                bounds: bounds,
-                padding: const EdgeInsets.all(40),
-              ),
+              CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40)),
             );
           }
         },
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           child: IntrinsicHeight(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Vertical connector line (like Google Maps Timeline)
-                Column(
-                  children: [
-                    Container(
-                      width: 4,
-                      color: const Color(0xFF1A73E8),
-                    ),
-                  ],
+                // ── Left axis column ──────────────────────────────────
+                SizedBox(
+                  width: axisColumnWidth,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Solid blue vertical line
+                      Positioned.fill(
+                        child: Center(
+                          child: Container(
+                            width: 3,
+                            color: blueAxis,
+                          ),
+                        ),
+                      ),
+                      // Collapse/expand icon in the middle
+                      Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outlineVariant,
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.unfold_more,
+                          size: 14,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 16),
-                // Content
+
+                // ── Content ───────────────────────────────────────────
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1A73E8).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: const Icon(Icons.directions_car, color: Color(0xFF1A73E8), size: 20),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                distStr,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                ),
-                              ),
-                              Text(
-                                durationStr,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                        // Transport mode icons: car > walk > car
+                        const Icon(Icons.directions_car, size: 20, color: Color(0xFF555555)),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.chevron_right, size: 16, color: Color(0xFF999999)),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.directions_walk, size: 20, color: Color(0xFF555555)),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.chevron_right, size: 16, color: Color(0xFF999999)),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.directions_car, size: 20, color: Color(0xFF555555)),
+
+                        const Spacer(),
+
+                        // Duration + 3-dot
                         Text(
-                          _formatPointTime(item.startTime, timezoneOffset),
+                          '$durationStr  ·  $distStr',
                           style: TextStyle(
-                            fontSize: 11,
+                            fontSize: 12,
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.more_vert, size: 18,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ],
                     ),
                   ),
