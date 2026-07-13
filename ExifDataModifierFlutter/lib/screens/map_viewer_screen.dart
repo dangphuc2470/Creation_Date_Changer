@@ -708,24 +708,6 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                   ),
                 ],
               ),
-              if (_showCalendar) ...[
-                const SizedBox(height: 12),
-                CustomCalendarInline(
-                  selectedDate: _selectedDate ?? DateTime.now(),
-                  allDates: appState.allDates,
-                  onDateSelected: (date) {
-                    setState(() {
-                      _selectedDate = date;
-                    });
-                    _loadPointsForSelectedDate();
-                  },
-                  onClose: () {
-                    setState(() {
-                      _showCalendar = false;
-                    });
-                  },
-                ),
-              ],
             ],
           ),
         ),
@@ -1298,11 +1280,11 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               children: [
                 _buildMap(context, appState, settings, pointsToShow),
 
-                // Map mode toggle
+                 // Map mode toggle
                 if (!isEditing && currentDateInfo.filePath.isNotEmpty)
                   Positioned(
                     top: 16,
-                    left: 16,
+                    left: _showCalendar ? 350 : 16,
                     child: FloatingActionButton.extended(
                       heroTag: 'edit_route',
                       onPressed: () {
@@ -1314,6 +1296,36 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                           Theme.of(context).colorScheme.primaryContainer,
                       foregroundColor:
                           Theme.of(context).colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+
+                // Floating Calendar Overlay
+                if (_showCalendar)
+                  Positioned(
+                    top: 16,
+                    left: 16,
+                    child: Material(
+                      elevation: 8,
+                      borderRadius: BorderRadius.circular(12),
+                      shadowColor: Colors.black38,
+                      child: SizedBox(
+                        width: 320,
+                        child: CustomCalendarInline(
+                          selectedDate: _selectedDate ?? DateTime.now(),
+                          allDates: appState.allDates,
+                          onDateSelected: (date) {
+                            setState(() {
+                              _selectedDate = date;
+                            });
+                            _loadPointsForSelectedDate();
+                          },
+                          onClose: () {
+                            setState(() {
+                              _showCalendar = false;
+                            });
+                          },
+                        ),
+                      ),
                     ),
                   ),
 
