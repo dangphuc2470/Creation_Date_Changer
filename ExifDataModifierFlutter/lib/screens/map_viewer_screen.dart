@@ -593,16 +593,6 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               const SizedBox(height: 16),
               Row(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.chevron_left),
-                    onPressed: () {
-                      setState(() {
-                        _selectedDate = _selectedDate!.subtract(const Duration(days: 1));
-                      });
-                      _loadPointsForSelectedDate();
-                    },
-                    tooltip: 'Previous Day',
-                  ),
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -705,16 +695,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                       ),
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.chevron_right),
-                    onPressed: () {
-                      setState(() {
-                        _selectedDate = _selectedDate!.add(const Duration(days: 1));
-                      });
-                      _loadPointsForSelectedDate();
-                    },
-                    tooltip: 'Next Day',
-                  ),
+                  const SizedBox(width: 8),
                   IconButton.filledTonal(
                     icon: const Icon(Icons.calendar_month),
                     onPressed: () async {
@@ -1704,7 +1685,7 @@ class MonthlyDistanceChart extends StatefulWidget {
 }
 
 class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
-  String _mode = 'monthly'; // 'daily', 'monthly', 'yearly'
+  String _mode = 'daily'; // 'daily', 'monthly', 'yearly'
   int? _hoveredIndex;
 
   String _formatDistance(double meters) {
@@ -1715,6 +1696,7 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
     }
   }
 
+  @override
   @override
   Widget build(BuildContext context) {
     // 1. Calculate totals
@@ -1752,30 +1734,13 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
     List<String> labels = [];
     double maxDist = 1.0;
     
-    // Monthly mode local vars
+    // Monthly/Daily mode local vars
     final daysInMonth =
         DateTime(widget.selectedDate.year, widget.selectedDate.month + 1, 0).day;
     final Map<int, DateInfo> monthData = {};
 
     if (_mode == 'daily') {
-      itemCount = 24;
-      final hourlyDistances = List.filled(24, 0.0);
-      if (widget.points.isNotEmpty) {
-        for (int i = 0; i < widget.points.length - 1; i++) {
-          final p1 = widget.points[i];
-          final p2 = widget.points[i + 1];
-          final localTime = p1.timestamp.add(
-              Duration(minutes: (widget.timezoneOffset * 60).toInt()));
-          final hour = localTime.hour;
-          final dist = GeoUtils.distanceBetween(p1.latLng, p2.latLng);
-          hourlyDistances[hour] += dist;
-        }
-      }
-      distances = hourlyDistances;
-      maxDist = distances.fold(
-          1.0, (maxVal, val) => val > maxVal ? val : maxVal);
-      labels = List.generate(24, (i) => i.toString().padLeft(2, '0'));
-    } else if (_mode == 'monthly') {
+      // Show days 1..31 of the selected month
       itemCount = daysInMonth;
       for (final d in widget.allDates) {
         if (d.date.year == widget.selectedDate.year &&
@@ -1789,29 +1754,37 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
       distances = List.generate(
           daysInMonth, (i) => monthData[i + 1]?.distance ?? 0.0);
       labels = List.generate(daysInMonth, (i) => (i + 1).toString());
-    } else {
-      // Yearly
+    } else if (_mode == 'monthly') {
+      // Show months Jan..Dec of the selected year
       itemCount = 12;
-      final yearlyDistances = List.filled(12, 0.0);
+      final monthlyDistances = List.filled(12, 0.0);
       for (int m = 1; m <= 12; m++) {
-        yearlyDistances[m - 1] = widget.allDates
+        monthlyDistances[m - 1] = widget.allDates
             .where((d) =>
                 d.date.year == widget.selectedDate.year && d.date.month == m)
             .fold(0.0, (sum, d) => sum + d.distance);
       }
-      distances = yearlyDistances;
+      distances = monthlyDistances;
       maxDist = distances.fold(
           1.0, (maxVal, val) => val > maxVal ? val : maxVal);
       labels = List.generate(12, (index) =>
           DateFormat('MMM').format(DateTime(2020, index + 1)));
+    } else {
+      // Show 7 years centered around the selected year
+      final currentYear = widget.selectedDate.year;
+      final List<int> years = List.generate(7, (i) => currentYear - 3 + i);
+      itemCount = 7;
+      distances = years.map((y) => widget.allDates.where((d) => d.date.year == y).fold(0.0, (sum, d) => sum + d.distance)).toList();
+      labels = years.map((y) => y.toString()).toList();
+      maxDist = distances.fold(1.0, (maxVal, val) => val > maxVal ? val : maxVal);
     }
 
     // Header title and active hover description
-    String titleText = 'Monthly Distance';
+    String titleText = 'Daily Distance';
     String currentModeTotal = _formatDistance(totalMonthDistance);
-    if (_mode == 'daily') {
-      titleText = 'Daily Distance';
-      currentModeTotal = _formatDistance(totalDayDistance);
+    if (_mode == 'monthly') {
+      titleText = 'Monthly Distance';
+      currentModeTotal = _formatDistance(totalYearDistance);
     } else if (_mode == 'yearly') {
       titleText = 'Yearly Distance';
       currentModeTotal = _formatDistance(totalYearDistance);
@@ -1820,15 +1793,6 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
     Widget? hoverSubtitle;
     if (_hoveredIndex != null && _hoveredIndex! < itemCount) {
       if (_mode == 'daily') {
-        hoverSubtitle = Text(
-          'Hour ${_hoveredIndex!.toString().padLeft(2, '0')}:00: ${_formatDistance(distances[_hoveredIndex!])}',
-          style: TextStyle(
-            fontSize: 12,
-            color: Theme.of(context).colorScheme.primary,
-            fontWeight: FontWeight.w600,
-          ),
-        );
-      } else if (_mode == 'monthly') {
         final day = _hoveredIndex! + 1;
         hoverSubtitle = Text(
           'Day $day: ${_formatDistance(distances[_hoveredIndex!])}',
@@ -1838,11 +1802,21 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
             fontWeight: FontWeight.w600,
           ),
         );
-      } else {
+      } else if (_mode == 'monthly') {
         final monthName = DateFormat('MMMM').format(
             DateTime(widget.selectedDate.year, _hoveredIndex! + 1));
         hoverSubtitle = Text(
           '$monthName: ${_formatDistance(distances[_hoveredIndex!])}',
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.primary,
+            fontWeight: FontWeight.w600,
+          ),
+        );
+      } else {
+        final yearVal = widget.selectedDate.year - 3 + _hoveredIndex!;
+        hoverSubtitle = Text(
+          'Year $yearVal: ${_formatDistance(distances[_hoveredIndex!])}',
           style: TextStyle(
             fontSize: 12,
             color: Theme.of(context).colorScheme.primary,
@@ -1868,23 +1842,75 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
                     children: [
-                      Text(
-                        '$titleText ($currentModeTotal)',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleSmall
-                            ?.copyWith(fontWeight: FontWeight.bold),
+                      IconButton(
+                        icon: const Icon(Icons.chevron_left, size: 20),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () {
+                          if (_mode == 'daily') {
+                            widget.onDateSelected(widget.selectedDate.subtract(const Duration(days: 1)));
+                          } else if (_mode == 'monthly') {
+                            final newMonth = widget.selectedDate.month == 1 ? 12 : widget.selectedDate.month - 1;
+                            final newYear = widget.selectedDate.month == 1 ? widget.selectedDate.year - 1 : widget.selectedDate.year;
+                            final daysInNewMonth = DateTime(newYear, newMonth + 1, 0).day;
+                            final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
+                            widget.onDateSelected(DateTime(newYear, newMonth, targetDay));
+                          } else {
+                            final newYear = widget.selectedDate.year - 1;
+                            final daysInNewMonth = DateTime(newYear, widget.selectedDate.month + 1, 0).day;
+                            final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
+                            widget.onDateSelected(DateTime(newYear, widget.selectedDate.month, targetDay));
+                          }
+                        },
                       ),
-                      if (hoverSubtitle != null) ...[
-                        const SizedBox(height: 2),
-                        hoverSubtitle,
-                      ],
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '$titleText ($currentModeTotal)',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.bold),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (hoverSubtitle != null) ...[
+                              const SizedBox(height: 2),
+                              hoverSubtitle,
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        icon: const Icon(Icons.chevron_right, size: 20),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () {
+                          if (_mode == 'daily') {
+                            widget.onDateSelected(widget.selectedDate.add(const Duration(days: 1)));
+                          } else if (_mode == 'monthly') {
+                            final newMonth = widget.selectedDate.month == 12 ? 1 : widget.selectedDate.month + 1;
+                            final newYear = widget.selectedDate.month == 12 ? widget.selectedDate.year + 1 : widget.selectedDate.year;
+                            final daysInNewMonth = DateTime(newYear, newMonth + 1, 0).day;
+                            final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
+                            widget.onDateSelected(DateTime(newYear, newMonth, targetDay));
+                          } else {
+                            final newYear = widget.selectedDate.year + 1;
+                            final daysInNewMonth = DateTime(newYear, widget.selectedDate.month + 1, 0).day;
+                            final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
+                            widget.onDateSelected(DateTime(newYear, widget.selectedDate.month, targetDay));
+                          }
+                        },
+                      ),
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: _mode,
@@ -1925,10 +1951,6 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
 
                   bool isActive = false;
                   if (_mode == 'daily') {
-                    final localTimeNow = DateTime.now().add(
-                        Duration(minutes: (widget.timezoneOffset * 60).toInt()));
-                    isActive = index == localTimeNow.hour;
-                  } else if (_mode == 'monthly') {
                     final day = index + 1;
                     isActive = day == widget.selectedDate.day;
                     final dayInfo = monthData[day];
@@ -1941,8 +1963,12 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                         barColor = Colors.grey.shade400;
                       }
                     }
-                  } else {
+                  } else if (_mode == 'monthly') {
                     isActive = (index + 1) == widget.selectedDate.month;
+                  } else {
+                    final currentYear = widget.selectedDate.year;
+                    final List<int> years = List.generate(7, (i) => currentYear - 3 + i);
+                    isActive = years[index] == widget.selectedDate.year;
                   }
 
                   if (isActive) {
@@ -1958,26 +1984,35 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                       setState(() {
                         _hoveredIndex = index;
                       });
-                      if (_mode == 'monthly') {
+                      if (_mode == 'daily') {
                         final clickedDate = DateTime(
                           widget.selectedDate.year,
                           widget.selectedDate.month,
                           index + 1,
                         );
                         widget.onDateSelected(clickedDate);
-                      } else if (_mode == 'yearly') {
+                      } else if (_mode == 'monthly') {
                         final clickedDate = DateTime(
                           widget.selectedDate.year,
                           index + 1,
                           1,
                         );
                         widget.onDateSelected(clickedDate);
+                      } else {
+                        final currentYear = widget.selectedDate.year;
+                        final List<int> years = List.generate(7, (i) => currentYear - 3 + i);
+                        final clickedDate = DateTime(
+                          years[index],
+                          widget.selectedDate.month,
+                          widget.selectedDate.day,
+                        );
+                        widget.onDateSelected(clickedDate);
                       }
                     },
                     child: Container(
                       width: _mode == 'daily'
-                          ? 28
-                          : (_mode == 'monthly' ? 24 : 45),
+                          ? 24
+                          : (_mode == 'monthly' ? 35 : 45),
                       margin: const EdgeInsets.symmetric(horizontal: 4),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.end,
