@@ -208,7 +208,6 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     if (!appState.isEditing) {
       // Non-edit mode: hover over existing tracks
       final paths = appState.activePaths;
-      final pathColors = appState.pathColors;
       if (paths.isEmpty) return;
 
       LocationPoint? closestPoint;
@@ -216,8 +215,27 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       double minDistance = double.infinity;
       const double snapThreshold = 0.005;
 
+      final currentDayInfo = appState.allDates.firstWhere(
+        (d) =>
+            _selectedDate != null &&
+            d.date.year == _selectedDate!.year &&
+            d.date.month == _selectedDate!.month &&
+            d.date.day == _selectedDate!.day,
+        orElse: () => DateInfo(
+          date: _selectedDate ?? DateTime.now(),
+          pointCount: 0,
+          filePath: '',
+          distance: 0.0,
+          state: 'original',
+          source: 'merge',
+          hasTimelineBackup: false,
+          hasGpxBackup: false,
+        ),
+      );
+
       for (final entry in paths.entries) {
-        final color = pathColors[entry.key] ?? const Color(0xFF7F92FF);
+        final isSelectedPath = entry.key == currentDayInfo.filePath;
+        final color = isSelectedPath ? Colors.purple : Colors.grey;
         for (final p in entry.value) {
           final dLat = p.latitude - point.latitude;
           final dLon = p.longitude - point.longitude;
@@ -1088,12 +1106,50 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
     // Build Polylines
     final List<Polyline> polylines = [];
+
+    // Find the currently selected date info to identify its file path
+    final currentDayInfo = appState.allDates.firstWhere(
+      (d) =>
+          _selectedDate != null &&
+          d.date.year == _selectedDate!.year &&
+          d.date.month == _selectedDate!.month &&
+          d.date.day == _selectedDate!.day,
+      orElse: () => DateInfo(
+        date: _selectedDate ?? DateTime.now(),
+        pointCount: 0,
+        filePath: '',
+        distance: 0.0,
+        state: 'original',
+        source: 'merge',
+        hasTimelineBackup: false,
+        hasGpxBackup: false,
+      ),
+    );
+
+    // Draw all other active paths in grey first
+    for (final entry in appState.activePaths.entries) {
+      final filePath = entry.key;
+      if (filePath == currentDayInfo.filePath) continue;
+
+      final pts = entry.value;
+      if (pts.isNotEmpty) {
+        polylines.add(
+          Polyline(
+            points: pts.map((p) => p.latLng).toList(),
+            strokeWidth: 3.0,
+            color: Colors.grey.withValues(alpha: 0.4),
+          ),
+        );
+      }
+    }
+
+    // Draw the currently selected active path in purple on top
     if (pointsToShow.isNotEmpty) {
       polylines.add(
         Polyline(
           points: pointsToShow.map((p) => p.latLng).toList(),
           strokeWidth: isEditing ? 5.0 : 4.0,
-          color: isEditing ? Colors.orange : const Color(0xFF7F92FF),
+          color: isEditing ? Colors.orange : Colors.purple,
         ),
       );
     }
@@ -1585,48 +1641,74 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
             );
           }
         },
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Theme.of(context).colorScheme.secondary.withOpacity(0.15)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.directions_run, color: Theme.of(context).colorScheme.secondary, size: 24),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Vertical connector line (like Google Maps Timeline)
+                Column(
                   children: [
-                    Text(
-                      'Moving Path ($distStr)',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.secondary,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      timeStr,
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Points: ${item.points.length} pts',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    Container(
+                      width: 4,
+                      color: const Color(0xFF1A73E8),
                     ),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(width: 16),
+                // Content
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1A73E8).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: const Icon(Icons.directions_car, color: Color(0xFF1A73E8), size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                distStr,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              Text(
+                                durationStr,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          _formatPointTime(item.startTime, timezoneOffset),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
