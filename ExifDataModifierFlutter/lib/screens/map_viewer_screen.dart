@@ -407,7 +407,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
   void _openEditPointDialog(BuildContext context, AppStateProvider appState, DateInfo dateInfo, List<LocationPoint> currentPoints, int index) {
     final pt = currentPoints[index];
     final settings = context.read<SettingsProvider>();
-    final offset = settings.timezoneOffset;
+    final offset = settings.geotagTimezone.toDouble();
 
     final latCtrl = TextEditingController(text: pt.latitude.toString());
     final lngCtrl = TextEditingController(text: pt.longitude.toString());
@@ -495,7 +495,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
 
   Widget _buildSidebar(BuildContext context, AppStateProvider appState, DateInfo dateInfo, List<LocationPoint> points) {
     final settings = context.read<SettingsProvider>();
-    final double offset = settings.timezoneOffset;
+    final double offset = settings.geotagTimezone.toDouble();
     final isEditing = appState.isEditing;
 
     final dateStr = _selectedDate == null
@@ -712,7 +712,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(12, 8, 8, 4),
                         child: Row(
-                          mainAxisAlignment: MainAxisAlignment.between,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
                               'Track Details (${points.length} pts)',
@@ -807,36 +807,47 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
       ],
     );
   }
+  Widget _buildTileLayer(String mapProvider) {
+    String urlTemplate;
+    TileProvider? tileProvider;
+
+    switch (mapProvider) {
+      case 'google_roadmap':
+        urlTemplate = 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+        break;
+      case 'google_satellite':
+        urlTemplate = 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
+        break;
+      case 'bing_roadmap':
+        urlTemplate =
+            'http://ecn.t3.tiles.virtualearth.net/tiles/r{quadkey}.jpeg?g=1';
+        tileProvider = BingTileProvider();
+        break;
+      case 'bing_satellite':
+        urlTemplate =
+            'http://ecn.t3.tiles.virtualearth.net/tiles/a{quadkey}.jpeg?g=1';
+        tileProvider = BingTileProvider();
+        break;
+      case 'osm':
+      default:
+        urlTemplate = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+        break;
+    }
+
+    return TileLayer(
+      urlTemplate: urlTemplate,
+      tileProvider: tileProvider,
+      userAgentPackageName: 'com.dangphuc.creation_date_changer',
+    );
+  }
 
   Widget _buildMap(BuildContext context, AppStateProvider appState, SettingsProvider settings, List<LocationPoint> pointsToShow) {
     final isEditing = appState.isEditing;
-    final mapStyle = settings.mapStyle;
-    final timeOffset = settings.timezoneOffset;
+    final mapProvider = settings.mapProvider;
+    final double timeOffset = settings.geotagTimezone.toDouble();
 
     // Resolve Map Tiles
-    TileLayer tileLayer;
-    if (mapStyle == MapStyle.bingHybrid || mapStyle == MapStyle.bingRoad) {
-      final key = settings.bingMapsApiKey;
-      if (key.isNotEmpty) {
-        final mode = mapStyle == MapStyle.bingHybrid ? 'AerialWithLabelsOnDemand' : 'RoadOnDemand';
-        tileLayer = TileLayer(
-          urlTemplate: 'https://t.ssl.ak.dynamic.tiles.virtualearth.net/comp/ch/{quadkey}?mkt=en-US&it=$mode&og=2340&ur=o&cct=v1&csl=1',
-          tileProvider: BingTileProvider(),
-          additionalOptions: const {'quadkey': ''},
-          userAgentPackageName: 'com.dangphuc.creation_date_changer',
-        );
-      } else {
-        tileLayer = TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.dangphuc.creation_date_changer',
-        );
-      }
-    } else {
-      tileLayer = TileLayer(
-        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        userAgentPackageName: 'com.dangphuc.creation_date_changer',
-      );
-    }
+    final tileLayer = _buildTileLayer(mapProvider);
 
     // Build Polylines
     final List<Polyline> polylines = [];
@@ -866,7 +877,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
             height: isSelected ? 24 : 16,
             child: GestureDetector(
               onLongPress: () {
-                appState.togglePinPoint(i);
+                appState.togglePin(i);
               },
               child: Container(
                 decoration: BoxDecoration(
@@ -936,7 +947,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
     final appState = context.watch<AppStateProvider>();
     final settings = context.watch<SettingsProvider>();
     final isEditing = appState.isEditing;
-    final timeOffset = settings.timezoneOffset;
+    final timeOffset = settings.geotagTimezone.toDouble();
 
     // Make sure we have selectedDate initialized
     if (_selectedDate == null) {
@@ -1201,7 +1212,7 @@ class _CustomCalendarDialogState extends State<CustomCalendarDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.between,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 IconButton(
                   icon: const Icon(Icons.chevron_left),
