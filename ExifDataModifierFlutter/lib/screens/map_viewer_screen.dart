@@ -1569,8 +1569,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
   Widget _buildTimelineItem(BuildContext context, TimelineItem item, double timezoneOffset) {
     const blueAxis = Color(0xFF1A73E8);
-    const axisDotSize = 10.0;
-    const axisColumnWidth = 56.0;
+    const lineColWidth = 8.0;   // narrow column for the blue line/dot only
+    const iconColWidth = 44.0;  // column for the place icon or expand arrow
 
     if (item is StayPointItem) {
       final startTime = _formatPointTime(item.startTime, timezoneOffset);
@@ -1584,35 +1584,38 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // ── Left axis column ──────────────────────────────────
+                // ── Col 1: Blue dot (no line for stay points) ────────
                 SizedBox(
-                  width: axisColumnWidth,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Brown place icon
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF795548),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.place, color: Colors.white, size: 20),
+                  width: lineColWidth,
+                  child: Center(
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: blueAxis,
+                        shape: BoxShape.circle,
                       ),
-                      const SizedBox(height: 4),
-                      // Blue dot marker
-                      Container(
-                        width: axisDotSize,
-                        height: axisDotSize,
-                        decoration: const BoxDecoration(
-                          color: blueAxis,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
+                const SizedBox(width: 4),
+
+                // ── Col 2: Brown place icon ───────────────────────────
+                SizedBox(
+                  width: iconColWidth,
+                  child: Center(
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF795548),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.place, color: Colors.white, size: 20),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
 
                 // ── Content ───────────────────────────────────────────
                 Expanded(
@@ -1621,7 +1624,6 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Place name box + address
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1660,7 +1662,6 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                           ),
                         ),
                         const SizedBox(width: 8),
-                        // Time + more button
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
@@ -1708,41 +1709,41 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // ── Left axis column ──────────────────────────────────
+                // ── Col 1: Solid blue vertical line (full height) ─────
                 SizedBox(
-                  width: axisColumnWidth,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Solid blue vertical line
-                      Positioned.fill(
-                        child: Center(
-                          child: Container(
-                            width: 3,
-                            color: blueAxis,
-                          ),
-                        ),
-                      ),
-                      // Collapse/expand icon in the middle
-                      Container(
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surface,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.outlineVariant,
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.unfold_more,
-                          size: 14,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
+                  width: lineColWidth,
+                  child: Center(
+                    child: Container(
+                      width: 5,
+                      color: blueAxis,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 4),
+
+                // ── Col 2: Expand icon centered (same column as place icon) ──
+                SizedBox(
+                  width: iconColWidth,
+                  child: Center(
+                    child: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.outlineVariant,
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.unfold_more,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
 
                 // ── Content ───────────────────────────────────────────
                 Expanded(
@@ -1751,7 +1752,6 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // Transport mode icons: car > walk > car
                         const Icon(Icons.directions_car, size: 20, color: Color(0xFF555555)),
                         const SizedBox(width: 4),
                         const Icon(Icons.chevron_right, size: 16, color: Color(0xFF999999)),
@@ -1761,10 +1761,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                         const Icon(Icons.chevron_right, size: 16, color: Color(0xFF999999)),
                         const SizedBox(width: 4),
                         const Icon(Icons.directions_car, size: 20, color: Color(0xFF555555)),
-
                         const Spacer(),
-
-                        // Duration + 3-dot
                         Text(
                           '$durationStr  ·  $distStr',
                           style: TextStyle(
@@ -1788,6 +1785,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     return const SizedBox.shrink();
   }
 }
+
+
 
 class MapWidget extends StatelessWidget {
   final MapController mapController;
