@@ -159,8 +159,8 @@ class _LocationManagerScreenState extends State<LocationManagerScreen> {
                       SizedBox(height: 8),
                       Text(
                         'Go to "Timeline Import" tab to import your Google Timeline or GPX tracking files.',
-                        textAlign: Center,
-                        style: TextStyle(color: Colors.grey),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.grey),
                       ),
                     ],
                   ),
