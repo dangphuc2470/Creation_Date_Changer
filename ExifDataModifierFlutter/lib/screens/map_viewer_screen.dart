@@ -88,8 +88,9 @@ class MapViewerScreen extends StatefulWidget {
   State<MapViewerScreen> createState() => _MapViewerScreenState();
 }
 
-class _MapViewerScreenState extends State<MapViewerScreen> {
+class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderStateMixin {
   final MapController _mapController = MapController();
+  AnimationController? _mapAnimationController;
 
   DateTime? _selectedDate;
 
@@ -134,6 +135,51 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
     } else {
       appState.setSelectedDatePath(dateInfo, []);
     }
+  }
+
+  @override
+  void dispose() {
+    _mapAnimationController?.dispose();
+    super.dispose();
+  }
+
+  void _animatedMapMove(LatLng destCenter, double destZoom) {
+    _mapAnimationController?.stop();
+    _mapAnimationController?.dispose();
+
+    final controller = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+    _mapAnimationController = controller;
+
+    final LatLng startCenter = _mapController.camera.center;
+    final double startZoom = _mapController.camera.zoom;
+
+    final Animation<double> animation = CurvedAnimation(
+      parent: controller,
+      curve: Curves.fastOutSlowIn,
+    );
+
+    controller.addListener(() {
+      final double t = animation.value;
+      final double lat = startCenter.latitude + (destCenter.latitude - startCenter.latitude) * t;
+      final double lng = startCenter.longitude + (destCenter.longitude - startCenter.longitude) * t;
+      final double zoom = startZoom + (destZoom - startZoom) * t;
+
+      _mapController.move(LatLng(lat, lng), zoom);
+    });
+
+    controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed || status == AnimationStatus.dismissed) {
+        controller.dispose();
+        if (_mapAnimationController == controller) {
+          _mapAnimationController = null;
+        }
+      }
+    });
+
+    controller.forward();
   }
 
   void _fitBounds() {
@@ -983,7 +1029,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                                 ],
                               ),
                               onTap: () {
-                                _mapController.move(
+                                _animatedMapMove(
                                     p.latLng, _mapController.camera.zoom);
                               },
                             );
