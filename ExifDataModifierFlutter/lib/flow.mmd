@@ -1,0 +1,43 @@
+graph TD
+    %% Input Sources
+    subgraph Input[Nguồn dữ liệu vào]
+A["Google Takeout (JSON)"]
+B["GPX (XML)"]
+C["GeoJSON / Legacy JSON (Đã xuất trước đó)"]
+end
+
+    %% Internal Processing
+    subgraph Processing[Mô hình xử lý nội bộ]
+T_Parser["TimelineParser"]
+G_Parser["GpxParser"]
+L_Mgr["LocationManager (parseAnyJson)"]
+Points["List&lt;LocationPoint&gt;<br>(Mô hình dữ liệu chung)"]
+end
+
+    %% State Providers & Actions
+    subgraph State[Quản lý trạng thái & Tính năng]
+E_State["AppStateProvider<br>(Chỉnh sửa trên bản đồ)"]
+G_State["GeotagProvider / BatchGeotagProvider<br>(Trùng khớp ảnh & tọa độ)"]
+end
+
+    %% Outputs
+    subgraph Output[Kết quả đầu ra]
+Out_GeoJSON["File GeoJSON (.json)<br>(Lưu trên ổ đĩa)"]
+Out_EXIF["Ảnh đã được gán tọa độ GPS<br>(EXIF metadata)"]
+end
+
+    %% Connections
+A-- >| Phân tích | T_Parser
+B-- >| Phân tích | G_Parser
+C-- >| Phân tích | L_Mgr
+
+T_Parser-- > Points
+G_Parser-- > Points
+L_Mgr-- > Points
+
+Points-- > E_State
+Points-- > G_State
+
+E_State-- >| Lưu chỉnh sửa | Out_GeoJSON
+E_State -.->| Xuất dữ liệu qua ExportService | Out_GeoJSON
+G_State-- >| Ghi tọa độ vào EXIF | Out_EXIF

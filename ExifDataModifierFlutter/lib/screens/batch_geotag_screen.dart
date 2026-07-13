@@ -22,6 +22,14 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
   final TextEditingController _searchCtrl = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<BatchGeotagProvider>().loadTimelineLocationsFromAppDb();
+    });
+  }
+
+  @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
@@ -75,24 +83,7 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
     }
   }
 
-  Future<void> _pickTimelineFolder(BuildContext ctx) async {
-    final result = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Select Timeline Folder',
-    );
-    if (result != null && ctx.mounted) {
-      _showToast('Loading timelines…',
-          icon: Icons.timeline, color: Colors.purple);
-      await ctx.read<BatchGeotagProvider>().loadTimelineFolder(result);
-      if (ctx.mounted) {
-        final p = ctx.read<BatchGeotagProvider>();
-        _showToast(
-          'Loaded ${p.timelineLocations.length} GPS points',
-          icon: Icons.timeline,
-          color: Colors.green,
-        );
-      }
-    }
-  }
+
 
   Future<void> _pickOutputFolder(BuildContext ctx) async {
     final result = await FilePicker.platform.getDirectoryPath(
@@ -205,13 +196,13 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
                   child: _FolderPickerTile(
                     icon: Icons.timeline,
                     iconColor: Colors.purple,
-                    label: 'Timeline Folder',
-                    path: provider.timelineFolderPath,
-                    subtitle: provider.timelineFolderPath != null
-                        ? '${provider.timelineLocations.length} GPS points from ${provider.loadedTimelineFiles.length} files'
-                        : 'Select folder with JSON timeline files',
-                    onTap: isBusy ? null : () => _pickTimelineFolder(context),
-                    onClear: isBusy || provider.timelineFolderPath == null
+                    label: 'Timeline Data',
+                    path: provider.timelineLocations.isNotEmpty ? 'App Database' : null,
+                    subtitle: provider.timelineLocations.isNotEmpty
+                        ? '${provider.timelineLocations.length} GPS points from ${provider.loadedTimelineFiles.length} dates'
+                        : 'No timeline data. Click to reload.',
+                    onTap: isBusy ? null : () => provider.loadTimelineLocationsFromAppDb(),
+                    onClear: isBusy || provider.timelineLocations.isEmpty
                         ? null
                         : () => provider.clearTimelines(),
                   ),

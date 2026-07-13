@@ -35,6 +35,14 @@ class _GeotagScreenState extends State<GeotagScreen> {
   GeotagProvider? _provider;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
+    });
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final p = context.read<GeotagProvider>();
@@ -449,6 +457,21 @@ class _GeotagScreenState extends State<GeotagScreen> {
             const SizedBox(height: 16),
             Row(
               children: [
+                IconButton(
+                  onPressed: isBusy
+                      ? null
+                      : () async {
+                          await context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
+                          _showToast(
+                            'Loaded from App Database',
+                            icon: Icons.storage,
+                            color: Colors.green,
+                          );
+                        },
+                  icon: const Icon(Icons.storage),
+                  tooltip: 'Load from App Database',
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: isBusy

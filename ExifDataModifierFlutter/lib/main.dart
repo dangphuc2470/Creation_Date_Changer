@@ -12,6 +12,9 @@ import 'screens/batch_geotag_screen.dart';
 import 'screens/change_date_screen.dart';
 import 'screens/change_filename_screen.dart';
 import 'screens/geotag_screen.dart';
+import 'screens/import_export_screen.dart';
+import 'screens/location_manager_screen.dart';
+import 'screens/map_viewer_screen.dart';
 import 'screens/lens_metadata_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/app_notifier.dart';
@@ -157,6 +160,9 @@ class MainLayoutScreen extends StatelessWidget {
     ChangeFilenameScreen(),
     GeotagScreen(),
     BatchGeotagScreen(),
+    ImportExportScreen(),
+    LocationManagerScreen(),
+    MapViewerScreen(),
     LensMetadataScreen(),
     SettingsScreen(),
   ];
@@ -184,12 +190,24 @@ class MainLayoutScreen extends StatelessWidget {
                   label: Text('Rename'),
                 ),
                 NavigationRailDestination(
-                  icon: Icon(Icons.map),
+                  icon: Icon(Icons.pin_drop),
                   label: Text('Geotag'),
                 ),
                 NavigationRailDestination(
                   icon: Icon(Icons.photo_library_outlined),
                   label: Text('Batch Geotag'),
+                ),
+                NavigationRailDestination(
+                  icon: Icon(Icons.import_export),
+                  label: Text('Timeline Import'),
+                ),
+                NavigationRailDestination(
+                  icon: Icon(Icons.folder_open),
+                  label: Text('Timeline Manage'),
+                ),
+                NavigationRailDestination(
+                  icon: Icon(Icons.map),
+                  label: Text('Timeline Map'),
                 ),
                 NavigationRailDestination(
                   icon: Icon(Icons.camera),
@@ -225,12 +243,24 @@ class MainLayoutScreen extends StatelessWidget {
             label: 'Rename',
           ),
           NavigationDestination(
-            icon: Icon(Icons.map),
+            icon: Icon(Icons.pin_drop),
             label: 'Geotag',
           ),
           NavigationDestination(
             icon: Icon(Icons.photo_library_outlined),
             label: 'Batch Geotag',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.import_export),
+            label: 'Timeline Import',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.folder_open),
+            label: 'Timeline Manage',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.map),
+            label: 'Timeline Map',
           ),
           NavigationDestination(
             icon: Icon(Icons.camera),

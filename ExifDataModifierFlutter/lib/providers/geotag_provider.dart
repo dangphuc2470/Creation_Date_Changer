@@ -113,7 +113,45 @@ class GeotagProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     geotagTimezone = prefs.getInt('geotagTimezone') ?? 7;
     timeOffset = Duration(hours: -geotagTimezone);
-    notifyListeners();
+    await loadTimelineLocationsFromAppDb();
+  }
+
+  Future<void> loadTimelineLocationsFromAppDb() async {
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final activeDir = Directory(p.join(docDir.path, 'timelines', 'active'));
+      if (!await activeDir.exists()) {
+        timelineLocations = [];
+        loadedTimelineFileName = null;
+        notifyListeners();
+        return;
+      }
+
+      final List<LocationPoint> allPoints = [];
+      final files = await activeDir
+          .list()
+          .where((e) => e is File && e.path.endsWith('.json'))
+          .cast<File>()
+          .toList();
+
+      for (final file in files) {
+        try {
+          final content = await file.readAsString();
+          final decoded = jsonDecode(content);
+          final points = LocationPoint.parseAnyJson(decoded);
+          allPoints.addAll(points);
+        } catch (_) {}
+      }
+
+      allPoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      timelineLocations = allPoints;
+      loadedTimelineFileName = files.isNotEmpty ? 'App Database (${files.length} days)' : null;
+      notifyListeners();
+    } catch (e) {
+      timelineLocations = [];
+      loadedTimelineFileName = 'App Database Error';
+      notifyListeners();
+    }
   }
 
   void setShowImagePreviews(bool value) {
@@ -457,9 +495,8 @@ class GeotagProvider extends ChangeNotifier {
         await prefs.setInt('geotagTimezone', detectedTz);
       }
 
-      final List<dynamic> parsedList = jsonDecode(jsonData);
-      timelineLocations =
-          parsedList.map((e) => LocationPoint.fromGeotagJson(e)).toList();
+      final decoded = jsonDecode(jsonData);
+      timelineLocations = LocationPoint.parseAnyJson(decoded);
       timelineLocations.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       loadedTimelineFileName = filename;
       // Mark pending items so the user knows to re-match

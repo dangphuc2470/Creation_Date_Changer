@@ -186,6 +186,67 @@ class BatchGeotagProvider extends ChangeNotifier {
   Future<void> _initPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     geotagTimezone = prefs.getInt('geotagTimezone') ?? 7;
+    await loadTimelineLocationsFromAppDb();
+  }
+
+  Future<void> loadTimelineLocationsFromAppDb() async {
+    isLoadingTimelines = true;
+    timelineLocations.clear();
+    loadedTimelineFiles.clear();
+    loadedTimelineCount = 0;
+    statusMessage = 'Loading timelines from App Database…';
+    notifyListeners();
+
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final activeDir = Directory(p.join(docDir.path, 'timelines', 'active'));
+      if (!await activeDir.exists()) {
+        statusMessage = 'App Database is empty.';
+        isLoadingTimelines = false;
+        notifyListeners();
+        return;
+      }
+
+      final files = await activeDir
+          .list()
+          .where((e) => e is File && e.path.endsWith('.json'))
+          .cast<File>()
+          .toList();
+      totalTimelines = files.length;
+
+      if (totalTimelines == 0) {
+        statusMessage = 'App Database has no timeline records.';
+        isLoadingTimelines = false;
+        notifyListeners();
+        return;
+      }
+
+      final List<LocationPoint> allPoints = [];
+      for (final file in files) {
+        try {
+          final content = await file.readAsString();
+          final decoded = jsonDecode(content);
+          final points = LocationPoint.parseAnyJson(decoded);
+          allPoints.addAll(points);
+          loadedTimelineFiles.add(p.basename(file.path));
+          loadedTimelineCount++;
+          statusMessage = 'Loaded $loadedTimelineCount / $totalTimelines timeline dates…';
+          notifyListeners();
+          await Future.delayed(Duration.zero);
+        } catch (_) {}
+      }
+
+      allPoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      timelineLocations = allPoints.toSet().toList();
+      timelineLocations.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+      timelineFolderPath = activeDir.path;
+      statusMessage = 'Loaded ${timelineLocations.length} locations from ${loadedTimelineFiles.length} dates in App Database.';
+    } catch (e) {
+      statusMessage = 'Error loading timelines from App Database: $e';
+    }
+
+    isLoadingTimelines = false;
     notifyListeners();
   }
 
@@ -376,9 +437,8 @@ class BatchGeotagProvider extends ChangeNotifier {
         if (_cancelScan) break;
         try {
           final content = await file.readAsString();
-          final parsedList = jsonDecode(content) as List<dynamic>;
-          final points =
-              parsedList.map((e) => LocationPoint.fromGeotagJson(e)).toList();
+          final decoded = jsonDecode(content);
+          final points = LocationPoint.parseAnyJson(decoded);
           allPoints.addAll(points);
           loadedTimelineFiles.add(p.basename(file.path));
           loadedTimelineCount++;
