@@ -1569,11 +1569,15 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
   Widget _buildTimelineItem(BuildContext context, TimelineItem item, double timezoneOffset) {
     const blueAxis = Color(0xFF1A73E8);
-    const lineColWidth = 8.0;   // narrow column for the blue line/dot only
-    const iconColWidth = 44.0;  // column for the place icon or expand arrow
+    // Col 1: place icon / expand icon
+    const iconColWidth = 44.0;
+    // Col 2: continuous blue line (with dot at stay points)
+    const lineColWidth = 20.0;
 
     if (item is StayPointItem) {
       final startTime = _formatPointTime(item.startTime, timezoneOffset);
+      final endTime   = _formatPointTime(item.endTime,   timezoneOffset);
+      final durationStr = _formatDuration(item.duration);
       final coordStr = '${item.center.latitude.toStringAsFixed(5)}, ${item.center.longitude.toStringAsFixed(5)}';
 
       return InkWell(
@@ -1584,23 +1588,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // ── Col 1: Blue dot (no line for stay points) ────────
-                SizedBox(
-                  width: lineColWidth,
-                  child: Center(
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: blueAxis,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-
-                // ── Col 2: Brown place icon ───────────────────────────
+                // ── Col 1: Brown place icon ───────────────────────────
                 SizedBox(
                   width: iconColWidth,
                   child: Center(
@@ -1613,6 +1601,33 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                       ),
                       child: const Icon(Icons.place, color: Colors.white, size: 20),
                     ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+
+                // ── Col 2: Continuous blue line + large dot at this point ──
+                SizedBox(
+                  width: lineColWidth,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Full-height blue line (runs through the whole item)
+                      Positioned.fill(
+                        child: Center(
+                          child: Container(width: 4, color: blueAxis),
+                        ),
+                      ),
+                      // Large circle dot at this stay point
+                      Container(
+                        width: 14,
+                        height: 14,
+                        decoration: BoxDecoration(
+                          color: blueAxis,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1628,6 +1643,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              // Place name box
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                 decoration: BoxDecoration(
@@ -1650,6 +1666,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                 ),
                               ),
                               const SizedBox(height: 4),
+                              // Coordinates
                               Text(
                                 coordStr,
                                 style: TextStyle(
@@ -1658,10 +1675,20 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                   fontFamily: 'monospace',
                                 ),
                               ),
+                              const SizedBox(height: 2),
+                              // Time range + duration
+                              Text(
+                                '$startTime – $endTime  ($durationStr)',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
                             ],
                           ),
                         ),
                         const SizedBox(width: 8),
+                        // Time + more menu
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
@@ -1709,25 +1736,13 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // ── Col 1: Solid blue vertical line (full height) ─────
-                SizedBox(
-                  width: lineColWidth,
-                  child: Center(
-                    child: Container(
-                      width: 5,
-                      color: blueAxis,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4),
-
-                // ── Col 2: Expand icon centered (same column as place icon) ──
+                // ── Col 1: Expand/collapse icon (same column as place icon) ──
                 SizedBox(
                   width: iconColWidth,
                   child: Center(
                     child: Container(
-                      width: 24,
-                      height: 24,
+                      width: 26,
+                      height: 26,
                       decoration: BoxDecoration(
                         color: Theme.of(context).colorScheme.surface,
                         shape: BoxShape.circle,
@@ -1740,6 +1755,18 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                         size: 16,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+
+                // ── Col 2: Continuous blue line (no dot for move segment) ──
+                SizedBox(
+                  width: lineColWidth,
+                  child: Center(
+                    child: Container(
+                      width: 4,
+                      color: blueAxis,
                     ),
                   ),
                 ),
