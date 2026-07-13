@@ -1975,8 +1975,10 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                       }
                     },
                     child: Container(
-                      width: _mode == 'daily' ? 12 : 14,
-                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      width: _mode == 'daily'
+                          ? 28
+                          : (_mode == 'monthly' ? 24 : 45),
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
