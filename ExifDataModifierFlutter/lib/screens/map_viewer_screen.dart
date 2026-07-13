@@ -94,6 +94,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
   DateTime? _selectedDate;
   bool _showCalendar = false;
+  bool _viewAsPath = false;
 
   // Hover state (non-edit mode)
   LocationPoint? _hoveredPoint;
@@ -886,17 +887,27 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                       Padding(
                         padding: const EdgeInsets.fromLTRB(12, 8, 8, 4),
                         child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              'Track Details (${points.length} pts)',
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.bold),
+                              _viewAsPath
+                                  ? 'Timeline Path'
+                                  : 'Track Details (${points.length} pts)',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              icon: Icon(_viewAsPath ? Icons.list : Icons.timeline),
+                              onPressed: () {
+                                setState(() {
+                                  _viewAsPath = !_viewAsPath;
+                                });
+                              },
+                              tooltip: _viewAsPath ? 'Show Raw List' : 'Show Timeline Path',
                             ),
                             IconButton(
                               icon: const Icon(Icons.add_circle_outline,
                                   color: Colors.blue),
-                              onPressed: isEditing
+                              onPressed: isEditing || _viewAsPath
                                   ? null
                                   : () => _openAddPointDialog(
                                       context, appState, dateInfo, points),
@@ -907,7 +918,23 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                       ),
                       const Divider(height: 1),
                       Expanded(
-                        child: ListView.builder(
+                        child: _viewAsPath
+                            ? () {
+                                final timelineItems = _clusterTimeline(points, offset);
+                                if (timelineItems.isEmpty) {
+                                  return const Center(
+                                    child: Text('No timeline points.'),
+                                  );
+                                }
+                                return ListView.builder(
+                                  itemCount: timelineItems.length,
+                                  itemBuilder: (context, idx) {
+                                    final item = timelineItems[idx];
+                                    return _buildTimelineItem(context, item, offset);
+                                  },
+                                );
+                              }()
+                            : ListView.builder(
                           itemCount: points.length,
                           itemBuilder: (context, idx) {
                             final p = points[idx];
@@ -1382,6 +1409,225 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         ],
       ),
     );
+  String _formatDuration(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes % 60;
+    if (h > 0) {
+      return '${h}h ${m}m';
+    } else {
+      return '${m}m';
+    }
+  }
+
+  List<TimelineItem> _clusterTimeline(List<LocationPoint> points, double timezoneOffset) {
+    if (points.isEmpty) return [];
+    if (points.length < 2) {
+      return [
+        StayPointItem(
+          points: points,
+          startTime: points.first.timestamp,
+          endTime: points.first.timestamp,
+          center: points.first.latLng,
+        )
+      ];
+    }
+
+    final List<TimelineItem> items = [];
+    final double distThreshold = 70.0; // meters
+    final Duration timeThreshold = const Duration(minutes: 5);
+
+    int i = 0;
+    final int n = points.length;
+
+    while (i < n) {
+      int j = i + 1;
+
+      while (j < n) {
+        final d = GeoUtils.distanceBetween(points[i].latLng, points[j].latLng);
+        if (d < distThreshold) {
+          j++;
+        } else {
+          break;
+        }
+      }
+
+      final duration = points[j - 1].timestamp.difference(points[i].timestamp);
+      if (duration >= timeThreshold && (j - i) >= 2) {
+        final stayPoints = points.sublist(i, j);
+        double latSum = 0;
+        double lngSum = 0;
+        for (final p in stayPoints) {
+          latSum += p.latitude;
+          lngSum += p.longitude;
+        }
+        final center = LatLng(latSum / stayPoints.length, lngSum / stayPoints.length);
+
+        items.add(StayPointItem(
+          points: stayPoints,
+          startTime: points[i].timestamp,
+          endTime: points[j - 1].timestamp,
+          center: center,
+        ));
+
+        i = j;
+      } else {
+        int nextStayStart = n;
+        for (int m = i + 1; m < n; m++) {
+          int nextJ = m + 1;
+          while (nextJ < n) {
+            final d = GeoUtils.distanceBetween(points[m].latLng, nextJ < n ? points[nextJ].latLng : points[m].latLng);
+            if (d < distThreshold) {
+              nextJ++;
+            } else {
+              break;
+            }
+          }
+          final nextDur = points[nextJ - 1].timestamp.difference(points[m].timestamp);
+          if (nextDur >= timeThreshold && (nextJ - m) >= 2) {
+            nextStayStart = m;
+            break;
+          }
+        }
+
+        final movePoints = points.sublist(i, nextStayStart);
+        double distSum = 0;
+        for (int m = 0; m < movePoints.length - 1; m++) {
+          distSum += GeoUtils.distanceBetween(movePoints[m].latLng, movePoints[m + 1].latLng);
+        }
+
+        items.add(MoveSegmentItem(
+          points: movePoints,
+          startTime: points[i].timestamp,
+          endTime: points[nextStayStart - 1].timestamp,
+          distance: distSum,
+        ));
+
+        i = nextStayStart;
+      }
+    }
+
+    return items;
+  }
+
+  Widget _buildTimelineItem(BuildContext context, TimelineItem item, double timezoneOffset) {
+    if (item is StayPointItem) {
+      final durationStr = _formatDuration(item.duration);
+      final timeStr = '${_formatPointTime(item.startTime, timezoneOffset)} - ${_formatPointTime(item.endTime, timezoneOffset)} ($durationStr)';
+      return InkWell(
+        onTap: () {
+          _animatedMapMove(item.center, 16.5);
+        },
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.2)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.location_on, color: Theme.of(context).colorScheme.primary, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Stay Point (${item.points.length} pts)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.primary,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      timeStr,
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Centroid: ${item.center.latitude.toStringAsFixed(6)}, ${item.center.longitude.toStringAsFixed(6)}',
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else if (item is MoveSegmentItem) {
+      final durationStr = _formatDuration(item.duration);
+      final timeStr = '${_formatPointTime(item.startTime, timezoneOffset)} - ${_formatPointTime(item.endTime, timezoneOffset)} ($durationStr)';
+      final distStr = item.distance < 1000
+          ? '${item.distance.toStringAsFixed(0)} m'
+          : '${(item.distance / 1000).toStringAsFixed(2)} km';
+      return InkWell(
+        onTap: () {
+          if (item.points.isNotEmpty) {
+            final bounds = GeoUtils.calculateBounds(item.points);
+            _mapController.fitCamera(
+              CameraFit.bounds(
+                bounds: bounds,
+                padding: const EdgeInsets.all(40),
+              ),
+            );
+          }
+        },
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Theme.of(context).colorScheme.secondary.withOpacity(0.15)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.directions_run, color: Theme.of(context).colorScheme.secondary, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Moving Path ($distStr)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.secondary,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      timeStr,
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Points: ${item.points.length} pts',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
   }
 }
 
@@ -2101,6 +2347,40 @@ class BingTileProvider extends NetworkTileProvider {
     }
     return quadKey.toString();
   }
+}
+
+abstract class TimelineItem {}
+
+class StayPointItem extends TimelineItem {
+  final List<LocationPoint> points;
+  final DateTime startTime;
+  final DateTime endTime;
+  final LatLng center;
+
+  StayPointItem({
+    required this.points,
+    required this.startTime,
+    required this.endTime,
+    required this.center,
+  });
+
+  Duration get duration => endTime.difference(startTime);
+}
+
+class MoveSegmentItem extends TimelineItem {
+  final List<LocationPoint> points;
+  final DateTime startTime;
+  final DateTime endTime;
+  final double distance;
+
+  MoveSegmentItem({
+    required this.points,
+    required this.startTime,
+    required this.endTime,
+    required this.distance,
+  });
+
+  Duration get duration => endTime.difference(startTime);
 }
 
 class CustomCalendarInline extends StatefulWidget {
