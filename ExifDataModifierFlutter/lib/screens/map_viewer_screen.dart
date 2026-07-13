@@ -794,7 +794,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                                 ],
                               ),
                               onTap: () {
-                                mapController.move(p.latLng, mapController.camera.zoom);
+                                _mapController.move(p.latLng, _mapController.camera.zoom);
                               },
                             );
                           },
@@ -807,7 +807,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
       ],
     );
   }
-  Widget _buildTileLayer(String mapProvider) {
+  TileLayer _buildTileLayer(String mapProvider) {
     String urlTemplate;
     TileProvider? tileProvider;
 
