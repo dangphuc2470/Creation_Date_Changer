@@ -9,6 +9,7 @@ import '../models/location_point.dart';
 import '../providers/app_state_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/location_manager.dart';
+import '../utils/geo_utils.dart';
 
 class ProjectionResult {
   final int insertIndex;
@@ -546,14 +547,127 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
               const SizedBox(height: 16),
               Row(
                 children: [
+                  IconButton(
+                    icon: const Icon(Icons.chevron_left),
+                    onPressed: () {
+                      setState(() {
+                        _selectedDate = _selectedDate!.subtract(const Duration(days: 1));
+                      });
+                      _loadPointsForSelectedDate();
+                    },
+                    tooltip: 'Previous Day',
+                  ),
                   Expanded(
-                    child: Text(
-                      dateStr,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(fontWeight: FontWeight.w600),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          // Day Dropdown
+                          Expanded(
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int>(
+                                isExpanded: true,
+                                value: _selectedDate?.day,
+                                items: List.generate(
+                                  DateTime(_selectedDate?.year ?? DateTime.now().year, (_selectedDate?.month ?? DateTime.now().month) + 1, 0).day,
+                                  (i) => i + 1,
+                                ).map((d) => DropdownMenuItem(
+                                  value: d,
+                                  child: Center(
+                                    child: Text(
+                                      d.toString().padLeft(2, '0'),
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                    ),
+                                  ),
+                                )).toList(),
+                                onChanged: (day) {
+                                  if (day != null) {
+                                    setState(() {
+                                      _selectedDate = DateTime(_selectedDate!.year, _selectedDate!.month, day);
+                                    });
+                                    _loadPointsForSelectedDate();
+                                  }
+                                },
+                              ),
+                            ),
+                          ),
+                          const Text('/', style: TextStyle(color: Colors.grey, fontSize: 14)),
+                          // Month Dropdown
+                          Expanded(
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int>(
+                                isExpanded: true,
+                                value: _selectedDate?.month,
+                                items: List.generate(12, (i) => i + 1).map((m) => DropdownMenuItem(
+                                  value: m,
+                                  child: Center(
+                                    child: Text(
+                                      m.toString().padLeft(2, '0'),
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                    ),
+                                  ),
+                                )).toList(),
+                                onChanged: (month) {
+                                  if (month != null) {
+                                    final daysInMonth = DateTime(_selectedDate!.year, month + 1, 0).day;
+                                    final targetDay = _selectedDate!.day.clamp(1, daysInMonth);
+                                    setState(() {
+                                      _selectedDate = DateTime(_selectedDate!.year, month, targetDay);
+                                    });
+                                    _loadPointsForSelectedDate();
+                                  }
+                                },
+                              ),
+                            ),
+                          ),
+                          const Text('/', style: TextStyle(color: Colors.grey, fontSize: 14)),
+                          // Year Dropdown
+                          Expanded(
+                            flex: 2,
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int>(
+                                isExpanded: true,
+                                value: _selectedDate?.year,
+                                items: List.generate(DateTime.now().year - 2000 + 1, (i) => 2000 + i).map((y) => DropdownMenuItem(
+                                  value: y,
+                                  child: Center(
+                                    child: Text(
+                                      y.toString(),
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                    ),
+                                  ),
+                                )).toList(),
+                                onChanged: (year) {
+                                  if (year != null) {
+                                    final daysInMonth = DateTime(year, _selectedDate!.month + 1, 0).day;
+                                    final targetDay = _selectedDate!.day.clamp(1, daysInMonth);
+                                    setState(() {
+                                      _selectedDate = DateTime(year, _selectedDate!.month, targetDay);
+                                    });
+                                    _loadPointsForSelectedDate();
+                                  }
+                                },
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right),
+                    onPressed: () {
+                      setState(() {
+                        _selectedDate = _selectedDate!.add(const Duration(days: 1));
+                      });
+                      _loadPointsForSelectedDate();
+                    },
+                    tooltip: 'Next Day',
                   ),
                   IconButton.filledTonal(
                     icon: const Icon(Icons.calendar_month),
@@ -719,6 +833,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
           MonthlyDistanceChart(
             selectedDate: _selectedDate!,
             allDates: appState.allDates,
+            points: points,
+            timezoneOffset: offset,
             onDateSelected: (date) {
               setState(() {
                 _selectedDate = date;
@@ -1521,32 +1637,172 @@ class _DayHeaderCell extends StatelessWidget {
   }
 }
 
-class MonthlyDistanceChart extends StatelessWidget {
+class MonthlyDistanceChart extends StatefulWidget {
   final DateTime selectedDate;
   final List<DateInfo> allDates;
+  final List<LocationPoint> points;
+  final double timezoneOffset;
   final Function(DateTime) onDateSelected;
 
   const MonthlyDistanceChart({
     super.key,
     required this.selectedDate,
     required this.allDates,
+    required this.points,
+    required this.timezoneOffset,
     required this.onDateSelected,
   });
 
   @override
+  State<MonthlyDistanceChart> createState() => _MonthlyDistanceChartState();
+}
+
+class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
+  String _mode = 'monthly'; // 'daily', 'monthly', 'yearly'
+  int? _hoveredIndex;
+
+  String _formatDistance(double meters) {
+    if (meters < 1000) {
+      return '${meters.toStringAsFixed(0)} m';
+    } else {
+      return '${(meters / 1000).toStringAsFixed(1)} km';
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // 1. Calculate totals
+    final currentDateInfo = widget.allDates.firstWhere(
+      (d) =>
+          d.date.year == widget.selectedDate.year &&
+          d.date.month == widget.selectedDate.month &&
+          d.date.day == widget.selectedDate.day,
+      orElse: () => DateInfo(
+        date: widget.selectedDate,
+        pointCount: 0,
+        filePath: '',
+        distance: 0.0,
+        state: 'original',
+        source: 'merge',
+        hasTimelineBackup: false,
+        hasGpxBackup: false,
+      ),
+    );
+    final totalDayDistance = currentDateInfo.distance;
+
+    final totalMonthDistance = widget.allDates
+        .where((d) =>
+            d.date.year == widget.selectedDate.year &&
+            d.date.month == widget.selectedDate.month)
+        .fold(0.0, (sum, d) => sum + d.distance);
+
+    final totalYearDistance = widget.allDates
+        .where((d) => d.date.year == widget.selectedDate.year)
+        .fold(0.0, (sum, d) => sum + d.distance);
+
+    // 2. Prepare Mode Data
+    int itemCount = 0;
+    List<double> distances = [];
+    List<String> labels = [];
+    double maxDist = 1.0;
+    
+    // Monthly mode local vars
     final daysInMonth =
-        DateTime(selectedDate.year, selectedDate.month + 1, 0).day;
-    double maxDistance = 1.0;
+        DateTime(widget.selectedDate.year, widget.selectedDate.month + 1, 0).day;
     final Map<int, DateInfo> monthData = {};
 
-    for (final d in allDates) {
-      if (d.date.year == selectedDate.year &&
-          d.date.month == selectedDate.month) {
-        monthData[d.date.day] = d;
-        if (d.distance > maxDistance) {
-          maxDistance = d.distance;
+    if (_mode == 'daily') {
+      itemCount = 24;
+      final hourlyDistances = List.filled(24, 0.0);
+      if (widget.points.isNotEmpty) {
+        for (int i = 0; i < widget.points.length - 1; i++) {
+          final p1 = widget.points[i];
+          final p2 = widget.points[i + 1];
+          final localTime = p1.timestamp.add(
+              Duration(minutes: (widget.timezoneOffset * 60).toInt()));
+          final hour = localTime.hour;
+          final dist = GeoUtils.distanceBetween(p1.latLng, p2.latLng);
+          hourlyDistances[hour] += dist;
         }
+      }
+      distances = hourlyDistances;
+      maxDist = distances.fold(
+          1.0, (maxVal, val) => val > maxVal ? val : maxVal);
+      labels = List.generate(24, (i) => i.toString().padLeft(2, '0'));
+    } else if (_mode == 'monthly') {
+      itemCount = daysInMonth;
+      for (final d in widget.allDates) {
+        if (d.date.year == widget.selectedDate.year &&
+            d.date.month == widget.selectedDate.month) {
+          monthData[d.date.day] = d;
+          if (d.distance > maxDist) {
+            maxDist = d.distance;
+          }
+        }
+      }
+      distances = List.generate(
+          daysInMonth, (i) => monthData[i + 1]?.distance ?? 0.0);
+      labels = List.generate(daysInMonth, (i) => (i + 1).toString());
+    } else {
+      // Yearly
+      itemCount = 12;
+      final yearlyDistances = List.filled(12, 0.0);
+      for (int m = 1; m <= 12; m++) {
+        yearlyDistances[m - 1] = widget.allDates
+            .where((d) =>
+                d.date.year == widget.selectedDate.year && d.date.month == m)
+            .fold(0.0, (sum, d) => sum + d.distance);
+      }
+      distances = yearlyDistances;
+      maxDist = distances.fold(
+          1.0, (maxVal, val) => val > maxVal ? val : maxVal);
+      labels = List.generate(12, (index) =>
+          DateFormat('MMM').format(DateTime(2020, index + 1)));
+    }
+
+    // Header title and active hover description
+    String titleText = 'Monthly Distance';
+    String currentModeTotal = _formatDistance(totalMonthDistance);
+    if (_mode == 'daily') {
+      titleText = 'Daily Distance';
+      currentModeTotal = _formatDistance(totalDayDistance);
+    } else if (_mode == 'yearly') {
+      titleText = 'Yearly Distance';
+      currentModeTotal = _formatDistance(totalYearDistance);
+    }
+
+    Widget? hoverSubtitle;
+    if (_hoveredIndex != null && _hoveredIndex! < itemCount) {
+      if (_mode == 'daily') {
+        hoverSubtitle = Text(
+          'Hour ${_hoveredIndex!.toString().padLeft(2, '0')}:00: ${_formatDistance(distances[_hoveredIndex!])}',
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.primary,
+            fontWeight: FontWeight.w600,
+          ),
+        );
+      } else if (_mode == 'monthly') {
+        final day = _hoveredIndex! + 1;
+        hoverSubtitle = Text(
+          'Day $day: ${_formatDistance(distances[_hoveredIndex!])}',
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.primary,
+            fontWeight: FontWeight.w600,
+          ),
+        );
+      } else {
+        final monthName = DateFormat('MMMM').format(
+            DateTime(widget.selectedDate.year, _hoveredIndex! + 1));
+        hoverSubtitle = Text(
+          '$monthName: ${_formatDistance(distances[_hoveredIndex!])}',
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.primary,
+            fontWeight: FontWeight.w600,
+          ),
+        );
       }
     }
 
@@ -1562,51 +1818,118 @@ class MonthlyDistanceChart extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Monthly Distance',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '$titleText ($currentModeTotal)',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      if (hoverSubtitle != null) ...[
+                        const SizedBox(height: 2),
+                        hoverSubtitle,
+                      ],
+                    ],
+                  ),
+                ),
+                DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _mode,
+                    isDense: true,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                    items: const [
+                      DropdownMenuItem(value: 'daily', child: Text('Daily')),
+                      DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
+                      DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() {
+                          _mode = val;
+                          _hoveredIndex = null;
+                        });
+                      }
+                    },
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             SizedBox(
               height: 80,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
-                itemCount: daysInMonth,
+                itemCount: itemCount,
                 itemBuilder: (context, index) {
-                  final day = index + 1;
-                  final dayInfo = monthData[day];
-                  final isCurrentDay = day == selectedDate.day;
+                  final double val = distances[index];
+                  final String label = labels[index];
 
-                  double heightFactor = 0.05;
+                  double heightFactor = (val / maxDist).clamp(0.05, 1.0);
                   Color barColor = Colors.grey.shade300;
 
-                  if (dayInfo != null) {
-                    heightFactor =
-                        (dayInfo.distance / maxDistance).clamp(0.1, 1.0);
-                    if (dayInfo.state == 'snapped') {
-                      barColor = Colors.green.shade300;
-                    } else if (dayInfo.state == 'edited') {
-                      barColor = Colors.blue.shade300;
-                    } else {
-                      barColor = Colors.grey.shade400;
+                  bool isActive = false;
+                  if (_mode == 'daily') {
+                    final localTimeNow = DateTime.now().add(
+                        Duration(minutes: (widget.timezoneOffset * 60).toInt()));
+                    isActive = index == localTimeNow.hour;
+                  } else if (_mode == 'monthly') {
+                    final day = index + 1;
+                    isActive = day == widget.selectedDate.day;
+                    final dayInfo = monthData[day];
+                    if (dayInfo != null) {
+                      if (dayInfo.state == 'snapped') {
+                        barColor = Colors.green.shade300;
+                      } else if (dayInfo.state == 'edited') {
+                        barColor = Colors.blue.shade300;
+                      } else {
+                        barColor = Colors.grey.shade400;
+                      }
                     }
+                  } else {
+                    isActive = (index + 1) == widget.selectedDate.month;
                   }
 
-                  if (isCurrentDay) {
+                  if (isActive) {
                     barColor = Theme.of(context).colorScheme.primary;
+                  }
+
+                  if (_hoveredIndex == index) {
+                    barColor = Theme.of(context).colorScheme.secondary;
                   }
 
                   return GestureDetector(
                     onTap: () {
-                      final clickedDate =
-                          DateTime(selectedDate.year, selectedDate.month, day);
-                      onDateSelected(clickedDate);
+                      setState(() {
+                        _hoveredIndex = index;
+                      });
+                      if (_mode == 'monthly') {
+                        final clickedDate = DateTime(
+                          widget.selectedDate.year,
+                          widget.selectedDate.month,
+                          index + 1,
+                        );
+                        widget.onDateSelected(clickedDate);
+                      } else if (_mode == 'yearly') {
+                        final clickedDate = DateTime(
+                          widget.selectedDate.year,
+                          index + 1,
+                          1,
+                        );
+                        widget.onDateSelected(clickedDate);
+                      }
                     },
                     child: Container(
-                      width: 14,
+                      width: _mode == 'daily' ? 12 : 14,
                       margin: const EdgeInsets.symmetric(horizontal: 2),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.end,
@@ -1625,13 +1948,13 @@ class MonthlyDistanceChart extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            day.toString(),
+                            label,
                             style: TextStyle(
                               fontSize: 9,
-                              fontWeight: isCurrentDay
+                              fontWeight: isActive
                                   ? FontWeight.bold
                                   : FontWeight.normal,
-                              color: isCurrentDay
+                              color: isActive
                                   ? Theme.of(context).colorScheme.primary
                                   : Theme.of(context)
                                       .colorScheme
