@@ -1,0 +1,31 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        
+
+        {
+            "name": "ExifDataModifierFlutter",
+            "request": "launch",
+            "type": "dart",
+            "args": [
+                "--host-vmservice-port=8000",
+                "--vm-service-host=127.0.0.1"
+            ]
+        },
+        {
+            "name": "ExifDataModifierFlutter (profile mode)",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "ExifDataModifierFlutter (release mode)",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        }
+    ]
+}
