@@ -1842,75 +1842,74 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.chevron_left, size: 20),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        onPressed: () {
-                          if (_mode == 'daily') {
-                            widget.onDateSelected(widget.selectedDate.subtract(const Duration(days: 1)));
-                          } else if (_mode == 'monthly') {
-                            final newMonth = widget.selectedDate.month == 1 ? 12 : widget.selectedDate.month - 1;
-                            final newYear = widget.selectedDate.month == 1 ? widget.selectedDate.year - 1 : widget.selectedDate.year;
-                            final daysInNewMonth = DateTime(newYear, newMonth + 1, 0).day;
-                            final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
-                            widget.onDateSelected(DateTime(newYear, newMonth, targetDay));
-                          } else {
-                            final newYear = widget.selectedDate.year - 1;
-                            final daysInNewMonth = DateTime(newYear, widget.selectedDate.month + 1, 0).day;
-                            final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
-                            widget.onDateSelected(DateTime(newYear, widget.selectedDate.month, targetDay));
-                          }
-                        },
+                      Text(
+                        '$titleText ($currentModeTotal)',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '$titleText ($currentModeTotal)',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleSmall
-                                  ?.copyWith(fontWeight: FontWeight.bold),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            if (hoverSubtitle != null) ...[
-                              const SizedBox(height: 2),
-                              hoverSubtitle,
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        icon: const Icon(Icons.chevron_right, size: 20),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        onPressed: () {
-                          if (_mode == 'daily') {
-                            widget.onDateSelected(widget.selectedDate.add(const Duration(days: 1)));
-                          } else if (_mode == 'monthly') {
-                            final newMonth = widget.selectedDate.month == 12 ? 1 : widget.selectedDate.month + 1;
-                            final newYear = widget.selectedDate.month == 12 ? widget.selectedDate.year + 1 : widget.selectedDate.year;
-                            final daysInNewMonth = DateTime(newYear, newMonth + 1, 0).day;
-                            final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
-                            widget.onDateSelected(DateTime(newYear, newMonth, targetDay));
-                          } else {
-                            final newYear = widget.selectedDate.year + 1;
-                            final daysInNewMonth = DateTime(newYear, widget.selectedDate.month + 1, 0).day;
-                            final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
-                            widget.onDateSelected(DateTime(newYear, widget.selectedDate.month, targetDay));
-                          }
-                        },
-                      ),
+                      if (hoverSubtitle != null) ...[
+                        const SizedBox(height: 2),
+                        hoverSubtitle,
+                      ],
                     ],
                   ),
                 ),
                 const SizedBox(width: 8),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.chevron_left, size: 20),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () {
+                        if (_mode == 'daily') {
+                          widget.onDateSelected(widget.selectedDate.subtract(const Duration(days: 1)));
+                        } else if (_mode == 'monthly') {
+                          final newMonth = widget.selectedDate.month == 1 ? 12 : widget.selectedDate.month - 1;
+                          final newYear = widget.selectedDate.month == 1 ? widget.selectedDate.year - 1 : widget.selectedDate.year;
+                          final daysInNewMonth = DateTime(newYear, newMonth + 1, 0).day;
+                          final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
+                          widget.onDateSelected(DateTime(newYear, newMonth, targetDay));
+                        } else {
+                          final newYear = widget.selectedDate.year - 1;
+                          final daysInNewMonth = DateTime(newYear, widget.selectedDate.month + 1, 0).day;
+                          final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
+                          widget.onDateSelected(DateTime(newYear, widget.selectedDate.month, targetDay));
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.chevron_right, size: 20),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () {
+                        if (_mode == 'daily') {
+                          widget.onDateSelected(widget.selectedDate.add(const Duration(days: 1)));
+                        } else if (_mode == 'monthly') {
+                          final newMonth = widget.selectedDate.month == 12 ? 1 : widget.selectedDate.month + 1;
+                          final newYear = widget.selectedDate.month == 12 ? widget.selectedDate.year + 1 : widget.selectedDate.year;
+                          final daysInNewMonth = DateTime(newYear, newMonth + 1, 0).day;
+                          final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
+                          widget.onDateSelected(DateTime(newYear, newMonth, targetDay));
+                        } else {
+                          final newYear = widget.selectedDate.year + 1;
+                          final daysInNewMonth = DateTime(newYear, widget.selectedDate.month + 1, 0).day;
+                          final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
+                          widget.onDateSelected(DateTime(newYear, widget.selectedDate.month, targetDay));
+                        }
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 12),
                 DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: _mode,
