@@ -1,5 +1,3 @@
-import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,7 +9,6 @@ import '../models/location_point.dart';
 import '../providers/app_state_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/location_manager.dart';
-import '../utils/geo_utils.dart';
 
 class ProjectionResult {
   final int insertIndex;
@@ -908,7 +905,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
     }
 
     // Hover projection marker
-    if (_hoveredLatLng != null) {
+    if (isEditing && _hoveredLatLng != null) {
       markers.add(
         Marker(
           point: _hoveredLatLng!,
@@ -920,6 +917,68 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 1.5),
             ),
+          ),
+        ),
+      );
+    }
+
+    // Hover point in non-edit mode
+    if (!isEditing && _hoveredPoint != null && _hoveredLatLng != null) {
+      final localHoverTime = _hoveredPoint!.timestamp.add(Duration(minutes: (timeOffset * 60).toInt()));
+      markers.add(
+        Marker(
+          point: _hoveredLatLng!,
+          width: 200,
+          height: 120,
+          alignment: Alignment.center,
+          child: Stack(
+            alignment: Alignment.center,
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: _hoveredColor ?? const Color(0xFF7F92FF),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2.5),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black38, blurRadius: 6),
+                  ],
+                ),
+              ),
+              Positioned(
+                bottom: 24,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.85),
+                    borderRadius: BorderRadius.circular(6),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black45, blurRadius: 4, offset: Offset(0, 2)),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        DateFormat('yyyy-MM-dd').format(localHoverTime),
+                        style: const TextStyle(color: Colors.grey, fontSize: 10),
+                      ),
+                      Text(
+                        DateFormat('HH:mm:ss').format(localHoverTime),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );
