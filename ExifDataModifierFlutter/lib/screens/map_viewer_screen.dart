@@ -1409,6 +1409,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         ],
       ),
     );
+  }
+
   String _formatDuration(Duration d) {
     final h = d.inHours;
     final m = d.inMinutes % 60;
@@ -1572,7 +1574,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       return InkWell(
         onTap: () {
           if (item.points.isNotEmpty) {
-            final bounds = GeoUtils.calculateBounds(item.points);
+            final bounds = LatLngBounds.fromPoints(
+              item.points.map((p) => p.latLng).toList(),
+            );
             _mapController.fitCamera(
               CameraFit.bounds(
                 bounds: bounds,
@@ -1964,26 +1968,8 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
   }
 
   @override
-  @override
   Widget build(BuildContext context) {
     // 1. Calculate totals
-    final currentDateInfo = widget.allDates.firstWhere(
-      (d) =>
-          d.date.year == widget.selectedDate.year &&
-          d.date.month == widget.selectedDate.month &&
-          d.date.day == widget.selectedDate.day,
-      orElse: () => DateInfo(
-        date: widget.selectedDate,
-        pointCount: 0,
-        filePath: '',
-        distance: 0.0,
-        state: 'original',
-        source: 'merge',
-        hasTimelineBackup: false,
-        hasGpxBackup: false,
-      ),
-    );
-    final totalDayDistance = currentDateInfo.distance;
 
     final totalMonthDistance = widget.allDates
         .where((d) =>
