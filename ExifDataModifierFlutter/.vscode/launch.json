@@ -9,11 +9,7 @@
         {
             "name": "ExifDataModifierFlutter",
             "request": "launch",
-            "type": "dart",
-            "args": [
-                "--host-vmservice-port=8000",
-                "--vm-service-host=127.0.0.1"
-            ]
+            "type": "dart"
         },
         {
             "name": "ExifDataModifierFlutter (profile mode)",
