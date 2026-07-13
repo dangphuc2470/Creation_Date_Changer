@@ -53,17 +53,23 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
           startDate: _startDate,
           endDate: _endDate,
           onProgress: (progress) {
-            setState(() {
-              _progress = progress.progress;
-              _statusMessage = progress.message;
-            });
+            if (mounted) {
+              setState(() {
+                _progress = progress.progress;
+                _statusMessage = progress.message;
+              });
+            }
           },
         );
 
-        if (points.isNotEmpty && mounted) {
+        if (!mounted) return;
+
+        if (points.isNotEmpty) {
           final appState = context.read<AppStateProvider>();
           await appState.saveImportedPoints(points, 'timeline');
           
+          if (!mounted) return;
+
           // Reload geotag providers with the new points
           context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
           context.read<BatchGeotagProvider>().loadTimelineLocationsFromAppDb();
@@ -84,6 +90,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
           });
         }
       } catch (e) {
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
           _statusMessage = 'Error: $e';
@@ -106,9 +113,14 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
 
       try {
         final points = await GpxParser.parseFile(result.files.single.path!);
-        if (points.isNotEmpty && mounted) {
+        
+        if (!mounted) return;
+
+        if (points.isNotEmpty) {
           final appState = context.read<AppStateProvider>();
           await appState.saveImportedPoints(points, 'gpx');
+
+          if (!mounted) return;
 
           // Reload geotag providers with the new points
           context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
@@ -130,6 +142,7 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
           });
         }
       } catch (e) {
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
           _statusMessage = 'Error: $e';
@@ -151,18 +164,22 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
         final groups = await BatchImportService.scanDirectory(
           result,
           (progress, message) {
-            setState(() {
-              _progress = progress;
-              _statusMessage = message;
-            });
+            if (mounted) {
+              setState(() {
+                _progress = progress;
+                _statusMessage = message;
+              });
+            }
           },
         );
 
         if (groups.isEmpty) {
-          setState(() {
-            _isLoading = false;
-            _statusMessage = 'No valid GPX or JSON files found in folder';
-          });
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+              _statusMessage = 'No valid GPX or JSON files found in folder';
+            });
+          }
           return;
         }
 
@@ -175,9 +192,13 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
             ),
           );
 
+          if (!mounted) return;
+
           if (finalGroups != null && finalGroups.isNotEmpty) {
             final appState = context.read<AppStateProvider>();
             await appState.saveBatchGroups(finalGroups);
+
+            if (!mounted) return;
 
             // Reload geotag providers with the new points
             context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
@@ -193,17 +214,18 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
             setState(() {
               _lastImportedCount = totalPts;
               _statusMessage = 'Successfully imported all files to App Database!';
-              if (_outputPath == null) {
-                _outputPath = path.join(path.dirname(result), 'output');
-              }
+              _outputPath ??= path.join(path.dirname(result), 'output');
             });
           }
         }
 
-        setState(() {
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       } catch (e) {
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
           _statusMessage = 'Error scanning folder: $e';

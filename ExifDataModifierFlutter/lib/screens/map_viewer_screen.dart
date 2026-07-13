@@ -24,7 +24,8 @@ class ProjectionResult {
   });
 }
 
-ProjectionResult? _getNearestProjection(LatLng cursor, List<LocationPoint> points) {
+ProjectionResult? _getNearestProjection(
+    LatLng cursor, List<LocationPoint> points) {
   if (points.length < 2) return null;
 
   ProjectionResult? bestResult;
@@ -104,9 +105,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
   void _loadPointsForSelectedDate() async {
     if (_selectedDate == null) return;
     final appState = context.read<AppStateProvider>();
-    
+
     final dateInfo = appState.allDates.firstWhere(
-      (d) => d.date.year == _selectedDate!.year &&
+      (d) =>
+          d.date.year == _selectedDate!.year &&
           d.date.month == _selectedDate!.month &&
           d.date.day == _selectedDate!.day,
       orElse: () => DateInfo(
@@ -124,7 +126,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
     if (dateInfo.filePath.isNotEmpty) {
       final points = await LocationManager.loadLocationFile(dateInfo.filePath);
       appState.setSelectedDatePath(dateInfo, points);
-      
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _fitBounds();
       });
@@ -138,9 +140,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
     final paths = appState.activePaths;
     if (paths.isEmpty) return;
 
-    final allPoints = paths.values
-        .expand((points) => points.map((p) => p.latLng))
-        .toList();
+    final allPoints =
+        paths.values.expand((points) => points.map((p) => p.latLng)).toList();
     if (allPoints.isEmpty) return;
 
     final bounds = LatLngBounds.fromPoints(allPoints);
@@ -304,7 +305,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
       final RenderBox renderBox = context.findRenderObject() as RenderBox;
       final localOffset = renderBox.globalToLocal(event.position);
       try {
-        final newLatLng = _mapController.camera.screenOffsetToLatLng(localOffset);
+        final newLatLng =
+            _mapController.camera.screenOffsetToLatLng(localOffset);
         appState.updatePointCoordinate(_selectedPointIndex!, newLatLng);
       } catch (_) {}
     }
@@ -319,14 +321,17 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
   }
 
   String _formatPointTime(DateTime utcTime, double timezoneOffset) {
-    final localTime = utcTime.add(Duration(minutes: (timezoneOffset * 60).toInt()));
+    final localTime =
+        utcTime.add(Duration(minutes: (timezoneOffset * 60).toInt()));
     return DateFormat('HH:mm:ss').format(localTime);
   }
 
-  void _openAddPointDialog(BuildContext context, AppStateProvider appState, DateInfo dateInfo, List<LocationPoint> currentPoints) {
+  void _openAddPointDialog(BuildContext context, AppStateProvider appState,
+      DateInfo dateInfo, List<LocationPoint> currentPoints) {
     final latCtrl = TextEditingController();
     final lngCtrl = TextEditingController();
-    final timeCtrl = TextEditingController(text: DateFormat('HH:mm:ss').format(DateTime.now()));
+    final timeCtrl = TextEditingController(
+        text: DateFormat('HH:mm:ss').format(DateTime.now()));
 
     showDialog(
       context: context,
@@ -338,12 +343,14 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
             TextField(
               controller: latCtrl,
               decoration: const InputDecoration(labelText: 'Latitude'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
             ),
             TextField(
               controller: lngCtrl,
               decoration: const InputDecoration(labelText: 'Longitude'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
             ),
             TextField(
               controller: timeCtrl,
@@ -384,14 +391,18 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                   timestamp: utcDate,
                 );
 
-                final newPoints = List<LocationPoint>.from(currentPoints)..add(newPoint);
+                final newPoints = List<LocationPoint>.from(currentPoints)
+                  ..add(newPoint);
                 await appState.saveListPoints(dateInfo, newPoints);
                 _loadPointsForSelectedDate();
-                if (mounted) Navigator.pop(ctx);
+                if (ctx.mounted) Navigator.pop(ctx);
               } catch (_) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invalid time format. Use HH:mm:ss.')),
-                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Invalid time format. Use HH:mm:ss.')),
+                  );
+                }
               }
             },
             child: const Text('Add'),
@@ -401,16 +412,19 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
     );
   }
 
-  void _openEditPointDialog(BuildContext context, AppStateProvider appState, DateInfo dateInfo, List<LocationPoint> currentPoints, int index) {
+  void _openEditPointDialog(BuildContext context, AppStateProvider appState,
+      DateInfo dateInfo, List<LocationPoint> currentPoints, int index) {
     final pt = currentPoints[index];
     final settings = context.read<SettingsProvider>();
     final offset = settings.geotagTimezone.toDouble();
 
     final latCtrl = TextEditingController(text: pt.latitude.toString());
     final lngCtrl = TextEditingController(text: pt.longitude.toString());
-    
-    final localTime = pt.timestamp.add(Duration(minutes: (offset * 60).toInt()));
-    final timeCtrl = TextEditingController(text: DateFormat('HH:mm:ss').format(localTime));
+
+    final localTime =
+        pt.timestamp.add(Duration(minutes: (offset * 60).toInt()));
+    final timeCtrl =
+        TextEditingController(text: DateFormat('HH:mm:ss').format(localTime));
 
     showDialog(
       context: context,
@@ -422,12 +436,14 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
             TextField(
               controller: latCtrl,
               decoration: const InputDecoration(labelText: 'Latitude'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
             ),
             TextField(
               controller: lngCtrl,
               decoration: const InputDecoration(labelText: 'Longitude'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
             ),
             TextField(
               controller: timeCtrl,
@@ -461,7 +477,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                   min,
                   sec,
                 );
-                final utcDate = localDate.subtract(Duration(minutes: (offset * 60).toInt()));
+                final utcDate = localDate
+                    .subtract(Duration(minutes: (offset * 60).toInt()));
 
                 final updatedPoint = LocationPoint(
                   latitude: lat,
@@ -476,11 +493,14 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
 
                 await appState.saveListPoints(dateInfo, newPoints);
                 _loadPointsForSelectedDate();
-                if (mounted) Navigator.pop(ctx);
+                if (ctx.mounted) Navigator.pop(ctx);
               } catch (_) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invalid time format. Use HH:mm:ss.')),
-                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Invalid time format. Use HH:mm:ss.')),
+                  );
+                }
               }
             },
             child: const Text('Save'),
@@ -490,7 +510,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
     );
   }
 
-  Widget _buildSidebar(BuildContext context, AppStateProvider appState, DateInfo dateInfo, List<LocationPoint> points) {
+  Widget _buildSidebar(BuildContext context, AppStateProvider appState,
+      DateInfo dateInfo, List<LocationPoint> points) {
     final settings = context.read<SettingsProvider>();
     final double offset = settings.geotagTimezone.toDouble();
     final isEditing = appState.isEditing;
@@ -510,11 +531,15 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
             children: [
               Row(
                 children: [
-                  Icon(Icons.map_outlined, color: Theme.of(context).colorScheme.primary, size: 28),
+                  Icon(Icons.map_outlined,
+                      color: Theme.of(context).colorScheme.primary, size: 28),
                   const SizedBox(width: 8),
                   Text(
                     'Timeline Map',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                    style: Theme.of(context)
+                        .textTheme
+                        .headlineSmall
+                        ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -524,7 +549,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                   Expanded(
                     child: Text(
                       dateStr,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w600),
                     ),
                   ),
                   IconButton.filledTonal(
@@ -566,9 +594,11 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                         : () async {
                             await appState.snapToRoads(dateInfo);
                             _loadPointsForSelectedDate();
-                            if (mounted) {
+                            if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Snapped timeline to roads! (Simulated)')),
+                                const SnackBar(
+                                    content: Text(
+                                        'Snapped timeline to roads! (Simulated)')),
                               );
                             }
                           },
@@ -597,9 +627,11 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                       : () async {
                           await appState.restoreDateToOriginal(dateInfo);
                           _loadPointsForSelectedDate();
-                          if (mounted) {
+                          if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Restored timeline to original backup.')),
+                              const SnackBar(
+                                  content: Text(
+                                      'Restored timeline to original backup.')),
                             );
                           }
                         },
@@ -615,12 +647,17 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                             context: context,
                             builder: (ctx) => AlertDialog(
                               title: const Text('Delete Timeline'),
-                              content: Text('Are you sure you want to delete all timeline records for $dateStr?'),
+                              content: Text(
+                                  'Are you sure you want to delete all timeline records for $dateStr?'),
                               actions: [
-                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                TextButton(
+                                    onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('Cancel')),
                                 ElevatedButton(
                                   onPressed: () => Navigator.pop(ctx, true),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      foregroundColor: Colors.white),
                                   child: const Text('Delete'),
                                 ),
                               ],
@@ -641,21 +678,26 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
         // Source dropdown
         if (dateInfo.hasTimelineBackup && dateInfo.hasGpxBackup)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: Row(
               children: [
-                const Text('Data Source: ', style: TextStyle(fontWeight: FontWeight.w500)),
+                const Text('Data Source: ',
+                    style: TextStyle(fontWeight: FontWeight.w500)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: dateInfo.source,
+                    initialValue: dateInfo.source,
                     decoration: const InputDecoration(
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                       border: OutlineInputBorder(),
                     ),
                     items: const [
-                      DropdownMenuItem(value: 'merge', child: Text('Merge (Auto)')),
-                      DropdownMenuItem(value: 'timeline', child: Text('Google Timeline')),
+                      DropdownMenuItem(
+                          value: 'merge', child: Text('Merge (Auto)')),
+                      DropdownMenuItem(
+                          value: 'timeline', child: Text('Google Timeline')),
                       DropdownMenuItem(value: 'gpx', child: Text('GPX Only')),
                     ],
                     onChanged: isEditing
@@ -690,7 +732,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
           child: Container(
             margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
             decoration: BoxDecoration(
-              border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+              border: Border.all(
+                  color: Theme.of(context).colorScheme.outlineVariant),
               borderRadius: BorderRadius.circular(12),
             ),
             child: dateInfo.filePath.isEmpty
@@ -713,13 +756,16 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                           children: [
                             Text(
                               'Track Details (${points.length} pts)',
-                              style: const TextStyle(fontWeight: FontWeight.bold),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.add_circle_outline, color: Colors.blue),
+                              icon: const Icon(Icons.add_circle_outline,
+                                  color: Colors.blue),
                               onPressed: isEditing
                                   ? null
-                                  : () => _openAddPointDialog(context, appState, dateInfo, points),
+                                  : () => _openAddPointDialog(
+                                      context, appState, dateInfo, points),
                               tooltip: 'Add Coordinate',
                             ),
                           ],
@@ -733,22 +779,31 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                             final p = points[idx];
                             return ListTile(
                               dense: true,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 0),
                               leading: CircleAvatar(
                                 radius: 10,
-                                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                                backgroundColor: Theme.of(context)
+                                    .colorScheme
+                                    .primaryContainer,
                                 child: Text(
                                   (idx + 1).toString(),
-                                  style: TextStyle(fontSize: 8, color: Theme.of(context).colorScheme.onPrimaryContainer),
+                                  style: TextStyle(
+                                      fontSize: 8,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onPrimaryContainer),
                                 ),
                               ),
                               title: Text(
                                 _formatPointTime(p.timestamp, offset),
-                                style: const TextStyle(fontWeight: FontWeight.bold),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold),
                               ),
                               subtitle: Text(
                                 '${p.latitude.toStringAsFixed(6)}, ${p.longitude.toStringAsFixed(6)}',
-                                style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
+                                style: const TextStyle(
+                                    fontFamily: 'monospace', fontSize: 10),
                               ),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -757,32 +812,53 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                                     icon: const Icon(Icons.edit, size: 16),
                                     onPressed: isEditing
                                         ? null
-                                        : () => _openEditPointDialog(context, appState, dateInfo, points, idx),
+                                        : () => _openEditPointDialog(context,
+                                            appState, dateInfo, points, idx),
                                     tooltip: 'Edit Point',
                                   ),
                                   IconButton(
-                                    icon: const Icon(Icons.delete_outline, size: 16, color: Colors.red),
+                                    icon: const Icon(Icons.delete_outline,
+                                        size: 16, color: Colors.red),
                                     onPressed: isEditing
                                         ? null
                                         : () async {
-                                            final confirm = await showDialog<bool>(
+                                            final confirm =
+                                                await showDialog<bool>(
                                               context: context,
                                               builder: (ctx) => AlertDialog(
-                                                title: const Text('Delete Point'),
-                                                content: const Text('Delete this coordinate point from the timeline?'),
+                                                title:
+                                                    const Text('Delete Point'),
+                                                content: const Text(
+                                                    'Delete this coordinate point from the timeline?'),
                                                 actions: [
-                                                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                                  TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(
+                                                              ctx, false),
+                                                      child:
+                                                          const Text('Cancel')),
                                                   ElevatedButton(
-                                                    onPressed: () => Navigator.pop(ctx, true),
-                                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                            ctx, true),
+                                                    style: ElevatedButton
+                                                        .styleFrom(
+                                                            backgroundColor:
+                                                                Colors.red,
+                                                            foregroundColor:
+                                                                Colors.white),
                                                     child: const Text('Delete'),
                                                   ),
                                                 ],
                                               ),
                                             );
                                             if (confirm == true) {
-                                              final newPts = List<LocationPoint>.from(points)..removeAt(idx);
-                                              await appState.saveListPoints(dateInfo, newPts);
+                                              final newPts =
+                                                  List<LocationPoint>.from(
+                                                      points)
+                                                    ..removeAt(idx);
+                                              await appState.saveListPoints(
+                                                  dateInfo, newPts);
                                               _loadPointsForSelectedDate();
                                             }
                                           },
@@ -791,7 +867,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                                 ],
                               ),
                               onTap: () {
-                                _mapController.move(p.latLng, _mapController.camera.zoom);
+                                _mapController.move(
+                                    p.latLng, _mapController.camera.zoom);
                               },
                             );
                           },
@@ -804,6 +881,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
       ],
     );
   }
+
   TileLayer _buildTileLayer(String mapProvider) {
     String urlTemplate;
     TileProvider? tileProvider;
@@ -838,7 +916,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
     );
   }
 
-  Widget _buildMap(BuildContext context, AppStateProvider appState, SettingsProvider settings, List<LocationPoint> pointsToShow) {
+  Widget _buildMap(BuildContext context, AppStateProvider appState,
+      SettingsProvider settings, List<LocationPoint> pointsToShow) {
     final isEditing = appState.isEditing;
     final mapProvider = settings.mapProvider;
     final double timeOffset = settings.geotagTimezone.toDouble();
@@ -884,7 +963,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 2),
                   boxShadow: const [
-                    BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
+                    BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 4,
+                        offset: Offset(0, 2)),
                   ],
                 ),
                 child: Center(
@@ -913,7 +995,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
           height: 14,
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.purple.withOpacity(0.8),
+              color: Colors.purple.withValues(alpha: 0.8),
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 1.5),
             ),
@@ -924,7 +1006,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
 
     // Hover point in non-edit mode
     if (!isEditing && _hoveredPoint != null && _hoveredLatLng != null) {
-      final localHoverTime = _hoveredPoint!.timestamp.add(Duration(minutes: (timeOffset * 60).toInt()));
+      final localHoverTime = _hoveredPoint!.timestamp
+          .add(Duration(minutes: (timeOffset * 60).toInt()));
       markers.add(
         Marker(
           point: _hoveredLatLng!,
@@ -950,12 +1033,16 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
               Positioned(
                 bottom: 24,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.85),
+                    color: Colors.black.withValues(alpha: 0.85),
                     borderRadius: BorderRadius.circular(6),
                     boxShadow: const [
-                      BoxShadow(color: Colors.black45, blurRadius: 4, offset: Offset(0, 2)),
+                      BoxShadow(
+                          color: Colors.black45,
+                          blurRadius: 4,
+                          offset: Offset(0, 2)),
                     ],
                   ),
                   child: Column(
@@ -963,7 +1050,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                     children: [
                       Text(
                         DateFormat('yyyy-MM-dd').format(localHoverTime),
-                        style: const TextStyle(color: Colors.grey, fontSize: 10),
+                        style:
+                            const TextStyle(color: Colors.grey, fontSize: 10),
                       ),
                       Text(
                         DateFormat('HH:mm:ss').format(localHoverTime),
@@ -1021,7 +1109,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
     }
 
     final currentDateInfo = appState.allDates.firstWhere(
-      (d) => d.date.year == _selectedDate!.year &&
+      (d) =>
+          d.date.year == _selectedDate!.year &&
           d.date.month == _selectedDate!.month &&
           d.date.day == _selectedDate!.day,
       orElse: () => DateInfo(
@@ -1047,7 +1136,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
           Container(
             width: 380,
             color: Theme.of(context).colorScheme.surface,
-            child: _buildSidebar(context, appState, currentDateInfo, pointsToShow),
+            child:
+                _buildSidebar(context, appState, currentDateInfo, pointsToShow),
           ),
           const VerticalDivider(width: 1, thickness: 1),
           // Map Panel
@@ -1068,8 +1158,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                       },
                       icon: const Icon(Icons.edit_road),
                       label: const Text('Edit Path Coordinates'),
-                      backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                      foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+                      backgroundColor:
+                          Theme.of(context).colorScheme.primaryContainer,
+                      foregroundColor:
+                          Theme.of(context).colorScheme.onPrimaryContainer,
                     ),
                   ),
 
@@ -1088,9 +1180,11 @@ class _MapViewerScreenState extends State<MapViewerScreen> {
                               _selectedPointIndex = null;
                             });
                             _loadPointsForSelectedDate();
-                            if (mounted) {
+                            if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Timeline edits saved successfully.')),
+                                const SnackBar(
+                                    content: Text(
+                                        'Timeline edits saved successfully.')),
                               );
                             }
                           },
@@ -1170,7 +1264,8 @@ class MapWidget extends StatelessWidget {
           final RenderBox renderBox = context.findRenderObject() as RenderBox;
           final localOffset = renderBox.globalToLocal(event.position);
           try {
-            final latLng = mapController.camera.screenOffsetToLatLng(localOffset);
+            final latLng =
+                mapController.camera.screenOffsetToLatLng(localOffset);
             onHover(event, latLng);
           } catch (_) {}
         },
@@ -1193,15 +1288,17 @@ class MapWidget extends StatelessWidget {
                 MarkerLayer(markers: markers),
               ],
             ),
-
-            if (isEditing && hoveredProjection != null && pointsToShow.length >= 2)
+            if (isEditing &&
+                hoveredProjection != null &&
+                pointsToShow.length >= 2)
               Positioned(
                 top: 16,
                 right: 16,
                 child: Card(
                   color: Colors.black87,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12.0, vertical: 8.0),
                     child: Text(
                       'Interpolated time: ${formatPointTime(
                         _getInterpolatedTime(hoveredProjection!, pointsToShow),
@@ -1218,7 +1315,8 @@ class MapWidget extends StatelessWidget {
     );
   }
 
-  DateTime _getInterpolatedTime(ProjectionResult proj, List<LocationPoint> points) {
+  DateTime _getInterpolatedTime(
+      ProjectionResult proj, List<LocationPoint> points) {
     final index = proj.insertIndex;
     if (index < 1 || index > points.length) return DateTime.now();
     final tPrev = points[index - 1].timestamp;
@@ -1257,10 +1355,12 @@ class _CustomCalendarDialogState extends State<CustomCalendarDialog> {
   @override
   Widget build(BuildContext context) {
     final daysInMonth = DateTime(_displayYear, _displayMonth + 1, 0).day;
-    final firstDayOfWeek = DateTime(_displayYear, _displayMonth, 1).weekday; // 1 = Monday, 7 = Sunday
+    final firstDayOfWeek = DateTime(_displayYear, _displayMonth, 1)
+        .weekday; // 1 = Monday, 7 = Sunday
     final paddingCount = firstDayOfWeek - 1;
 
-    final monthName = DateFormat('MMMM yyyy').format(DateTime(_displayYear, _displayMonth));
+    final monthName =
+        DateFormat('MMMM yyyy').format(DateTime(_displayYear, _displayMonth));
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1288,7 +1388,8 @@ class _CustomCalendarDialogState extends State<CustomCalendarDialog> {
                 ),
                 Text(
                   monthName,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16),
                 ),
                 IconButton(
                   icon: const Icon(Icons.chevron_right),
@@ -1338,7 +1439,9 @@ class _CustomCalendarDialogState extends State<CustomCalendarDialog> {
 
                 DateInfo? dayInfo;
                 for (final d in widget.allDates) {
-                  if (d.date.year == date.year && d.date.month == date.month && d.date.day == date.day) {
+                  if (d.date.year == date.year &&
+                      d.date.month == date.month &&
+                      d.date.day == date.day) {
                     dayInfo = d;
                     break;
                   }
@@ -1375,13 +1478,16 @@ class _CustomCalendarDialogState extends State<CustomCalendarDialog> {
                       color: cellColor,
                       borderRadius: BorderRadius.circular(8),
                       border: isSelected
-                          ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
+                          ? Border.all(
+                              color: Theme.of(context).colorScheme.primary,
+                              width: 2)
                           : null,
                     ),
                     child: Text(
                       day.toString(),
                       style: TextStyle(
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.normal,
                         color: textColor,
                       ),
                     ),
@@ -1407,7 +1513,8 @@ class _DayHeaderCell extends StatelessWidget {
       child: Center(
         child: Text(
           text,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey),
+          style: const TextStyle(
+              fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey),
         ),
       ),
     );
@@ -1428,12 +1535,14 @@ class MonthlyDistanceChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final daysInMonth = DateTime(selectedDate.year, selectedDate.month + 1, 0).day;
+    final daysInMonth =
+        DateTime(selectedDate.year, selectedDate.month + 1, 0).day;
     double maxDistance = 1.0;
     final Map<int, DateInfo> monthData = {};
 
     for (final d in allDates) {
-      if (d.date.year == selectedDate.year && d.date.month == selectedDate.month) {
+      if (d.date.year == selectedDate.year &&
+          d.date.month == selectedDate.month) {
         monthData[d.date.day] = d;
         if (d.distance > maxDistance) {
           maxDistance = d.distance;
@@ -1455,7 +1564,10 @@ class MonthlyDistanceChart extends StatelessWidget {
           children: [
             Text(
               'Monthly Distance',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
             SizedBox(
@@ -1472,7 +1584,8 @@ class MonthlyDistanceChart extends StatelessWidget {
                   Color barColor = Colors.grey.shade300;
 
                   if (dayInfo != null) {
-                    heightFactor = (dayInfo.distance / maxDistance).clamp(0.1, 1.0);
+                    heightFactor =
+                        (dayInfo.distance / maxDistance).clamp(0.1, 1.0);
                     if (dayInfo.state == 'snapped') {
                       barColor = Colors.green.shade300;
                     } else if (dayInfo.state == 'edited') {
@@ -1488,7 +1601,8 @@ class MonthlyDistanceChart extends StatelessWidget {
 
                   return GestureDetector(
                     onTap: () {
-                      final clickedDate = DateTime(selectedDate.year, selectedDate.month, day);
+                      final clickedDate =
+                          DateTime(selectedDate.year, selectedDate.month, day);
                       onDateSelected(clickedDate);
                     },
                     child: Container(
@@ -1514,10 +1628,14 @@ class MonthlyDistanceChart extends StatelessWidget {
                             day.toString(),
                             style: TextStyle(
                               fontSize: 9,
-                              fontWeight: isCurrentDay ? FontWeight.bold : FontWeight.normal,
+                              fontWeight: isCurrentDay
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
                               color: isCurrentDay
                                   ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -1538,10 +1656,10 @@ class BingTileProvider extends NetworkTileProvider {
   BingTileProvider();
 
   @override
-  String getTileUrl(TileCoordinates coords, TileLayer options) {
-    final x = coords.x;
-    final y = coords.y;
-    final z = coords.z;
+  String getTileUrl(TileCoordinates coordinates, TileLayer options) {
+    final x = coordinates.x;
+    final y = coordinates.y;
+    final z = coordinates.z;
     final quadKey = _getQuadKey(x, y, z);
     return options.urlTemplate!.replaceAll('{quadkey}', quadKey);
   }
