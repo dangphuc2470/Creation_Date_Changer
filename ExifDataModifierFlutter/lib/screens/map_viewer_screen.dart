@@ -93,6 +93,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   AnimationController? _mapAnimationController;
 
   DateTime? _selectedDate;
+  bool _showCalendar = false;
 
   // Hover state (non-edit mode)
   LocationPoint? _hoveredPoint;
@@ -697,26 +698,34 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                   ),
                   const SizedBox(width: 8),
                   IconButton.filledTonal(
-                    icon: const Icon(Icons.calendar_month),
-                    onPressed: () async {
-                      final date = await showDialog<DateTime>(
-                        context: context,
-                        builder: (ctx) => CustomCalendarDialog(
-                          initialDate: _selectedDate ?? DateTime.now(),
-                          allDates: appState.allDates,
-                        ),
-                      );
-                      if (date != null) {
-                        setState(() {
-                          _selectedDate = date;
-                        });
-                        _loadPointsForSelectedDate();
-                      }
+                    icon: Icon(_showCalendar ? Icons.calendar_today : Icons.calendar_month),
+                    onPressed: () {
+                      setState(() {
+                        _showCalendar = !_showCalendar;
+                      });
                     },
-                    tooltip: 'Choose Date',
+                    tooltip: _showCalendar ? 'Hide Calendar' : 'Show Calendar',
                   ),
                 ],
               ),
+              if (_showCalendar) ...[
+                const SizedBox(height: 12),
+                CustomCalendarInline(
+                  selectedDate: _selectedDate ?? DateTime.now(),
+                  allDates: appState.allDates,
+                  onDateSelected: (date) {
+                    setState(() {
+                      _selectedDate = date;
+                    });
+                    _loadPointsForSelectedDate();
+                  },
+                  onClose: () {
+                    setState(() {
+                      _showCalendar = false;
+                    });
+                  },
+                ),
+              ],
             ],
           ),
         ),
@@ -2079,5 +2088,218 @@ class BingTileProvider extends NetworkTileProvider {
       quadKey.write(digit.toString());
     }
     return quadKey.toString();
+  }
+}
+
+class CustomCalendarInline extends StatefulWidget {
+  final DateTime selectedDate;
+  final List<DateInfo> allDates;
+  final Function(DateTime) onDateSelected;
+  final VoidCallback onClose;
+
+  const CustomCalendarInline({
+    super.key,
+    required this.selectedDate,
+    required this.allDates,
+    required this.onDateSelected,
+    required this.onClose,
+  });
+
+  @override
+  State<CustomCalendarInline> createState() => _CustomCalendarInlineState();
+}
+
+class _CustomCalendarInlineState extends State<CustomCalendarInline> {
+  late int _displayYear;
+  late int _displayMonth;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayYear = widget.selectedDate.year;
+    _displayMonth = widget.selectedDate.month;
+  }
+
+  @override
+  void didUpdateWidget(covariant CustomCalendarInline oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedDate != widget.selectedDate) {
+      _displayYear = widget.selectedDate.year;
+      _displayMonth = widget.selectedDate.month;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final daysInMonth = DateTime(_displayYear, _displayMonth + 1, 0).day;
+    final firstDayOfWeek = DateTime(_displayYear, _displayMonth, 1).weekday; // 1 = Monday, 7 = Sunday
+    final paddingCount = firstDayOfWeek - 1;
+
+    final monthName = DateFormat('MMMM yyyy').format(DateTime(_displayYear, _displayMonth));
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(12.0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left, size: 20),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: () {
+                  setState(() {
+                    if (_displayMonth == 1) {
+                      _displayMonth = 12;
+                      _displayYear--;
+                    } else {
+                      _displayMonth--;
+                    }
+                  });
+                },
+              ),
+              Text(
+                monthName,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.chevron_right, size: 20),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () {
+                      setState(() {
+                        if (_displayMonth == 12) {
+                          _displayMonth = 1;
+                          _displayYear++;
+                        } else {
+                          _displayMonth++;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: widget.onClose,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Hide', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _DayHeaderCell('M'),
+              _DayHeaderCell('T'),
+              _DayHeaderCell('W'),
+              _DayHeaderCell('T'),
+              _DayHeaderCell('F'),
+              _DayHeaderCell('S'),
+              _DayHeaderCell('S'),
+            ],
+          ),
+          const Divider(height: 8),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              mainAxisSpacing: 4,
+              crossAxisSpacing: 4,
+            ),
+            itemCount: paddingCount + daysInMonth,
+            itemBuilder: (context, index) {
+              if (index < paddingCount) {
+                return const SizedBox.shrink();
+              }
+
+              final day = index - paddingCount + 1;
+              final date = DateTime(_displayYear, _displayMonth, day);
+
+              DateInfo? dayInfo;
+              for (final d in widget.allDates) {
+                if (d.date.year == date.year &&
+                    d.date.month == date.month &&
+                    d.date.day == date.day) {
+                  dayInfo = d;
+                  break;
+                }
+              }
+
+              Color cellColor = Colors.transparent;
+              Color textColor = Theme.of(context).colorScheme.onSurface;
+
+              if (dayInfo != null) {
+                if (dayInfo.state == 'snapped') {
+                  cellColor = Colors.green.shade100;
+                  textColor = Colors.green.shade900;
+                } else if (dayInfo.state == 'edited') {
+                  cellColor = Colors.blue.shade100;
+                  textColor = Colors.blue.shade900;
+                } else {
+                  cellColor = Colors.grey.shade200;
+                  textColor = Colors.grey.shade800;
+                }
+              }
+
+              final isSelected = widget.selectedDate.year == date.year &&
+                  widget.selectedDate.month == date.month &&
+                  widget.selectedDate.day == date.day;
+
+              return InkWell(
+                onTap: () {
+                  widget.onDateSelected(date);
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Theme.of(context).colorScheme.primary
+                        : cellColor,
+                    borderRadius: BorderRadius.circular(8),
+                    border: isSelected
+                        ? null
+                        : (date.year == DateTime.now().year &&
+                                date.month == DateTime.now().month &&
+                                date.day == DateTime.now().day)
+                            ? Border.all(
+                                color: Theme.of(context).colorScheme.primary,
+                                width: 1)
+                            : null,
+                  ),
+                  child: Text(
+                    day.toString(),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      color: isSelected
+                          ? Theme.of(context).colorScheme.onPrimary
+                          : textColor,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
   }
 }
