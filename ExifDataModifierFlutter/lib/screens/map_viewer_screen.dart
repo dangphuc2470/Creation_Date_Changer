@@ -1971,12 +1971,6 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
   Widget build(BuildContext context) {
     // 1. Calculate totals
 
-    final totalMonthDistance = widget.allDates
-        .where((d) =>
-            d.date.year == widget.selectedDate.year &&
-            d.date.month == widget.selectedDate.month)
-        .fold(0.0, (sum, d) => sum + d.distance);
-
     final totalYearDistance = widget.allDates
         .where((d) => d.date.year == widget.selectedDate.year)
         .fold(0.0, (sum, d) => sum + d.distance);
@@ -2032,14 +2026,31 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
       maxDist = distances.fold(1.0, (maxVal, val) => val > maxVal ? val : maxVal);
     }
 
+    final selectedDateInfo = widget.allDates.firstWhere(
+      (d) =>
+          d.date.year == widget.selectedDate.year &&
+          d.date.month == widget.selectedDate.month &&
+          d.date.day == widget.selectedDate.day,
+      orElse: () => DateInfo(
+        date: widget.selectedDate,
+        pointCount: 0,
+        filePath: '',
+        distance: 0.0,
+        state: 'original',
+        source: 'merge',
+        hasTimelineBackup: false,
+        hasGpxBackup: false,
+      ),
+    );
+
     // Header title and active hover description
-    String titleText = 'Daily Distance';
-    String currentModeTotal = _formatDistance(totalMonthDistance);
+    String titleText = 'Day Distance';
+    String currentModeTotal = _formatDistance(selectedDateInfo.distance);
     if (_mode == 'monthly') {
-      titleText = 'Monthly Distance';
+      titleText = 'Month Distance';
       currentModeTotal = _formatDistance(totalYearDistance);
     } else if (_mode == 'yearly') {
-      titleText = 'Yearly Distance';
+      titleText = 'Year Distance';
       currentModeTotal = _formatDistance(totalYearDistance);
     }
 
@@ -2172,9 +2183,9 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                           color: Theme.of(context).colorScheme.primary,
                         ),
                     items: const [
-                      DropdownMenuItem(value: 'daily', child: Text('Daily')),
-                      DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
-                      DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
+                      DropdownMenuItem(value: 'daily', child: Text('Day')),
+                      DropdownMenuItem(value: 'monthly', child: Text('Month')),
+                      DropdownMenuItem(value: 'yearly', child: Text('Year')),
                     ],
                     onChanged: (val) {
                       if (val != null) {
