@@ -1477,24 +1477,43 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         );
       } else if (_viewAsPath && timelineItems.isNotEmpty) {
         // Render each MoveSegmentItem as a separate polyline with conditional colors/thickness
-        for (final item in timelineItems) {
+        for (int idx = 0; idx < timelineItems.length; idx++) {
+          final item = timelineItems[idx];
           if (item is MoveSegmentItem && item.points.isNotEmpty) {
-            final isCurrentSelected = (selectedMoveSegment == item);
-            final hasAnySelection = (selectedMoveSegment != null);
-
             Color lineColor;
             double width;
 
-            if (hasAnySelection) {
-              if (isCurrentSelected) {
-                lineColor = TimelineConstants.activeRouteColor; // Bold active route
-                width = TimelineConstants.polylineStrokeWidthSelected;
+            final hasTimelineSelection = (_selectedTimelineItemIndex != null);
+
+            if (hasTimelineSelection) {
+              final selectedItem = timelineItems[_selectedTimelineItemIndex!];
+
+              if (selectedItem is MoveSegmentItem) {
+                // If a move segment is selected, only highlight that exact segment
+                if (_selectedTimelineItemIndex == idx) {
+                  lineColor = TimelineConstants.activeRouteColor;
+                  width = TimelineConstants.polylineStrokeWidthSelected;
+                } else {
+                  lineColor = TimelineConstants.activeRouteColor.withValues(alpha: 0.15);
+                  width = TimelineConstants.polylineStrokeWidthUnselected;
+                }
+              } else if (selectedItem is StayPointItem) {
+                // If a stay point is selected, highlight only the 2 adjacent roads (idx == selected - 1 or idx == selected + 1)
+                final isAdjacent = (idx == _selectedTimelineItemIndex! - 1) || (idx == _selectedTimelineItemIndex! + 1);
+                if (isAdjacent) {
+                  lineColor = TimelineConstants.activeRouteColor;
+                  width = TimelineConstants.polylineStrokeWidthSelected;
+                } else {
+                  lineColor = TimelineConstants.activeRouteColor.withValues(alpha: 0.15);
+                  width = TimelineConstants.polylineStrokeWidthUnselected;
+                }
               } else {
-                lineColor = TimelineConstants.activeRouteColor.withValues(alpha: 0.15); // Faded route
-                width = TimelineConstants.polylineStrokeWidthUnselected;
+                lineColor = TimelineConstants.activeRouteColor;
+                width = TimelineConstants.polylineStrokeWidthDefault;
               }
             } else {
-              lineColor = TimelineConstants.activeRouteColor; // Default bold route
+              // No selection, draw everything bold/active
+              lineColor = TimelineConstants.activeRouteColor;
               width = TimelineConstants.polylineStrokeWidthDefault;
             }
 
