@@ -98,6 +98,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   DateTime? _selectedDate;
   bool _showCalendar = false;
   bool _viewAsPath = true;
+  double _sidebarWidth = 380.0;
 
   // Hover state (non-edit mode)
   LocationPoint? _hoveredPoint;
@@ -1753,14 +1754,30 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     return Scaffold(
       body: Row(
         children: [
-          // Sidebar
           Container(
-            width: 380,
+            width: _sidebarWidth,
             color: Theme.of(context).colorScheme.surface,
             child:
                 _buildSidebar(context, appState, currentDateInfo, pointsToShow),
           ),
-          const VerticalDivider(width: 1, thickness: 1),
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onHorizontalDragUpdate: (details) {
+              setState(() {
+                _sidebarWidth = (_sidebarWidth + details.delta.dx).clamp(280.0, 800.0);
+              });
+            },
+            child: MouseRegion(
+              cursor: SystemMouseCursors.resizeLeftRight,
+              child: Container(
+                width: 8,
+                color: Colors.transparent,
+                child: const Center(
+                  child: VerticalDivider(width: 1, thickness: 1),
+                ),
+              ),
+            ),
+          ),
           // Map Panel
           Expanded(
             child: Stack(
@@ -2321,8 +2338,16 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        ..._buildTransitIcons(item.points),
-                        const Spacer(),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: _buildTransitIcons(item.points),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Text(
                           '$durationStr  ·  $distStr',
                           style: TextStyle(
@@ -2330,7 +2355,6 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
-                        const SizedBox(width: 4),
                         PopupMenuButton<String>(
                           icon: Icon(Icons.more_vert, size: 18,
                               color: Theme.of(context).colorScheme.onSurfaceVariant),
