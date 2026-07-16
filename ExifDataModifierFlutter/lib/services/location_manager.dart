@@ -29,8 +29,11 @@ class DateInfo {
 
 /// Service to manage exported location data
 class LocationManager {
+  static final Map<String, List<LocationPoint>> _pointsCache = {};
+
   /// Scan exported folder and get list of available dates
   static Future<List<DateInfo>> scanExportedData(String rootPath) async {
+    _pointsCache.clear();
     final List<DateInfo> dates = [];
     final rootDir = Directory(rootPath);
     
@@ -62,6 +65,7 @@ class LocationManager {
           final jsonString = await entity.readAsString();
           final decoded = jsonDecode(jsonString);
           final points = LocationPoint.parseAnyJson(decoded);
+          _pointsCache[entity.path] = points;
           
           final distance = GeoUtils.calculateTrackDistance(points);
 
@@ -108,7 +112,12 @@ class LocationManager {
   
   /// Load location points from a file
   static Future<List<LocationPoint>> loadLocationFile(String filePath) async {
-    return await _loadLocationFile(filePath);
+    if (_pointsCache.containsKey(filePath)) {
+      return _pointsCache[filePath]!;
+    }
+    final points = await _loadLocationFile(filePath);
+    _pointsCache[filePath] = points;
+    return points;
   }
   
   static Future<List<LocationPoint>> _loadLocationFile(String filePath) async {
@@ -117,6 +126,18 @@ class LocationManager {
     final decoded = jsonDecode(jsonString);
     
     return LocationPoint.parseAnyJson(decoded);
+  }
+
+  static void updateCache(String filePath, List<LocationPoint> points) {
+    _pointsCache[filePath] = List<LocationPoint>.from(points);
+  }
+
+  static void invalidateCache(String filePath) {
+    _pointsCache.remove(filePath);
+  }
+
+  static void clearCache() {
+    _pointsCache.clear();
   }
   
   /// Calculate statistics for a set of points

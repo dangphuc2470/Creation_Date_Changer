@@ -233,6 +233,8 @@ class AppStateProvider extends ChangeNotifier {
     final geojsonMap = LocationPoint.toGeoJson(points, null, 'edited', dateInfo.source);
     await activeFile.writeAsString(const JsonEncoder.withIndent('  ').convert(geojsonMap), flush: true);
 
+    LocationManager.updateCache(dateInfo.filePath, points);
+
     await initializeAndScanAppStorage();
   }
 
@@ -272,6 +274,8 @@ class AppStateProvider extends ChangeNotifier {
       final geojsonMap = LocationPoint.toGeoJson(points, null, 'original', originalSource);
       await activeFile.writeAsString(const JsonEncoder.withIndent('  ').convert(geojsonMap), flush: true);
 
+      // Invalidate the cache to reload restored file data
+      LocationManager.invalidateCache(activePath);
       // Reload points
       final reloadedPoints = await LocationManager.loadLocationFile(activePath);
 
