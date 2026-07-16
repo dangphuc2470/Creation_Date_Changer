@@ -220,17 +220,23 @@ class GeotagProvider extends ChangeNotifier {
   }
 
   void checkAll() {
-    for (var item in items) item.isChecked = true;
+    for (var item in items) {
+      item.isChecked = true;
+    }
     notifyListeners();
   }
 
   void uncheckAll() {
-    for (var item in items) item.isChecked = false;
+    for (var item in items) {
+      item.isChecked = false;
+    }
     notifyListeners();
   }
 
   void selectOnlyErrors() {
-    for (var item in items) item.isChecked = item.isError;
+    for (var item in items) {
+      item.isChecked = item.isError;
+    }
     notifyListeners();
   }
 

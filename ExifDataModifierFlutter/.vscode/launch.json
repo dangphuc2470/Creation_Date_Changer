@@ -9,7 +9,8 @@
         {
             "name": "ExifDataModifierFlutter",
             "request": "launch",
-            "type": "dart"
+            "type": "dart",
+            "deviceId": "windows"
         },
         {
             "name": "ExifDataModifierFlutter (profile mode)",

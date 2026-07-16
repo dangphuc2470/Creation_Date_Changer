@@ -242,7 +242,7 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
                   color: Theme.of(context)
                       .colorScheme
                       .surfaceContainerHighest
-                      .withOpacity(0.5),
+                      .withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
@@ -451,7 +451,7 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
               Icon(Icons.photo_library_outlined,
                   size: 56,
                   color:
-                      Theme.of(context).colorScheme.onSurface.withOpacity(0.3)),
+                      Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3)),
               const SizedBox(height: 16),
               Text(
                 'Select an image folder to get started.',
@@ -459,7 +459,7 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
                       color: Theme.of(context)
                           .colorScheme
                           .onSurface
-                          .withOpacity(0.5),
+                          .withValues(alpha: 0.5),
                     ),
               ),
               const SizedBox(height: 4),
@@ -469,7 +469,7 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
                       color: Theme.of(context)
                           .colorScheme
                           .onSurface
-                          .withOpacity(0.4),
+                          .withValues(alpha: 0.4),
                     ),
               ),
             ],
@@ -483,8 +483,9 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
       if (_filterStatus != null && item.status != _filterStatus) return false;
       if (_searchQuery.isNotEmpty &&
           !item.filename.toLowerCase().contains(_searchQuery.toLowerCase()) &&
-          !item.relativePath.toLowerCase().contains(_searchQuery.toLowerCase()))
+          !item.relativePath.toLowerCase().contains(_searchQuery.toLowerCase())) {
         return false;
+      }
       return true;
     }).toList();
 
@@ -523,7 +524,7 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
             color: Theme.of(context)
                 .colorScheme
                 .surfaceContainerHighest
-                .withOpacity(0.4),
+                .withValues(alpha: 0.4),
             child: Row(
               children: [
                 Text(
@@ -532,7 +533,7 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
                       color: Theme.of(context)
                           .colorScheme
                           .onSurface
-                          .withOpacity(0.6)),
+                          .withValues(alpha: 0.6)),
                 ),
                 const Spacer(),
                 if (_filterStatus != null)
@@ -559,7 +560,7 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
                           color: Theme.of(context)
                               .colorScheme
                               .onSurface
-                              .withOpacity(0.5)),
+                              .withValues(alpha: 0.5)),
                     ),
                   )
                 : ListView.separated(
@@ -618,7 +619,7 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
               margin: const EdgeInsets.only(left: 6),
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
               decoration: BoxDecoration(
-                color: Colors.grey.withOpacity(0.15),
+                color: Colors.grey.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
@@ -638,7 +639,7 @@ class _BatchGeotagScreenState extends State<BatchGeotagScreen> {
             item.relativePath,
             style: TextStyle(
               fontSize: 11,
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
               fontFamily: 'monospace',
             ),
             overflow: TextOverflow.ellipsis,
@@ -786,15 +787,15 @@ class _FolderPickerTile extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: hasPath
-              ? iconColor.withOpacity(0.07)
+              ? iconColor.withValues(alpha: 0.07)
               : Theme.of(context)
                   .colorScheme
                   .surfaceContainerHighest
-                  .withOpacity(0.4),
+                  .withValues(alpha: 0.4),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: hasPath
-                ? iconColor.withOpacity(0.3)
+                ? iconColor.withValues(alpha: 0.3)
                 : Theme.of(context).dividerColor,
           ),
         ),
@@ -823,7 +824,7 @@ class _FolderPickerTile extends StatelessWidget {
                           ? Theme.of(context)
                               .colorScheme
                               .onSurface
-                              .withOpacity(0.7)
+                              .withValues(alpha: 0.7)
                           : Colors.grey,
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -833,7 +834,7 @@ class _FolderPickerTile extends StatelessWidget {
                       subtitle,
                       style: TextStyle(
                         fontSize: 10,
-                        color: iconColor.withOpacity(0.8),
+                        color: iconColor.withValues(alpha: 0.8),
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -890,10 +891,10 @@ class _StatChip extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: selected ? color.withOpacity(0.15) : Colors.transparent,
+          color: selected ? color.withValues(alpha: 0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? color : color.withOpacity(0.3),
+            color: selected ? color : color.withValues(alpha: 0.3),
             width: selected ? 1.5 : 1,
           ),
         ),
@@ -985,8 +986,9 @@ class _SettingsDialog extends StatelessWidget {
                           DropdownMenuItem(value: e, child: Text('${e}m')))
                       .toList(),
                   onChanged: (val) {
-                    if (val != null)
+                    if (val != null) {
                       provider.setMaxInterpolationGapMinutes(val);
+                    }
                   },
                 ),
               ],
@@ -1077,17 +1079,17 @@ class _ToastWidgetState extends State<_ToastWidget>
               constraints: const BoxConstraints(maxWidth: 480),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.grey[900]?.withOpacity(0.9),
+                color: Colors.grey[900]?.withValues(alpha: 0.9),
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
+                    color: Colors.black.withValues(alpha: 0.2),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
                 ],
                 border: Border.all(
-                  color: widget.color.withOpacity(0.5),
+                  color: widget.color.withValues(alpha: 0.5),
                   width: 1,
                 ),
               ),

@@ -287,7 +287,7 @@ class _LensMetadataScreenState extends State<LensMetadataScreen> {
       children: [
         // Top Action Bar for the group
         Card(
-          color: Theme.of(context).colorScheme.surfaceVariant,
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
@@ -307,7 +307,7 @@ class _LensMetadataScreenState extends State<LensMetadataScreen> {
                                 filled: true,
                                 fillColor: Colors.white,
                               ),
-                              value: group.selectedTemplate,
+                              initialValue: group.selectedTemplate,
                               items: [
                                 const DropdownMenuItem<LensTemplate>(
                                     value: null,
@@ -318,7 +318,7 @@ class _LensMetadataScreenState extends State<LensMetadataScreen> {
                                     child: Text(
                                         '${lens.name} (${lens.focalLength}mm f/${lens.fNumber})'),
                                   );
-                                }).toList(),
+                                }),
                               ],
                               onChanged: group.isProcessing
                                   ? null
@@ -349,10 +349,10 @@ class _LensMetadataScreenState extends State<LensMetadataScreen> {
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.5),
+                            color: Colors.white.withValues(alpha: 0.5),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                                color: Colors.indigo.withOpacity(0.2)),
+                                color: Colors.indigo.withValues(alpha: 0.2)),
                           ),
                           child: Row(
                             children: [

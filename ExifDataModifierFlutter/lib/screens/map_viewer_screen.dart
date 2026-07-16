@@ -105,8 +105,12 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   // Selected point index (edit mode)
   int? _selectedPointIndex;
   bool _isDraggingPoint = false;
+  int? _selectedTimelineItemIndex;
 
   void _loadPointsForSelectedDate() async {
+    setState(() {
+      _selectedTimelineItemIndex = null;
+    });
     if (_selectedDate == null) return;
     final appState = context.read<AppStateProvider>();
 
@@ -948,7 +952,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                   itemCount: timelineItems.length,
                                   itemBuilder: (context, idx) {
                                     final item = timelineItems[idx];
-                                    return _buildTimelineItem(context, item, offset);
+                                    final isSelected = _selectedTimelineItemIndex == idx;
+                                    return _buildTimelineItem(context, item, offset, idx, isSelected);
                                   },
                                 );
                               }()
@@ -1567,7 +1572,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     return items;
   }
 
-  Widget _buildTimelineItem(BuildContext context, TimelineItem item, double timezoneOffset) {
+  Widget _buildTimelineItem(
+      BuildContext context, TimelineItem item, double timezoneOffset, int index, bool isSelected) {
     const blueAxis = Color(0xFF1A73E8);
     // Col 1: place icon / expand icon
     const iconColWidth = 44.0;
@@ -1580,8 +1586,14 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       final durationStr = _formatDuration(item.duration);
       final coordStr = '${item.center.latitude.toStringAsFixed(5)}, ${item.center.longitude.toStringAsFixed(5)}';
 
-      return InkWell(
-        onTap: () => _animatedMapMove(item.center, 16.5),
+      return _TimelineTileWrapper(
+        isSelected: isSelected,
+        onTap: () {
+          setState(() {
+            _selectedTimelineItemIndex = index;
+          });
+          _animatedMapMove(item.center, 16.5);
+        },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: IntrinsicHeight(
@@ -1719,8 +1731,12 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
           ? '${item.distance.toStringAsFixed(0)} m'
           : '${(item.distance / 1000).toStringAsFixed(2)} km';
 
-      return InkWell(
+      return _TimelineTileWrapper(
+        isSelected: isSelected,
         onTap: () {
+          setState(() {
+            _selectedTimelineItemIndex = index;
+          });
           if (item.points.isNotEmpty) {
             final bounds = LatLngBounds.fromPoints(
               item.points.map((p) => p.latLng).toList(),
@@ -1779,15 +1795,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const Icon(Icons.directions_car, size: 20, color: Color(0xFF555555)),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.chevron_right, size: 16, color: Color(0xFF999999)),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.directions_walk, size: 20, color: Color(0xFF555555)),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.chevron_right, size: 16, color: Color(0xFF999999)),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.directions_car, size: 20, color: Color(0xFF555555)),
+                        ..._buildTransitIcons(item.points),
                         const Spacer(),
                         Text(
                           '$durationStr  ·  $distStr',
@@ -1810,6 +1818,113 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       );
     }
     return const SizedBox.shrink();
+  }
+
+  List<String> _getTransitModes(List<LocationPoint> points) {
+    final List<String> modes = [];
+    String? lastMode;
+
+    for (final p in points) {
+      final mode = p.activityType;
+      if (mode != null && mode.isNotEmpty) {
+        if (mode != lastMode) {
+          modes.add(mode);
+          lastMode = mode;
+        }
+      }
+    }
+
+    if (modes.isEmpty) {
+      modes.add('IN_PASSENGER_VEHICLE');
+    }
+
+    return modes;
+  }
+
+  IconData _getTransitIcon(String mode) {
+    final norm = mode.toUpperCase();
+    if (norm.contains('WALK') || norm.contains('FOOT') || norm.contains('RUN')) {
+      return Icons.directions_walk;
+    }
+    if (norm.contains('BIKE') || norm.contains('BICYCLE') || norm.contains('CYCLE')) {
+      return Icons.directions_bike;
+    }
+    if (norm.contains('BUS')) {
+      return Icons.directions_bus;
+    }
+    if (norm.contains('TRAIN') || norm.contains('SUBWAY') || norm.contains('RAIL')) {
+      return Icons.directions_railway;
+    }
+    if (norm.contains('FLY') || norm.contains('AIR')) {
+      return Icons.local_airport;
+    }
+    if (norm.contains('SAIL') || norm.contains('BOAT') || norm.contains('SHIP')) {
+      return Icons.directions_boat;
+    }
+    return Icons.directions_car;
+  }
+
+  List<Widget> _buildTransitIcons(List<LocationPoint> points) {
+    final modes = _getTransitModes(points);
+    final List<Widget> widgets = [];
+
+    for (int i = 0; i < modes.length; i++) {
+      final iconData = _getTransitIcon(modes[i]);
+      widgets.add(
+        Icon(iconData, size: 20, color: const Color(0xFF555555)),
+      );
+      if (i < modes.length - 1) {
+        widgets.add(const SizedBox(width: 4));
+        widgets.add(
+          const Icon(Icons.chevron_right, size: 16, color: Color(0xFF999999)),
+        );
+        widgets.add(const SizedBox(width: 4));
+      }
+    }
+
+    return widgets;
+  }
+}
+
+class _TimelineTileWrapper extends StatefulWidget {
+  final Widget child;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _TimelineTileWrapper({
+    required this.child,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  State<_TimelineTileWrapper> createState() => _TimelineTileWrapperState();
+}
+
+class _TimelineTileWrapperState extends State<_TimelineTileWrapper> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    Color? backgroundColor;
+    if (widget.isSelected) {
+      backgroundColor = Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.25);
+    } else if (_isHovered) {
+      backgroundColor = Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4);
+    }
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          color: backgroundColor,
+          child: widget.child,
+        ),
+      ),
+    );
   }
 }
 
@@ -2608,7 +2723,7 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
         border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(12),
       ),

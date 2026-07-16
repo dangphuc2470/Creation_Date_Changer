@@ -161,7 +161,7 @@ class SettingsScreen extends StatelessWidget {
                           onPressed: () => provider.removeLensTemplate(lens.id),
                         ),
                       );
-                    }).toList(),
+                    }),
                   ],
                 ),
               ),

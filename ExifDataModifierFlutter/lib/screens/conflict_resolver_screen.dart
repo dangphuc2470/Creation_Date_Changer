@@ -1,3 +1,5 @@
+// ignore_for_file: unused_import
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/batch_import_service.dart';
@@ -29,13 +31,6 @@ class _ConflictResolverScreenState extends State<ConflictResolverScreen> {
     });
   }
 
-  List<LocationPoint> _getFinalPoints() {
-    final List<LocationPoint> allPoints = [];
-    for (final group in _groups) {
-      allPoints.addAll(BatchImportService.mergeGroup(group));
-    }
-    return allPoints;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -168,7 +163,7 @@ class _ConflictResolverScreenState extends State<ConflictResolverScreen> {
                 size: 20,
               ),
             );
-          }).toList(),
+          }),
           if (hasConflict)
             Padding(
               padding: const EdgeInsets.all(12.0),

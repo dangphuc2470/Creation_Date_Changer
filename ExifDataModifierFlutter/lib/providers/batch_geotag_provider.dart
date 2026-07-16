@@ -537,7 +537,7 @@ class BatchGeotagProvider extends ChangeNotifier {
       statusMessage = 'Matching cancelled.';
     } else {
       statusMessage =
-          'Matched: ${countMatched} | Has GPS: ${countSkippedGps} | No match: ${countNoMatch} | Unsupported: ${countUnsupported}';
+          'Matched: $countMatched | Has GPS: $countSkippedGps | No match: $countNoMatch | Unsupported: $countUnsupported';
     }
     _cancelMatch = false;
     notifyListeners();

@@ -67,7 +67,7 @@ class ChangeFilenameScreen extends StatelessWidget {
                 const SizedBox(width: 16),
                 Expanded(
                   child: DropdownButtonFormField<DateSource>(
-                    value: provider.selectedSource,
+                    initialValue: provider.selectedSource,
                     decoration: const InputDecoration(
                       labelText: 'Date Source',
                       border: OutlineInputBorder(),

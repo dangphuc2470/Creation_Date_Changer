@@ -23,7 +23,7 @@ class GeotagScreen extends StatefulWidget {
 
 class _GeotagScreenState extends State<GeotagScreen> {
   final MapController _mapController = MapController();
-  LatLng _mapCenter =
+  final LatLng _mapCenter =
       const LatLng(10.7790301, 106.6837685); // Default to Viettel Tower
   bool _tapToPin = false;
   String? _hoveredImagePath;
@@ -142,9 +142,9 @@ class _GeotagScreenState extends State<GeotagScreen> {
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
                       decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.05),
+                        color: Colors.blue.withValues(alpha: 0.05),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue.withOpacity(0.1)),
+                        border: Border.all(color: Colors.blue.withValues(alpha: 0.1)),
                       ),
                       child: ListTile(
                         dense: true,
@@ -641,8 +641,9 @@ class _GeotagScreenState extends State<GeotagScreen> {
                   if (item.hasExistingGps && provider.overrideExistingGps) {
                     subtextColor = Colors.deepPurple;
                     iconData = Icons.edit_location_alt;
-                    if (item.errorMessage == null)
+                    if (item.errorMessage == null) {
                       subtext += ' (Will override)';
+                    }
                   } else {
                     subtextColor = Colors.blue;
                     iconData = Icons.location_on;
@@ -711,7 +712,7 @@ class _GeotagScreenState extends State<GeotagScreen> {
         Positioned.fill(
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.35),
+              color: Colors.black.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
@@ -769,7 +770,7 @@ class _GeotagScreenState extends State<GeotagScreen> {
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 2),
               boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 3)
+                BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 3)
               ],
             ),
           ),
@@ -804,16 +805,16 @@ class _GeotagScreenState extends State<GeotagScreen> {
                   color: Colors.white,
                   shadows: [
                     Shadow(
-                        color: Colors.black.withOpacity(0.8),
+                        color: Colors.black.withValues(alpha: 0.8),
                         offset: const Offset(1, 1)),
                     Shadow(
-                        color: Colors.black.withOpacity(0.8),
+                        color: Colors.black.withValues(alpha: 0.8),
                         offset: const Offset(-1, -1)),
                     Shadow(
-                        color: Colors.black.withOpacity(0.8),
+                        color: Colors.black.withValues(alpha: 0.8),
                         offset: const Offset(1, -1)),
                     Shadow(
-                        color: Colors.black.withOpacity(0.8),
+                        color: Colors.black.withValues(alpha: 0.8),
                         offset: const Offset(-1, 1)),
                   ],
                 ), // Crosshair
@@ -916,10 +917,10 @@ class _GeotagScreenState extends State<GeotagScreen> {
               padding:
                   const EdgeInsets.only(left: 8, right: 12, top: 4, bottom: 4),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.9),
+                color: Colors.white.withValues(alpha: 0.9),
                 borderRadius: BorderRadius.circular(8),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4)
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4)
                 ],
               ),
               child: Row(
@@ -1072,10 +1073,11 @@ class _GeotagScreenState extends State<GeotagScreen> {
                     onChanged: isBusy
                         ? null
                         : (val) {
-                            if (val != null)
+                            if (val != null) {
                               context
                                   .read<GeotagProvider>()
                                   .setMaxInterpolationGapMinutes(val);
+                            }
                           },
                   ),
                 ],
@@ -1243,7 +1245,7 @@ class _GeotagScreenState extends State<GeotagScreen> {
           shape: BoxShape.circle,
           border: Border.all(color: Colors.white, width: 2),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 4)
+            BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 4)
           ],
         ),
         child: ClipOval(
@@ -1268,7 +1270,7 @@ class _GeotagScreenState extends State<GeotagScreen> {
           shape: BoxShape.circle,
           border: Border.all(color: Colors.white, width: 2),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 2)
+            BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 2)
           ],
         ),
       ),
@@ -1314,9 +1316,9 @@ class _TimelineMiniChartState extends State<TimelineMiniChart> {
         height: 48, // Increased height for hover label
         width: double.infinity,
         decoration: BoxDecoration(
-          color: Colors.blue.withOpacity(0.04),
+          color: Colors.blue.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: Colors.blue.withOpacity(0.08)),
+          border: Border.all(color: Colors.blue.withValues(alpha: 0.08)),
         ),
         child: CustomPaint(
           painter: _TimelineChartPainter(
@@ -1382,7 +1384,7 @@ class _TimelineChartPainter extends CustomPainter {
       ..shader = ui.Gradient.linear(
         Offset(0, chartTop),
         Offset(0, size.height),
-        [Colors.blue.withOpacity(0.3), Colors.blue.withOpacity(0.01)],
+        [Colors.blue.withValues(alpha: 0.3), Colors.blue.withValues(alpha: 0.01)],
       )
       ..style = PaintingStyle.fill;
 
@@ -1399,7 +1401,7 @@ class _TimelineChartPainter extends CustomPainter {
     // Hover seeker and time label
     if (hoverX != null && hoverX! >= 0 && hoverX! <= size.width) {
       final seekerPaint = Paint()
-        ..color = Colors.orange.withOpacity(0.8)
+        ..color = Colors.orange.withValues(alpha: 0.8)
         ..strokeWidth = 1.0;
       canvas.drawLine(
           Offset(hoverX!, chartTop), Offset(hoverX!, size.height), seekerPaint);
@@ -1522,17 +1524,17 @@ class _ToastWidgetState extends State<_ToastWidget>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.grey[900]?.withOpacity(0.9),
+                color: Colors.grey[900]?.withValues(alpha: 0.9),
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
+                    color: Colors.black.withValues(alpha: 0.2),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
                 ],
                 border: Border.all(
-                  color: widget.color.withOpacity(0.5),
+                  color: widget.color.withValues(alpha: 0.5),
                   width: 1,
                 ),
               ),
@@ -1565,10 +1567,10 @@ class BingTileProvider extends NetworkTileProvider {
   BingTileProvider();
 
   @override
-  String getTileUrl(TileCoordinates coords, TileLayer options) {
-    final x = coords.x;
-    final y = coords.y;
-    final z = coords.z;
+  String getTileUrl(TileCoordinates coordinates, TileLayer options) {
+    final x = coordinates.x;
+    final y = coordinates.y;
+    final z = coordinates.z;
     final quadKey = _getQuadKey(x, y, z);
     return options.urlTemplate!.replaceAll('{quadkey}', quadKey);
   }
