@@ -94,7 +94,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
   DateTime? _selectedDate;
   bool _showCalendar = false;
-  bool _viewAsPath = false;
+  bool _viewAsPath = true;
 
   // Hover state (non-edit mode)
   LocationPoint? _hoveredPoint;
@@ -1838,6 +1838,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   Widget _buildTimelineItem(
       BuildContext context, TimelineItem item, double timezoneOffset, int index, bool isSelected, bool isFirst, bool isLast) {
     const blueAxis = Color(0xFF1A73E8);
+    final hasAnySelection = _selectedTimelineItemIndex != null;
+    final lineActiveColor = hasAnySelection
+        ? (isSelected ? blueAxis : blueAxis.withValues(alpha: 0.25))
+        : blueAxis;
     // Col 1: place icon / expand icon
     const iconColWidth = 44.0;
     // Col 2: continuous blue line (with dot at stay points)
@@ -1892,14 +1896,14 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                           children: [
                             Expanded(
                               child: Container(
-                                width: 4,
-                                color: isFirst ? Colors.transparent : blueAxis,
+                                width: 6,
+                                color: isFirst ? Colors.transparent : lineActiveColor,
                               ),
                             ),
                             Expanded(
                               child: Container(
-                                width: 4,
-                                color: isLast ? Colors.transparent : blueAxis,
+                                width: 6,
+                                color: isLast ? Colors.transparent : lineActiveColor,
                               ),
                             ),
                           ],
@@ -1910,7 +1914,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                         width: 14,
                         height: 14,
                         decoration: BoxDecoration(
-                          color: blueAxis,
+                          color: lineActiveColor,
                           shape: BoxShape.circle,
                           border: Border.all(color: Colors.white, width: 2),
                         ),
@@ -2057,8 +2061,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                   width: lineColWidth,
                   child: Center(
                     child: Container(
-                      width: 4,
-                      color: blueAxis,
+                      width: 6,
+                      color: lineActiveColor,
                     ),
                   ),
                 ),
