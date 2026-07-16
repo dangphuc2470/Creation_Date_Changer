@@ -2,11 +2,13 @@ import 'dart:math';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/location_point.dart';
 import '../providers/app_state_provider.dart';
 import '../providers/settings_provider.dart';
@@ -112,11 +114,45 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   int? _selectedTimelineItemIndex;
   LocationPoint? _previousDayLastStayPoint;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadLastSelectedDate();
+  }
+
+  Future<void> _loadLastSelectedDate() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedDateStr = prefs.getString('last_selected_map_date');
+      if (savedDateStr != null) {
+        final parsedDate = DateTime.tryParse(savedDateStr);
+        if (parsedDate != null) {
+          setState(() {
+            _selectedDate = parsedDate;
+          });
+          _loadPointsForSelectedDate();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading last selected map date: $e');
+    }
+  }
+
+  Future<void> _saveLastSelectedDate(DateTime date) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('last_selected_map_date', DateFormat('yyyy-MM-dd').format(date));
+    } catch (e) {
+      debugPrint('Error saving last selected map date: $e');
+    }
+  }
+
   void _loadPointsForSelectedDate() async {
     setState(() {
       _selectedTimelineItemIndex = null;
     });
     if (_selectedDate == null) return;
+    _saveLastSelectedDate(_selectedDate!);
     final appState = context.read<AppStateProvider>();
 
     // Try to load previous day's last stay point to show stay continuity
@@ -1335,7 +1371,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
   TileLayer _buildTileLayer(String mapProvider) {
     String urlTemplate;
-    TileProvider? tileProvider;
+    TileProvider tileProvider = CachedTileProvider();
 
     switch (mapProvider) {
       case 'google_roadmap':
@@ -3547,7 +3583,16 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
   }
 }
 
-class BingTileProvider extends NetworkTileProvider {
+class CachedTileProvider extends TileProvider {
+  CachedTileProvider();
+
+  @override
+  ImageProvider getImage(TileCoordinates coordinates, TileLayer options) {
+    return CachedNetworkImageProvider(getTileUrl(coordinates, options));
+  }
+}
+
+class BingTileProvider extends CachedTileProvider {
   BingTileProvider();
 
   @override
