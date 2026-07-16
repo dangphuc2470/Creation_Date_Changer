@@ -23,7 +23,7 @@ class TimelineConstants {
 
   // Sidebar List Dimensions & Thickness
   static const double timelineLineThickness = 12.0; // Thickness of the vertical timeline line
-  static const double timelineDotDiameter = 20.0; // Diameter of the stay point dot circle
+  static const double timelineDotDiameter = 12.0; // Diameter of the stay point dot circle
   static const double iconColumnWidth = 44.0; // Width of the icon column
   static const double lineColumnWidth = 20.0; // Width of the line column
 

@@ -1,4 +1,6 @@
 import 'dart:math';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -1891,24 +1893,16 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      // Top/Middle/Bottom vertical line segments
+                      // Equal-height top and bottom line segments
                       Positioned.fill(
                         child: Column(
                           children: [
-                            // Top line (runs from Y = 0 to Y = center - 18)
                             Expanded(
                               child: Container(
                                 width: TimelineConstants.timelineLineThickness,
                                 color: isFirst ? Colors.transparent : lineActiveColor,
                               ),
                             ),
-                            // Middle block (aligned with left place icon height)
-                            Container(
-                              height: 36,
-                              width: TimelineConstants.timelineLineThickness,
-                              color: lineActiveColor,
-                            ),
-                            // Bottom line (runs from Y = center + 18 to Y = height)
                             Expanded(
                               child: Container(
                                 width: TimelineConstants.timelineLineThickness,
@@ -2094,8 +2088,47 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                           ),
                         ),
                         const SizedBox(width: 4),
-                        Icon(Icons.more_vert, size: 18,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        PopupMenuButton<String>(
+                          icon: Icon(Icons.more_vert, size: 18,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          padding: EdgeInsets.zero,
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(
+                              value: 'snap_osrm',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.alt_route, size: 18),
+                                  SizedBox(width: 8),
+                                  Text('Snap Segment to Roads'),
+                                ],
+                              ),
+                            ),
+                          ],
+                          onSelected: (val) {
+                            if (val == 'snap_osrm') {
+                              final appState = context.read<AppStateProvider>();
+                              final dateInfo = appState.allDates.firstWhere(
+                                (d) =>
+                                    _selectedDate != null &&
+                                    d.date.year == _selectedDate!.year &&
+                                    d.date.month == _selectedDate!.month &&
+                                    d.date.day == _selectedDate!.day,
+                                orElse: () => DateInfo(
+                                  date: _selectedDate ?? DateTime.now(),
+                                  pointCount: 0,
+                                  filePath: '',
+                                  distance: 0.0,
+                                  state: 'original',
+                                  source: 'merge',
+                                  hasTimelineBackup: false,
+                                  hasGpxBackup: false,
+                                ),
+                              );
+                              final dayPoints = appState.activePaths[dateInfo.filePath] ?? [];
+                              _snapSegmentToRoads(context, appState, dateInfo, dayPoints, item);
+                            }
+                          },
+                        ),
                       ],
                     ),
                   ),
@@ -2172,6 +2205,123 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     }
 
     return widgets;
+  }
+
+  Future<void> _snapSegmentToRoads(
+      BuildContext context,
+      AppStateProvider appState,
+      DateInfo dateInfo,
+      List<LocationPoint> dayPoints,
+      MoveSegmentItem segment) async {
+    if (segment.points.isEmpty) return;
+
+    final startPoint = segment.points.first;
+    final endPoint = segment.points.last;
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Routing segment with OSRM...'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final url = 'https://router.project-osrm.org/route/v1/driving/'
+        '${startPoint.longitude},${startPoint.latitude};${endPoint.longitude},${endPoint.latitude}'
+        '?overview=full&geometries=geojson';
+
+    final client = HttpClient();
+    List<LatLng> routedCoords = [];
+    try {
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final responseBody = await response.transform(utf8.decoder).join();
+        final data = jsonDecode(responseBody);
+        if (data['routes'] != null && data['routes'].isNotEmpty) {
+          final geometry = data['routes'][0]['geometry'];
+          final coordinates = geometry['coordinates'] as List;
+          routedCoords = coordinates.map((coord) {
+            final lng = coord[0] as double;
+            final lat = coord[1] as double;
+            return LatLng(lat, lng);
+          }).toList();
+        }
+      }
+    } catch (e) {
+      debugPrint('OSRM routing failed: $e');
+    } finally {
+      client.close();
+    }
+
+    // Dismiss loading dialog
+    if (context.mounted) {
+      Navigator.of(context).pop();
+    }
+
+    if (routedCoords.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to route segment using OSRM.')),
+        );
+      }
+      return;
+    }
+
+    // Interpolate points
+    final List<double> cumulativeDistances = [0.0];
+    double totalDist = 0.0;
+    for (int k = 0; k < routedCoords.length - 1; k++) {
+      final d = GeoUtils.distanceBetween(routedCoords[k], routedCoords[k + 1]);
+      totalDist += d;
+      cumulativeDistances.add(totalDist);
+    }
+
+    final List<LocationPoint> newPoints = [];
+    final totalDuration = segment.endTime.difference(segment.startTime);
+    for (int k = 0; k < routedCoords.length; k++) {
+      final ratio = totalDist > 0 ? (cumulativeDistances[k] / totalDist) : (k / (routedCoords.length - 1));
+      final timestamp = segment.startTime.add(totalDuration * ratio);
+      newPoints.add(LocationPoint(
+        latitude: routedCoords[k].latitude,
+        longitude: routedCoords[k].longitude,
+        timestamp: timestamp,
+        activityType: segment.points.isNotEmpty ? segment.points.first.activityType : 'IN_PASSENGER_VEHICLE',
+      ));
+    }
+
+    final List<LocationPoint> updatedPoints = List.from(dayPoints);
+    final firstIdx = updatedPoints.indexOf(segment.points.first);
+    final lastIdx = updatedPoints.indexOf(segment.points.last);
+
+    if (firstIdx >= 0 && lastIdx >= firstIdx) {
+      updatedPoints.removeRange(firstIdx, lastIdx + 1);
+      updatedPoints.insertAll(firstIdx, newPoints);
+    } else {
+      updatedPoints.addAll(newPoints);
+    }
+
+    await appState.saveListPoints(dateInfo, updatedPoints);
+    _loadPointsForSelectedDate();
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Segment successfully snapped to roads!')),
+      );
+    }
   }
 }
 
