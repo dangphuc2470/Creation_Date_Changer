@@ -1,0 +1,40 @@
+import 'package:flutter/material.dart';
+
+class TimelineConstants {
+  // Theme & Colors
+  static const Color timelineAxisColor = Color(0xFF1A73E8); // Classic blue timeline line
+  static const Color stayPointIconColor = Color(0xFF795548); // Brown place icon color
+  static const Color defaultRouteColor = Color(0xFF7F92FF); // Default map route color
+  static const Color activeRouteColor = Colors.purple; // Selected day map route color
+  static const Color editRouteColor = Colors.orange; // Edit mode map route color
+
+  // State Highlight Colors (Material Expressive Colors)
+  static final Color originalStateColor = Colors.grey.shade400; // Grey for original/unedited
+  static final Color editedStateColor = Colors.blue.shade300; // Blue for manually edited
+  static final Color snappedStateColor = Colors.green.shade300; // Green for snapped to roads
+
+  // State Text/Cell Highlight Colors (Material Expressive Colors)
+  static final Color originalCellBg = Colors.grey.shade200;
+  static final Color originalCellText = Colors.grey.shade800;
+  static final Color editedCellBg = Colors.blue.shade100;
+  static final Color editedCellText = Colors.blue.shade900;
+  static final Color snappedCellBg = Colors.green.shade100;
+  static final Color snappedCellText = Colors.green.shade900;
+
+  // Sidebar List Dimensions & Thickness
+  static const double timelineLineThickness = 15.0; // Thickness of the vertical timeline line
+  static const double timelineDotDiameter = 15.0; // Diameter of the stay point dot circle
+  static const double iconColumnWidth = 44.0; // Width of the icon column
+  static const double lineColumnWidth = 20.0; // Width of the line column
+
+  // Map Polyline Stroke Widths
+  static const double polylineStrokeWidthEditing = 5.0; // Edit mode active polyline
+  static const double polylineStrokeWidthSelected = 5.5; // Bold selected route segment
+  static const double polylineStrokeWidthUnselected = 3.5; // Faded unselected route segment
+  static const double polylineStrokeWidthDefault = 4.5; // Normal route segments
+  static const double polylineStrokeWidthInactive = 3.0; // Other days' inactive routes (grey)
+
+  // Clustering Configuration
+  static const double stayPointDistanceThreshold = 70.0; // Max distance in meters to cluster stay point
+  static const Duration stayPointDurationThreshold = Duration(minutes: 5); // Min duration to cluster stay point
+}
