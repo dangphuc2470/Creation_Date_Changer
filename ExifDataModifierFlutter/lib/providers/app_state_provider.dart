@@ -409,6 +409,16 @@ class AppStateProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setEditingPoints(List<LocationPoint> points) {
+    _editingPoints = List<LocationPoint>.from(points);
+    notifyListeners();
+  }
+
+  void setPinnedPointIndices(Set<int> indices) {
+    _pinnedPointIndices = Set<int>.from(indices);
+    notifyListeners();
+  }
+
   void insertPoint(int index, LatLng latLng, double t) {
     if (index < 1 || index > _editingPoints.length) return;
 

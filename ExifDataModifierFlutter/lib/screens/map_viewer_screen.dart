@@ -382,22 +382,19 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     final tapLatLng = _mapController.camera.screenOffsetToLatLng(localOffset);
 
     final editingPoints = appState.editingPoints;
-    final pinnedIndices = appState.pinnedPointIndices;
 
     int? clickedIndex;
     double minDistanceSq = double.infinity;
 
     for (int i = 0; i < editingPoints.length; i++) {
-      if (pinnedIndices.contains(i) || _selectedPointIndex == i) {
-        final pt = editingPoints[i];
-        final dLat = pt.latitude - tapLatLng.latitude;
-        final dLon = pt.longitude - tapLatLng.longitude;
-        final distSq = dLat * dLat + dLon * dLon;
+      final pt = editingPoints[i];
+      final dLat = pt.latitude - tapLatLng.latitude;
+      final dLon = pt.longitude - tapLatLng.longitude;
+      final distSq = dLat * dLat + dLon * dLon;
 
-        if (distSq < minDistanceSq && distSq < touchThresholdSq) {
-          minDistanceSq = distSq;
-          clickedIndex = i;
-        }
+      if (distSq < minDistanceSq && distSq < touchThresholdSq) {
+        minDistanceSq = distSq;
+        clickedIndex = i;
       }
     }
 
@@ -441,7 +438,221 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       setState(() {
         _isDraggingPoint = false;
       });
+      _snapAfterDragRelease();
     }
+  }
+
+  Future<List<LatLng>> _fetchRouteCoordinates(LatLng start, LatLng end, bool useGoogle, String googleApiKey) async {
+    if (useGoogle) {
+      final url = 'https://roads.googleapis.com/v1/snapToRoads?path=${start.latitude},${start.longitude}|${end.latitude},${end.longitude}&interpolate=true&key=$googleApiKey';
+      final client = HttpClient();
+      try {
+        final request = await client.getUrl(Uri.parse(url));
+        final response = await request.close();
+        if (response.statusCode == 200) {
+          final responseBody = await response.transform(utf8.decoder).join();
+          final data = jsonDecode(responseBody);
+          if (data['snappedPoints'] != null) {
+            final List snapped = data['snappedPoints'];
+            return snapped.map((s) {
+              final lat = s['location']['latitude'] as double;
+              final lng = s['location']['longitude'] as double;
+              return LatLng(lat, lng);
+            }).toList();
+          }
+        }
+      } catch (e) {
+        debugPrint('Google Roads API failed: $e');
+      } finally {
+        client.close();
+      }
+    } else {
+      final url = 'https://router.project-osrm.org/route/v1/driving/'
+          '${start.longitude},${start.latitude};${end.longitude},${end.latitude}'
+          '?overview=full&geometries=geojson';
+      final client = HttpClient();
+      try {
+        final request = await client.getUrl(Uri.parse(url));
+        final response = await request.close();
+        if (response.statusCode == 200) {
+          final responseBody = await response.transform(utf8.decoder).join();
+          final data = jsonDecode(responseBody);
+          if (data['routes'] != null && data['routes'].isNotEmpty) {
+            final geometry = data['routes'][0]['geometry'];
+            final coordinates = geometry['coordinates'] as List;
+            return coordinates.map((coord) {
+              final lng = coord[0] as double;
+              final lat = coord[1] as double;
+              return LatLng(lat, lng);
+            }).toList();
+          }
+        }
+      } catch (e) {
+        debugPrint('OSRM routing failed: $e');
+      } finally {
+        client.close();
+      }
+    }
+    return [];
+  }
+
+  Future<void> _snapAfterDragRelease() async {
+    final draggedIdx = _selectedPointIndex;
+    if (draggedIdx == null) return;
+
+    final appState = context.read<AppStateProvider>();
+    appState.pinnedPointIndices.add(draggedIdx);
+
+    final settings = context.read<SettingsProvider>();
+    final useGoogle = settings.routingProvider == 'google';
+    final googleApiKey = settings.googleMapsApiKey;
+
+    if (useGoogle && googleApiKey.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please configure your Google Maps API Key in Settings to snap roads.')),
+      );
+      return;
+    }
+
+    final editingPoints = List<LocationPoint>.from(appState.editingPoints);
+    final pinnedIndices = Set<int>.from(appState.pinnedPointIndices);
+
+    int a = 0;
+    for (int i = draggedIdx - 1; i >= 0; i--) {
+      if (pinnedIndices.contains(i)) {
+        a = i;
+        break;
+      }
+    }
+
+    int b = editingPoints.length - 1;
+    for (int i = draggedIdx + 1; i < editingPoints.length; i++) {
+      if (pinnedIndices.contains(i)) {
+        b = i;
+        break;
+      }
+    }
+
+    // Parallel fetch routes
+    final futures = await Future.wait([
+      _fetchRouteCoordinates(editingPoints[a].latLng, editingPoints[draggedIdx].latLng, useGoogle, googleApiKey),
+      _fetchRouteCoordinates(editingPoints[draggedIdx].latLng, editingPoints[b].latLng, useGoogle, googleApiKey),
+    ]);
+
+    final List<LatLng> route1 = futures[0];
+    final List<LatLng> route2 = futures[1];
+
+    if (route1.isEmpty && route2.isEmpty) {
+      return;
+    }
+
+    final List<LocationPoint> finalPoints = [];
+
+    // 1. Copy points before 'a'
+    for (int i = 0; i < a; i++) {
+      finalPoints.add(editingPoints[i]);
+    }
+
+    // 2. Add snapped points from 'a' to 'draggedIdx'
+    final tA = editingPoints[a].timestamp;
+    final tDragged = editingPoints[draggedIdx].timestamp;
+    final duration1 = tDragged.difference(tA);
+
+    final List<LocationPoint> segment1 = [];
+    if (route1.isNotEmpty) {
+      final List<double> dists = [0.0];
+      double totalD = 0.0;
+      for (int k = 0; k < route1.length - 1; k++) {
+        final d = GeoUtils.distanceBetween(route1[k], route1[k + 1]);
+        totalD += d;
+        dists.add(totalD);
+      }
+      for (int k = 0; k < route1.length; k++) {
+        final ratio = totalD > 0 ? (dists[k] / totalD) : (k / (route1.length - 1));
+        segment1.add(LocationPoint(
+          latitude: route1[k].latitude,
+          longitude: route1[k].longitude,
+          timestamp: tA.add(duration1 * ratio),
+          elevation: editingPoints[a].elevation,
+          activityType: editingPoints[a].activityType,
+        ));
+      }
+    } else {
+      for (int i = a; i <= draggedIdx; i++) {
+        segment1.add(editingPoints[i]);
+      }
+    }
+    finalPoints.addAll(segment1);
+
+    // 3. Add snapped points from 'draggedIdx' to 'b'
+    final tB = editingPoints[b].timestamp;
+    final duration2 = tB.difference(tDragged);
+
+    final List<LocationPoint> segment2 = [];
+    if (route2.isNotEmpty) {
+      final List<double> dists = [0.0];
+      double totalD = 0.0;
+      for (int k = 0; k < route2.length - 1; k++) {
+        final d = GeoUtils.distanceBetween(route2[k], route2[k + 1]);
+        totalD += d;
+        dists.add(totalD);
+      }
+      for (int k = 1; k < route2.length; k++) {
+        final ratio = totalD > 0 ? (dists[k] / totalD) : (k / (route2.length - 1));
+        segment2.add(LocationPoint(
+          latitude: route2[k].latitude,
+          longitude: route2[k].longitude,
+          timestamp: tDragged.add(duration2 * ratio),
+          elevation: editingPoints[draggedIdx].elevation,
+          activityType: editingPoints[draggedIdx].activityType,
+        ));
+      }
+    } else {
+      for (int i = draggedIdx + 1; i <= b; i++) {
+        segment2.add(editingPoints[i]);
+      }
+    }
+    finalPoints.addAll(segment2);
+
+    // 4. Copy points after 'b'
+    for (int i = b + 1; i < editingPoints.length; i++) {
+      finalPoints.add(editingPoints[i]);
+    }
+
+    final Set<int> newPinnedIndices = {0, finalPoints.length - 1};
+
+    for (final oldIdx in pinnedIndices) {
+      if (oldIdx == 0 || oldIdx == editingPoints.length - 1) continue;
+      final oldTime = editingPoints[oldIdx].timestamp;
+      
+      int nearestIdx = 0;
+      int minDiffMs = double.maxFinite.toInt();
+      for (int i = 0; i < finalPoints.length; i++) {
+        final diff = finalPoints[i].timestamp.difference(oldTime).inMilliseconds.abs();
+        if (diff < minDiffMs) {
+          minDiffMs = diff;
+          nearestIdx = i;
+        }
+      }
+      newPinnedIndices.add(nearestIdx);
+    }
+
+    appState.setEditingPoints(finalPoints);
+    appState.setPinnedPointIndices(newPinnedIndices);
+    
+    final oldTime = editingPoints[draggedIdx].timestamp;
+    int nearestIdx = 0;
+    int minDiffMs = double.maxFinite.toInt();
+    for (int i = 0; i < finalPoints.length; i++) {
+      final diff = finalPoints[i].timestamp.difference(oldTime).inMilliseconds.abs();
+      if (diff < minDiffMs) {
+        minDiffMs = diff;
+        nearestIdx = i;
+      }
+    }
+    setState(() {
+      _selectedPointIndex = nearestIdx;
+    });
   }
 
   String _formatPointTime(DateTime utcTime, double timezoneOffset) {
