@@ -106,6 +106,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   int? _selectedPointIndex;
   bool _isDraggingPoint = false;
   int? _selectedTimelineItemIndex;
+  LocationPoint? _previousDayLastStayPoint;
 
   void _loadPointsForSelectedDate() async {
     setState(() {
@@ -113,6 +114,55 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     });
     if (_selectedDate == null) return;
     final appState = context.read<AppStateProvider>();
+
+    // Try to load previous day's last stay point to show stay continuity
+    LocationPoint? prevLastStay;
+    try {
+      final prevDate = _selectedDate!.subtract(const Duration(days: 1));
+      final prevDateInfo = appState.allDates.firstWhere(
+        (d) =>
+            d.date.year == prevDate.year &&
+            d.date.month == prevDate.month &&
+            d.date.day == prevDate.day,
+        orElse: () => DateInfo(
+          date: prevDate,
+          pointCount: 0,
+          filePath: '',
+          distance: 0.0,
+          state: 'original',
+          source: 'merge',
+          hasTimelineBackup: false,
+          hasGpxBackup: false,
+        ),
+      );
+
+      if (prevDateInfo.filePath.isNotEmpty) {
+        final prevPoints = await LocationManager.loadLocationFile(prevDateInfo.filePath);
+        if (!mounted) return;
+        if (prevPoints.isNotEmpty) {
+          final settings = context.read<SettingsProvider>();
+          final double timeOffset = settings.geotagTimezone.toDouble();
+          final prevItems = _clusterTimelineRaw(prevPoints, timeOffset);
+          for (int k = prevItems.length - 1; k >= 0; k--) {
+            if (prevItems[k] is StayPointItem) {
+              final stay = prevItems[k] as StayPointItem;
+              prevLastStay = LocationPoint(
+                latitude: stay.center.latitude,
+                longitude: stay.center.longitude,
+                timestamp: stay.endTime,
+              );
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading previous day last stay point: $e');
+    }
+
+    setState(() {
+      _previousDayLastStayPoint = prevLastStay;
+    });
 
     final dateInfo = appState.allDates.firstWhere(
       (d) =>
@@ -1573,7 +1623,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     }
   }
 
-  List<TimelineItem> _clusterTimeline(List<LocationPoint> points, double timezoneOffset) {
+  List<TimelineItem> _clusterTimelineRaw(List<LocationPoint> points, double timezoneOffset) {
     if (points.isEmpty) return [];
     if (points.length < 2) {
       return [
@@ -1645,14 +1695,26 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
         final movePoints = points.sublist(i, nextStayStart);
         double distSum = 0;
-        for (int m = 0; m < movePoints.length - 1; m++) {
-          distSum += GeoUtils.distanceBetween(movePoints[m].latLng, movePoints[m + 1].latLng);
+        final List<LocationPoint> pathPoints = [];
+        if (i > 0) {
+          pathPoints.add(points[i - 1]);
         }
+        pathPoints.addAll(movePoints);
+        if (nextStayStart < n) {
+          pathPoints.add(points[nextStayStart]);
+        }
+
+        for (int m = 0; m < pathPoints.length - 1; m++) {
+          distSum += GeoUtils.distanceBetween(pathPoints[m].latLng, pathPoints[m + 1].latLng);
+        }
+
+        final startTime = (i > 0) ? points[i - 1].timestamp : points[i].timestamp;
+        final endTime = (nextStayStart < n) ? points[nextStayStart].timestamp : points[nextStayStart - 1].timestamp;
 
         items.add(MoveSegmentItem(
           points: movePoints,
-          startTime: points[i].timestamp,
-          endTime: points[nextStayStart - 1].timestamp,
+          startTime: startTime,
+          endTime: endTime,
           distance: distSum,
         ));
 
@@ -1661,6 +1723,71 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     }
 
     return items;
+  }
+
+  List<TimelineItem> _clusterTimeline(List<LocationPoint> points, double timezoneOffset) {
+    final List<TimelineItem> rawItems = _clusterTimelineRaw(points, timezoneOffset);
+
+    if (_previousDayLastStayPoint != null && _selectedDate != null) {
+      final currentDayMidnight = DateTime.utc(
+        _selectedDate!.year,
+        _selectedDate!.month,
+        _selectedDate!.day,
+        0, 0, 0,
+      );
+
+      if (rawItems.isNotEmpty) {
+        final firstItem = rawItems.first;
+        if (firstItem.startTime.difference(currentDayMidnight).inMinutes > 1) {
+          final stayPoints = [
+            LocationPoint(
+              latitude: _previousDayLastStayPoint!.latitude,
+              longitude: _previousDayLastStayPoint!.longitude,
+              timestamp: currentDayMidnight,
+            ),
+            LocationPoint(
+              latitude: _previousDayLastStayPoint!.latitude,
+              longitude: _previousDayLastStayPoint!.longitude,
+              timestamp: firstItem.startTime,
+            ),
+          ];
+
+          final initialStay = StayPointItem(
+            points: stayPoints,
+            startTime: currentDayMidnight,
+            endTime: firstItem.startTime,
+            center: LatLng(_previousDayLastStayPoint!.latitude, _previousDayLastStayPoint!.longitude),
+          );
+
+          rawItems.insert(0, initialStay);
+        }
+      } else {
+        final currentDayEnd = currentDayMidnight.add(const Duration(hours: 24));
+        final stayPoints = [
+          LocationPoint(
+            latitude: _previousDayLastStayPoint!.latitude,
+            longitude: _previousDayLastStayPoint!.longitude,
+            timestamp: currentDayMidnight,
+          ),
+          LocationPoint(
+            latitude: _previousDayLastStayPoint!.latitude,
+            longitude: _previousDayLastStayPoint!.longitude,
+            timestamp: currentDayEnd,
+          ),
+        ];
+
+        final initialStay = StayPointItem(
+          points: stayPoints,
+          startTime: currentDayMidnight,
+          endTime: currentDayEnd,
+          center: LatLng(_previousDayLastStayPoint!.latitude, _previousDayLastStayPoint!.longitude),
+        );
+
+        rawItems.add(initialStay);
+      }
+    }
+
+    return rawItems;
   }
 
   Widget _buildTimelineItem(
@@ -2732,11 +2859,16 @@ class BingTileProvider extends NetworkTileProvider {
   }
 }
 
-abstract class TimelineItem {}
+abstract class TimelineItem {
+  DateTime get startTime;
+  DateTime get endTime;
+}
 
 class StayPointItem extends TimelineItem {
   final List<LocationPoint> points;
+  @override
   final DateTime startTime;
+  @override
   final DateTime endTime;
   final LatLng center;
 
@@ -2752,7 +2884,9 @@ class StayPointItem extends TimelineItem {
 
 class MoveSegmentItem extends TimelineItem {
   final List<LocationPoint> points;
+  @override
   final DateTime startTime;
+  @override
   final DateTime endTime;
   final double distance;
 
