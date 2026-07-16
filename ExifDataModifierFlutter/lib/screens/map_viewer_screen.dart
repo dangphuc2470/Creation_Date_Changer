@@ -1906,7 +1906,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                             Container(
                               height: 36,
                               width: TimelineConstants.timelineLineThickness,
-                              color: (isFirst || isLast) ? Colors.transparent : lineActiveColor,
+                              color: lineActiveColor,
                             ),
                             // Bottom line (runs from Y = center + 18 to Y = height)
                             Expanded(
@@ -1918,17 +1918,16 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                           ],
                         ),
                       ),
-                      // Large circle dot at this stay point (only for intermediate items)
-                      if (!isFirst && !isLast)
-                        Container(
-                          width: TimelineConstants.timelineDotDiameter,
-                          height: TimelineConstants.timelineDotDiameter,
-                          decoration: BoxDecoration(
-                            color: lineActiveColor,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                          ),
+                      // Large circle dot at this stay point
+                      Container(
+                        width: TimelineConstants.timelineDotDiameter,
+                        height: TimelineConstants.timelineDotDiameter,
+                        decoration: BoxDecoration(
+                          color: lineActiveColor,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
                         ),
+                      ),
                     ],
                   ),
                 ),
