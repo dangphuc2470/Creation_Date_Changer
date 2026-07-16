@@ -2207,36 +2207,6 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     return widgets;
   }
 
-  List<LatLng> _decodeGooglePolyline(String encoded) {
-    final List<LatLng> points = [];
-    int index = 0, len = encoded.length;
-    int lat = 0, lng = 0;
-
-    while (index < len) {
-      int b, shift = 0, result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-      lat += dlat;
-
-      shift = 0;
-      result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-      lng += dlng;
-
-      points.add(LatLng(lat / 1E5, lng / 1E5));
-    }
-    return points;
-  }
-
   Future<void> _snapSegmentToRoads(
       BuildContext context,
       AppStateProvider appState,
@@ -2256,8 +2226,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       return;
     }
 
-    final startPoint = segment.points.first;
-    final endPoint = segment.points.last;
+    final originalPoints = segment.points;
 
     // Show loading dialog
     showDialog(
@@ -2272,7 +2241,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               children: [
                 const CircularProgressIndicator(),
                 const SizedBox(height: 16),
-                Text(useGoogle ? 'Routing segment with Google Maps...' : 'Routing segment with OSRM...'),
+                Text(useGoogle ? 'Routing segment with Google Roads API...' : 'Routing segment with OSRM...'),
               ],
             ),
           ),
@@ -2280,29 +2249,131 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       ),
     );
 
-    final url = useGoogle
-        ? 'https://maps.googleapis.com/maps/api/directions/json'
-            '?origin=${startPoint.latitude},${startPoint.longitude}'
-            '&destination=${endPoint.latitude},${endPoint.longitude}'
-            '&mode=driving&key=$googleApiKey'
-        : 'https://router.project-osrm.org/route/v1/driving/'
-            '${startPoint.longitude},${startPoint.latitude};${endPoint.longitude},${endPoint.latitude}'
-            '?overview=full&geometries=geojson';
+    final List<LocationPoint> newPoints = [];
+    bool routingSuccess = true;
 
-    final client = HttpClient();
-    List<LatLng> routedCoords = [];
-    try {
-      final request = await client.getUrl(Uri.parse(url));
-      final response = await request.close();
-      if (response.statusCode == 200) {
-        final responseBody = await response.transform(utf8.decoder).join();
-        final data = jsonDecode(responseBody);
-        if (useGoogle) {
-          if (data['routes'] != null && data['routes'].isNotEmpty) {
-            final encodedPoints = data['routes'][0]['overview_polyline']['points'] as String;
-            routedCoords = _decodeGooglePolyline(encodedPoints);
+    if (useGoogle) {
+      final List<Map<String, dynamic>> snappedPoints = [];
+      // Google Roads API snapToRoads accepts max 100 points per request.
+      // Chunk to handle longer paths robustly.
+      for (int start = 0; start < originalPoints.length; start += 99) {
+        final end = (start + 100 < originalPoints.length) ? start + 100 : originalPoints.length;
+        final chunk = originalPoints.sublist(start, end);
+        final pathString = chunk.map((p) => '${p.latitude},${p.longitude}').join('|');
+
+        final url = 'https://roads.googleapis.com/v1/snapToRoads?path=$pathString&interpolate=true&key=$googleApiKey';
+
+        final client = HttpClient();
+        try {
+          final request = await client.getUrl(Uri.parse(url));
+          final response = await request.close();
+          if (response.statusCode == 200) {
+            final responseBody = await response.transform(utf8.decoder).join();
+            final data = jsonDecode(responseBody);
+            if (data['snappedPoints'] != null) {
+              final List chunkSnapped = data['snappedPoints'];
+              for (final s in chunkSnapped) {
+                final origIdx = s['originalIndex'] as int?;
+                final adjustedSnapped = Map<String, dynamic>.from(s);
+                if (origIdx != null) {
+                  adjustedSnapped['originalIndex'] = origIdx + start;
+                }
+                snappedPoints.add(adjustedSnapped);
+              }
+            }
+          } else {
+            routingSuccess = false;
+            debugPrint('Google Roads API error: Status code ${response.statusCode}');
           }
-        } else {
+        } catch (e) {
+          routingSuccess = false;
+          debugPrint('Google Roads API request failed: $e');
+        } finally {
+          client.close();
+        }
+      }
+
+      if (routingSuccess && snappedPoints.isNotEmpty) {
+        // Interpolate timestamps precisely for snapped and interpolated points
+        for (int k = 0; k < snappedPoints.length; k++) {
+          final s = snappedPoints[k];
+          final lat = s['location']['latitude'] as double;
+          final lng = s['location']['longitude'] as double;
+          final origIdx = s['originalIndex'] as int?;
+
+          DateTime timestamp;
+          if (origIdx != null && origIdx >= 0 && origIdx < originalPoints.length) {
+            timestamp = originalPoints[origIdx].timestamp;
+          } else {
+            // Find preceding and succeeding original index coordinates to interpolate between
+            int? prevOrigIdx;
+            int? nextOrigIdx;
+
+            for (int prev = k - 1; prev >= 0; prev--) {
+              if (snappedPoints[prev]['originalIndex'] != null) {
+                prevOrigIdx = snappedPoints[prev]['originalIndex'] as int;
+                break;
+              }
+            }
+            for (int next = k + 1; next < snappedPoints.length; next++) {
+              if (snappedPoints[next]['originalIndex'] != null) {
+                nextOrigIdx = snappedPoints[next]['originalIndex'] as int;
+                break;
+              }
+            }
+
+            if (prevOrigIdx != null && nextOrigIdx != null) {
+              final startTime = originalPoints[prevOrigIdx].timestamp;
+              final endTime = originalPoints[nextOrigIdx].timestamp;
+              
+              int interpCount = 0;
+              int myInterpIndex = 0;
+              for (int m = k - 1; m >= 0; m--) {
+                if (snappedPoints[m]['originalIndex'] != null) break;
+                myInterpIndex++;
+              }
+              for (int m = k + 1; m < snappedPoints.length; m++) {
+                if (snappedPoints[m]['originalIndex'] != null) break;
+                interpCount++;
+              }
+              interpCount += myInterpIndex + 1;
+
+              final ratio = (myInterpIndex + 1) / (interpCount + 1);
+              timestamp = startTime.add(endTime.difference(startTime) * ratio);
+            } else if (prevOrigIdx != null) {
+              timestamp = originalPoints[prevOrigIdx].timestamp;
+            } else if (nextOrigIdx != null) {
+              timestamp = originalPoints[nextOrigIdx].timestamp;
+            } else {
+              final totalDuration = segment.endTime.difference(segment.startTime);
+              timestamp = segment.startTime.add(totalDuration * (k / (snappedPoints.length - 1)));
+            }
+          }
+
+          newPoints.add(LocationPoint(
+            latitude: lat,
+            longitude: lng,
+            timestamp: timestamp,
+            activityType: segment.points.isNotEmpty ? segment.points.first.activityType : 'IN_PASSENGER_VEHICLE',
+          ));
+        }
+      }
+    } else {
+      // OSRM routing
+      final startPoint = segment.points.first;
+      final endPoint = segment.points.last;
+      final url = 'https://router.project-osrm.org/route/v1/driving/'
+          '${startPoint.longitude},${startPoint.latitude};${endPoint.longitude},${endPoint.latitude}'
+          '?overview=full&geometries=geojson';
+
+      final client = HttpClient();
+      List<LatLng> routedCoords = [];
+      try {
+        final request = await client.getUrl(Uri.parse(url));
+        final response = await request.close();
+        if (response.statusCode == 200) {
+          final responseBody = await response.transform(utf8.decoder).join();
+          final data = jsonDecode(responseBody);
           if (data['routes'] != null && data['routes'].isNotEmpty) {
             final geometry = data['routes'][0]['geometry'];
             final coordinates = geometry['coordinates'] as List;
@@ -2313,11 +2384,34 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
             }).toList();
           }
         }
+      } catch (e) {
+        routingSuccess = false;
+        debugPrint('OSRM routing failed: $e');
+      } finally {
+        client.close();
       }
-    } catch (e) {
-      debugPrint('Routing failed: $e');
-    } finally {
-      client.close();
+
+      if (routingSuccess && routedCoords.isNotEmpty) {
+        final List<double> cumulativeDistances = [0.0];
+        double totalDist = 0.0;
+        for (int k = 0; k < routedCoords.length - 1; k++) {
+          final d = GeoUtils.distanceBetween(routedCoords[k], routedCoords[k + 1]);
+          totalDist += d;
+          cumulativeDistances.add(totalDist);
+        }
+
+        final totalDuration = segment.endTime.difference(segment.startTime);
+        for (int k = 0; k < routedCoords.length; k++) {
+          final ratio = totalDist > 0 ? (cumulativeDistances[k] / totalDist) : (k / (routedCoords.length - 1));
+          final timestamp = segment.startTime.add(totalDuration * ratio);
+          newPoints.add(LocationPoint(
+            latitude: routedCoords[k].latitude,
+            longitude: routedCoords[k].longitude,
+            timestamp: timestamp,
+            activityType: segment.points.isNotEmpty ? segment.points.first.activityType : 'IN_PASSENGER_VEHICLE',
+          ));
+        }
+      }
     }
 
     // Dismiss loading dialog
@@ -2325,35 +2419,13 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       Navigator.of(context).pop();
     }
 
-    if (routedCoords.isEmpty) {
+    if (newPoints.isEmpty) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to route segment using ${useGoogle ? 'Google Maps' : 'OSRM'}.')),
+          SnackBar(content: Text('Failed to route segment using ${useGoogle ? 'Google Roads API' : 'OSRM'}.')),
         );
       }
       return;
-    }
-
-    // Interpolate points
-    final List<double> cumulativeDistances = [0.0];
-    double totalDist = 0.0;
-    for (int k = 0; k < routedCoords.length - 1; k++) {
-      final d = GeoUtils.distanceBetween(routedCoords[k], routedCoords[k + 1]);
-      totalDist += d;
-      cumulativeDistances.add(totalDist);
-    }
-
-    final List<LocationPoint> newPoints = [];
-    final totalDuration = segment.endTime.difference(segment.startTime);
-    for (int k = 0; k < routedCoords.length; k++) {
-      final ratio = totalDist > 0 ? (cumulativeDistances[k] / totalDist) : (k / (routedCoords.length - 1));
-      final timestamp = segment.startTime.add(totalDuration * ratio);
-      newPoints.add(LocationPoint(
-        latitude: routedCoords[k].latitude,
-        longitude: routedCoords[k].longitude,
-        timestamp: timestamp,
-        activityType: segment.points.isNotEmpty ? segment.points.first.activityType : 'IN_PASSENGER_VEHICLE',
-      ));
     }
 
     final List<LocationPoint> updatedPoints = List.from(dayPoints);

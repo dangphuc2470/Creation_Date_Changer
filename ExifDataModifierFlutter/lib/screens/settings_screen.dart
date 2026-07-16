@@ -134,7 +134,7 @@ class SettingsScreen extends StatelessWidget {
                               child: Text('OSRM (Free OSM)')),
                           DropdownMenuItem(
                               value: 'google',
-                              child: Text('Google Maps Directions API')),
+                              child: Text('Google Roads API (Snap to Roads)')),
                         ],
                         onChanged: (val) {
                           if (val != null) {
