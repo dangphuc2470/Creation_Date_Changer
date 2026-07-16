@@ -9,6 +9,7 @@ import '../models/location_point.dart';
 import '../providers/app_state_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/location_manager.dart';
+import '../constants/timeline_constants.dart';
 import '../utils/geo_utils.dart';
 
 class ProjectionResult {
@@ -1194,7 +1195,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         polylines.add(
           Polyline(
             points: pts.map((p) => p.latLng).toList(),
-            strokeWidth: 3.0,
+            strokeWidth: TimelineConstants.polylineStrokeWidthInactive,
             color: Colors.grey.withValues(alpha: 0.4),
           ),
         );
@@ -1221,8 +1222,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         polylines.add(
           Polyline(
             points: pointsToShow.map((p) => p.latLng).toList(),
-            strokeWidth: 5.0,
-            color: Colors.orange,
+            strokeWidth: TimelineConstants.polylineStrokeWidthEditing,
+            color: TimelineConstants.editRouteColor,
           ),
         );
       } else if (_viewAsPath && timelineItems.isNotEmpty) {
@@ -1237,15 +1238,15 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
             if (hasAnySelection) {
               if (isCurrentSelected) {
-                lineColor = Colors.purple; // Bold purple
-                width = 5.5;
+                lineColor = TimelineConstants.activeRouteColor; // Bold active route
+                width = TimelineConstants.polylineStrokeWidthSelected;
               } else {
-                lineColor = Colors.purple.withValues(alpha: 0.15); // Faded purple
-                width = 3.5;
+                lineColor = TimelineConstants.activeRouteColor.withValues(alpha: 0.15); // Faded route
+                width = TimelineConstants.polylineStrokeWidthUnselected;
               }
             } else {
-              lineColor = Colors.purple; // Default bold purple
-              width = 4.5;
+              lineColor = TimelineConstants.activeRouteColor; // Default bold route
+              width = TimelineConstants.polylineStrokeWidthDefault;
             }
 
             // Create a continuous, connected path segment by pre-pending and post-pending neighboring coordinates
@@ -1357,7 +1358,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
           height: 36,
           child: Container(
             decoration: BoxDecoration(
-              color: const Color(0xFF795548), // Brown to match stay point list item icon
+              color: TimelineConstants.stayPointIconColor, // Brown stay point icon
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 3),
               boxShadow: const [
@@ -1382,7 +1383,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
           height: 22,
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.purple.withValues(alpha: 0.5),
+              color: TimelineConstants.activeRouteColor.withValues(alpha: 0.5),
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 3),
               boxShadow: const [
@@ -1400,7 +1401,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
           height: 22,
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.purple,
+              color: TimelineConstants.activeRouteColor,
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 3),
               boxShadow: const [
@@ -1682,8 +1683,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     }
 
     final List<TimelineItem> items = [];
-    final double distThreshold = 70.0; // meters
-    final Duration timeThreshold = const Duration(minutes: 5);
+    final double distThreshold = TimelineConstants.stayPointDistanceThreshold; // meters
+    final Duration timeThreshold = TimelineConstants.stayPointDurationThreshold;
 
     int i = 0;
     final int n = points.length;
@@ -1837,15 +1838,15 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
   Widget _buildTimelineItem(
       BuildContext context, TimelineItem item, double timezoneOffset, int index, bool isSelected, bool isFirst, bool isLast) {
-    const blueAxis = Color(0xFF1A73E8);
+    const blueAxis = TimelineConstants.timelineAxisColor;
     final hasAnySelection = _selectedTimelineItemIndex != null;
     final lineActiveColor = hasAnySelection
         ? (isSelected ? blueAxis : blueAxis.withValues(alpha: 0.25))
         : blueAxis;
     // Col 1: place icon / expand icon
-    const iconColWidth = 44.0;
+    const iconColWidth = TimelineConstants.iconColumnWidth;
     // Col 2: continuous blue line (with dot at stay points)
-    const lineColWidth = 20.0;
+    const lineColWidth = TimelineConstants.lineColumnWidth;
 
     if (item is StayPointItem) {
       final startTime = _formatPointTime(item.startTime, timezoneOffset);
@@ -1875,7 +1876,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                       width: 36,
                       height: 36,
                       decoration: const BoxDecoration(
-                        color: Color(0xFF795548),
+                        color: TimelineConstants.stayPointIconColor,
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.place, color: Colors.white, size: 20),
@@ -1896,13 +1897,13 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                           children: [
                             Expanded(
                               child: Container(
-                                width: 6,
+                                width: TimelineConstants.timelineLineThickness,
                                 color: isFirst ? Colors.transparent : lineActiveColor,
                               ),
                             ),
                             Expanded(
                               child: Container(
-                                width: 6,
+                                width: TimelineConstants.timelineLineThickness,
                                 color: isLast ? Colors.transparent : lineActiveColor,
                               ),
                             ),
@@ -2061,7 +2062,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                   width: lineColWidth,
                   child: Center(
                     child: Container(
-                      width: 6,
+                      width: TimelineConstants.timelineLineThickness,
                       color: lineActiveColor,
                     ),
                   ),
