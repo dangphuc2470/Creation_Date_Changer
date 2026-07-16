@@ -1912,8 +1912,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                       ),
                       // Large circle dot at this stay point
                       Container(
-                        width: 14,
-                        height: 14,
+                        width: TimelineConstants.timelineDotDiameter,
+                        height: TimelineConstants.timelineDotDiameter,
                         decoration: BoxDecoration(
                           color: lineActiveColor,
                           shape: BoxShape.circle,
