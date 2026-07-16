@@ -17,13 +17,13 @@ class TimelineConstants {
   static final Color originalCellBg = Colors.grey.shade200;
   static final Color originalCellText = Colors.grey.shade800;
   static final Color editedCellBg = Colors.blue.shade100;
-  static final Color editedCellText = Colors.blue.shade900;
+  static final Color editedCellText = const Color.fromARGB(255, 43, 47, 54);
   static final Color snappedCellBg = Colors.green.shade100;
   static final Color snappedCellText = Colors.green.shade900;
 
   // Sidebar List Dimensions & Thickness
-  static const double timelineLineThickness = 15.0; // Thickness of the vertical timeline line
-  static const double timelineDotDiameter = 15.0; // Diameter of the stay point dot circle
+  static const double timelineLineThickness = 12.0; // Thickness of the vertical timeline line
+  static const double timelineDotDiameter = 20.0; // Diameter of the stay point dot circle
   static const double iconColumnWidth = 44.0; // Width of the icon column
   static const double lineColumnWidth = 20.0; // Width of the line column
 

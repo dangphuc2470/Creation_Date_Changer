@@ -1891,16 +1891,24 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      // Equal-height top and bottom line segments
+                      // Top/Middle/Bottom vertical line segments
                       Positioned.fill(
                         child: Column(
                           children: [
+                            // Top line (runs from Y = 0 to Y = center - 18)
                             Expanded(
                               child: Container(
                                 width: TimelineConstants.timelineLineThickness,
                                 color: isFirst ? Colors.transparent : lineActiveColor,
                               ),
                             ),
+                            // Middle block (aligned with left place icon height)
+                            Container(
+                              height: 36,
+                              width: TimelineConstants.timelineLineThickness,
+                              color: (isFirst || isLast) ? Colors.transparent : lineActiveColor,
+                            ),
+                            // Bottom line (runs from Y = center + 18 to Y = height)
                             Expanded(
                               child: Container(
                                 width: TimelineConstants.timelineLineThickness,
@@ -1910,16 +1918,17 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                           ],
                         ),
                       ),
-                      // Large circle dot at this stay point
-                      Container(
-                        width: TimelineConstants.timelineDotDiameter,
-                        height: TimelineConstants.timelineDotDiameter,
-                        decoration: BoxDecoration(
-                          color: lineActiveColor,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
+                      // Large circle dot at this stay point (only for intermediate items)
+                      if (!isFirst && !isLast)
+                        Container(
+                          width: TimelineConstants.timelineDotDiameter,
+                          height: TimelineConstants.timelineDotDiameter,
+                          decoration: BoxDecoration(
+                            color: lineActiveColor,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
