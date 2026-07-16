@@ -36,7 +36,7 @@ class LocationManager {
     _pointsCache.clear();
     final List<DateInfo> dates = [];
     final rootDir = Directory(rootPath);
-    
+
     if (!await rootDir.exists()) {
       return dates;
     }
@@ -45,14 +45,31 @@ class LocationManager {
       path.join('timelines', 'active'),
       path.join('timelines', 'original'),
     ));
-    
+
+    // Load metadata cache from disk
+    final cacheFile = File(path.join(rootDir.parent.path, 'active_metadata_cache.json'));
+    Map<String, Map<String, dynamic>> cache = {};
+    if (await cacheFile.exists()) {
+      try {
+        final jsonStr = await cacheFile.readAsString();
+        final decoded = jsonDecode(jsonStr);
+        if (decoded is Map) {
+          cache = decoded.map((k, v) => MapEntry(k as String, Map<String, dynamic>.from(v as Map)));
+        }
+      } catch (e) {
+        debugPrint('Error loading metadata cache: $e');
+      }
+    }
+
+    bool cacheUpdated = false;
+
     await for (final entity in rootDir.list()) {
       if (entity is File && entity.path.endsWith('.json')) {
         final fileName = path.basename(entity.path);
         if (fileName.contains('_timeline') || fileName.contains('_gpx')) {
           continue; // skip original segments if placed here
         }
-        
+
         final dateStr = fileName.replaceAll('.json', '');
         final parts = dateStr.split('-');
         if (parts.length != 3) continue;
@@ -60,24 +77,11 @@ class LocationManager {
         final month = int.tryParse(parts[1]);
         final day = int.tryParse(parts[2]);
         if (year == null || month == null || day == null) continue;
-        
-        try {
-          final jsonString = await entity.readAsString();
-          final decoded = jsonDecode(jsonString);
-          final points = LocationPoint.parseAnyJson(decoded);
-          _pointsCache[entity.path] = points;
-          
-          final distance = GeoUtils.calculateTrackDistance(points);
 
-          // Extract state & source from GeoJSON properties
-          String state = 'original';
-          String source = 'merge';
-          if (decoded is Map<String, dynamic>) {
-            final properties = decoded['properties'] as Map<String, dynamic>? ?? {};
-            state = properties['state'] as String? ?? 'original';
-            source = properties['source'] as String? ?? 'merge';
-          }
-          
+        try {
+          final stat = await entity.stat();
+          final lastMod = stat.modified.millisecondsSinceEpoch;
+
           // Check for backups in original folder
           bool hasTimeline = false;
           bool hasGpx = false;
@@ -86,16 +90,61 @@ class LocationManager {
             hasGpx = await File(path.join(originalDir.path, '${dateStr}_gpx.json')).exists();
           }
 
-          dates.add(DateInfo(
-            date: DateTime(year, month, day),
-            pointCount: points.length,
-            filePath: entity.path,
-            distance: distance,
-            state: state,
-            source: source,
-            hasTimelineBackup: hasTimeline,
-            hasGpxBackup: hasGpx,
-          ));
+          if (cache.containsKey(entity.path) &&
+              cache[entity.path]!['lastModifiedMs'] == lastMod &&
+              cache[entity.path]!['hasTimelineBackup'] == hasTimeline &&
+              cache[entity.path]!['hasGpxBackup'] == hasGpx) {
+            // Use cached values
+            final c = cache[entity.path]!;
+            dates.add(DateInfo(
+              date: DateTime(year, month, day),
+              pointCount: c['pointCount'] as int,
+              filePath: entity.path,
+              distance: (c['distance'] as num).toDouble(),
+              state: c['state'] as String,
+              source: c['source'] as String,
+              hasTimelineBackup: hasTimeline,
+              hasGpxBackup: hasGpx,
+            ));
+          } else {
+            // Load and parse
+            final jsonString = await entity.readAsString();
+            final decoded = jsonDecode(jsonString);
+            final points = LocationPoint.parseAnyJson(decoded);
+            _pointsCache[entity.path] = points;
+
+            final distance = GeoUtils.calculateTrackDistance(points);
+
+            String state = 'original';
+            String source = 'merge';
+            if (decoded is Map<String, dynamic>) {
+              final properties = decoded['properties'] as Map<String, dynamic>? ?? {};
+              state = properties['state'] as String? ?? 'original';
+              source = properties['source'] as String? ?? 'merge';
+            }
+
+            dates.add(DateInfo(
+              date: DateTime(year, month, day),
+              pointCount: points.length,
+              filePath: entity.path,
+              distance: distance,
+              state: state,
+              source: source,
+              hasTimelineBackup: hasTimeline,
+              hasGpxBackup: hasGpx,
+            ));
+
+            cache[entity.path] = {
+              'pointCount': points.length,
+              'distance': distance,
+              'state': state,
+              'source': source,
+              'lastModifiedMs': lastMod,
+              'hasTimelineBackup': hasTimeline,
+              'hasGpxBackup': hasGpx,
+            };
+            cacheUpdated = true;
+          }
         } catch (e) {
           if (kDebugMode) {
             print('Error scanning file ${entity.path}: $e');
@@ -103,10 +152,28 @@ class LocationManager {
         }
       }
     }
-    
+
+    // Clean up cache for deleted files
+    final activePaths = dates.map((d) => d.filePath).toSet();
+    final cacheKeys = cache.keys.toList();
+    for (final key in cacheKeys) {
+      if (!activePaths.contains(key)) {
+        cache.remove(key);
+        cacheUpdated = true;
+      }
+    }
+
+    if (cacheUpdated) {
+      try {
+        await cacheFile.writeAsString(jsonEncode(cache), flush: true);
+      } catch (e) {
+        debugPrint('Error saving metadata cache: $e');
+      }
+    }
+
     // Sort by date descending
     dates.sort((a, b) => b.date.compareTo(a.date));
-    
+
     return dates;
   }
   
