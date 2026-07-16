@@ -1215,12 +1215,11 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                 return ListView.builder(
                                   itemCount: timelineItems.length,
                                   itemBuilder: (context, idx) {
-                                    final item = timelineItems[idx];
                                     final isSelected = _selectedTimelineItemIndex == idx;
                                     final isFirst = idx == 0;
                                     final isLast = idx == timelineItems.length - 1;
                                     return _buildTimelineItem(
-                                        context, item, offset, idx, isSelected, isFirst, isLast);
+                                        context, timelineItems, idx, offset, isSelected, isFirst, isLast);
                                   },
                                 );
                               }()
@@ -2050,7 +2049,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   }
 
   Widget _buildTimelineItem(
-      BuildContext context, TimelineItem item, double timezoneOffset, int index, bool isSelected, bool isFirst, bool isLast) {
+      BuildContext context, List<TimelineItem> allItems, int index, double timezoneOffset, bool isSelected, bool isFirst, bool isLast) {
+    final item = allItems[index];
     const blueAxis = TimelineConstants.timelineAxisColor;
     final hasAnySelection = _selectedTimelineItemIndex != null;
     final lineActiveColor = hasAnySelection
@@ -2206,8 +2206,40 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                               ),
                             ),
                             const SizedBox(height: 2),
-                            Icon(Icons.more_vert, size: 18,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            PopupMenuButton<String>(
+                              icon: Icon(Icons.more_vert, size: 18,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              padding: EdgeInsets.zero,
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'copy_json',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.copy, size: 18),
+                                      SizedBox(width: 8),
+                                      Text('Copy Segment JSON'),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'copy_json_neighbors',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.copy_all, size: 18),
+                                      SizedBox(width: 8),
+                                      Text('Copy JSON with Neighbors'),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              onSelected: (val) {
+                                if (val == 'copy_json') {
+                                  _copySegmentJson(context, item);
+                                } else if (val == 'copy_json_neighbors') {
+                                  _copyJsonWithNeighbors(context, allItems, index);
+                                }
+                              },
+                            ),
                           ],
                         ),
                       ],
@@ -2314,6 +2346,26 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                 ],
                               ),
                             ),
+                            const PopupMenuItem(
+                              value: 'copy_json',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.copy, size: 18),
+                                  SizedBox(width: 8),
+                                  Text('Copy Segment JSON'),
+                                ],
+                              ),
+                            ),
+                            const PopupMenuItem(
+                              value: 'copy_json_neighbors',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.copy_all, size: 18),
+                                  SizedBox(width: 8),
+                                  Text('Copy JSON with Neighbors'),
+                                ],
+                              ),
+                            ),
                           ],
                           onSelected: (val) {
                             if (val == 'snap_osrm') {
@@ -2337,6 +2389,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                               );
                               final dayPoints = appState.activePaths[dateInfo.filePath] ?? [];
                               _snapSegmentToRoads(context, appState, dateInfo, dayPoints, item);
+                            } else if (val == 'copy_json') {
+                              _copySegmentJson(context, item);
+                            } else if (val == 'copy_json_neighbors') {
+                              _copyJsonWithNeighbors(context, allItems, index);
                             }
                           },
                         ),
@@ -2658,6 +2714,91 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         const SnackBar(content: Text('Segment successfully snapped to roads!')),
       );
     }
+  }
+
+  void _copyToClipboard(BuildContext context, String text, String successMessage) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(successMessage)),
+    );
+  }
+
+  Map<String, dynamic> _pointToTimelineJson(LocationPoint p) {
+    return {
+      'point': '${p.latitude}°, ${p.longitude}°',
+      'time': p.timestamp.toUtc().toIso8601String(),
+    };
+  }
+
+  void _copySegmentJson(BuildContext context, TimelineItem item) {
+    final pointsJson = item is StayPointItem
+        ? item.points.map(_pointToTimelineJson).toList()
+        : (item as MoveSegmentItem).points.map(_pointToTimelineJson).toList();
+    final jsonStr = const JsonEncoder.withIndent('  ').convert(pointsJson);
+    _copyToClipboard(context, jsonStr, 'Segment JSON copied to clipboard!');
+  }
+
+  void _copyJsonWithNeighbors(BuildContext context, List<TimelineItem> allItems, int currentIndex) {
+    final ctrl = TextEditingController(text: '2');
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Copy JSON with Neighbors'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Enter number of neighboring segments to include before & after:'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: 'Number of neighbors',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final neighbors = int.tryParse(ctrl.text.trim()) ?? 2;
+              Navigator.of(dialogCtx).pop();
+
+              final start = (currentIndex - neighbors).clamp(0, allItems.length - 1);
+              final end = (currentIndex + neighbors).clamp(0, allItems.length - 1);
+
+              final List<Map<String, dynamic>> output = [];
+              for (int i = start; i <= end; i++) {
+                final item = allItems[i];
+                final isCurrent = i == currentIndex;
+                
+                final String type = item is StayPointItem ? 'stay_point' : 'move_segment';
+                final List<LocationPoint> pts = item is StayPointItem ? item.points : (item as MoveSegmentItem).points;
+
+                output.add({
+                  'segmentIndex': i,
+                  'isTargetSegment': isCurrent,
+                  'type': type,
+                  'startTime': item.startTime.toUtc().toIso8601String(),
+                  'endTime': item.endTime.toUtc().toIso8601String(),
+                  'points': pts.map(_pointToTimelineJson).toList(),
+                });
+              }
+
+              final jsonStr = const JsonEncoder.withIndent('  ').convert(output);
+              _copyToClipboard(context, jsonStr, 'JSON with neighbors copied to clipboard!');
+            },
+            child: const Text('Copy'),
+          ),
+        ],
+      ),
+    );
   }
 }
 
