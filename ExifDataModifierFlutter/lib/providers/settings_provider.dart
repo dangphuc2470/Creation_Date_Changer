@@ -15,6 +15,8 @@ class SettingsProvider extends ChangeNotifier {
   Map<String, String> lensMappings =
       {}; // Key: "focal_aperture", Value: "lensId"
   int geotagTimezone = 7;
+  String routingProvider = 'osrm';
+  String googleMapsApiKey = '';
 
   bool get isLoaded => _isLoaded;
 
@@ -30,6 +32,8 @@ class SettingsProvider extends ChangeNotifier {
         'IMG_<yyyyMMdd_HHmmss>_[nnnn]';
     mapProvider = _prefs.getString('mapProvider') ?? 'google_roadmap';
     geotagTimezone = _prefs.getInt('geotagTimezone') ?? 7;
+    routingProvider = _prefs.getString('routingProvider') ?? 'osrm';
+    googleMapsApiKey = _prefs.getString('googleMapsApiKey') ?? '';
 
     final lensesJson = _prefs.getStringList('lensTemplates');
     if (lensesJson != null) {
@@ -143,5 +147,17 @@ class SettingsProvider extends ChangeNotifier {
 
   Future<void> _saveLensMappings() async {
     await _prefs.setString('lensMappings', json.encode(lensMappings));
+  }
+
+  Future<void> updateRoutingProvider(String val) async {
+    routingProvider = val;
+    await _prefs.setString('routingProvider', val);
+    notifyListeners();
+  }
+
+  Future<void> updateGoogleMapsApiKey(String val) async {
+    googleMapsApiKey = val;
+    await _prefs.setString('googleMapsApiKey', val);
+    notifyListeners();
   }
 }

@@ -2207,6 +2207,36 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     return widgets;
   }
 
+  List<LatLng> _decodeGooglePolyline(String encoded) {
+    final List<LatLng> points = [];
+    int index = 0, len = encoded.length;
+    int lat = 0, lng = 0;
+
+    while (index < len) {
+      int b, shift = 0, result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      lng += dlng;
+
+      points.add(LatLng(lat / 1E5, lng / 1E5));
+    }
+    return points;
+  }
+
   Future<void> _snapSegmentToRoads(
       BuildContext context,
       AppStateProvider appState,
@@ -2215,6 +2245,17 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       MoveSegmentItem segment) async {
     if (segment.points.isEmpty) return;
 
+    final settings = context.read<SettingsProvider>();
+    final useGoogle = settings.routingProvider == 'google';
+    final googleApiKey = settings.googleMapsApiKey;
+
+    if (useGoogle && googleApiKey.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please configure your Google Maps API Key in Settings.')),
+      );
+      return;
+    }
+
     final startPoint = segment.points.first;
     final endPoint = segment.points.last;
 
@@ -2222,16 +2263,16 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const Center(
+      builder: (context) => Center(
         child: Card(
           child: Padding(
-            padding: EdgeInsets.all(24.0),
+            padding: const EdgeInsets.all(24.0),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 16),
-                Text('Routing segment with OSRM...'),
+                const CircularProgressIndicator(),
+                const SizedBox(height: 16),
+                Text(useGoogle ? 'Routing segment with Google Maps...' : 'Routing segment with OSRM...'),
               ],
             ),
           ),
@@ -2239,9 +2280,14 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       ),
     );
 
-    final url = 'https://router.project-osrm.org/route/v1/driving/'
-        '${startPoint.longitude},${startPoint.latitude};${endPoint.longitude},${endPoint.latitude}'
-        '?overview=full&geometries=geojson';
+    final url = useGoogle
+        ? 'https://maps.googleapis.com/maps/api/directions/json'
+            '?origin=${startPoint.latitude},${startPoint.longitude}'
+            '&destination=${endPoint.latitude},${endPoint.longitude}'
+            '&mode=driving&key=$googleApiKey'
+        : 'https://router.project-osrm.org/route/v1/driving/'
+            '${startPoint.longitude},${startPoint.latitude};${endPoint.longitude},${endPoint.latitude}'
+            '?overview=full&geometries=geojson';
 
     final client = HttpClient();
     List<LatLng> routedCoords = [];
@@ -2251,18 +2297,25 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       if (response.statusCode == 200) {
         final responseBody = await response.transform(utf8.decoder).join();
         final data = jsonDecode(responseBody);
-        if (data['routes'] != null && data['routes'].isNotEmpty) {
-          final geometry = data['routes'][0]['geometry'];
-          final coordinates = geometry['coordinates'] as List;
-          routedCoords = coordinates.map((coord) {
-            final lng = coord[0] as double;
-            final lat = coord[1] as double;
-            return LatLng(lat, lng);
-          }).toList();
+        if (useGoogle) {
+          if (data['routes'] != null && data['routes'].isNotEmpty) {
+            final encodedPoints = data['routes'][0]['overview_polyline']['points'] as String;
+            routedCoords = _decodeGooglePolyline(encodedPoints);
+          }
+        } else {
+          if (data['routes'] != null && data['routes'].isNotEmpty) {
+            final geometry = data['routes'][0]['geometry'];
+            final coordinates = geometry['coordinates'] as List;
+            routedCoords = coordinates.map((coord) {
+              final lng = coord[0] as double;
+              final lat = coord[1] as double;
+              return LatLng(lat, lng);
+            }).toList();
+          }
         }
       }
     } catch (e) {
-      debugPrint('OSRM routing failed: $e');
+      debugPrint('Routing failed: $e');
     } finally {
       client.close();
     }
@@ -2275,7 +2328,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     if (routedCoords.isEmpty) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to route segment using OSRM.')),
+          SnackBar(content: Text('Failed to route segment using ${useGoogle ? 'Google Maps' : 'OSRM'}.')),
         );
       }
       return;

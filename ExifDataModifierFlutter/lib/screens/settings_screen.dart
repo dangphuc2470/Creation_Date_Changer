@@ -122,6 +122,46 @@ class SettingsScreen extends StatelessWidget {
                         },
                       ),
                     ),
+                    ListTile(
+                      title: const Text('Routing & Snapping Provider'),
+                      subtitle: const Text(
+                          'Select OSRM (free) or Google Maps API for road snapping.'),
+                      trailing: DropdownButton<String>(
+                        value: provider.routingProvider,
+                        items: const [
+                          DropdownMenuItem(
+                              value: 'osrm',
+                              child: Text('OSRM (Free OSM)')),
+                          DropdownMenuItem(
+                              value: 'google',
+                              child: Text('Google Maps Directions API')),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            context
+                                .read<SettingsProvider>()
+                                .updateRoutingProvider(val);
+                          }
+                        },
+                      ),
+                    ),
+                    if (provider.routingProvider == 'google')
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                        child: TextFormField(
+                          initialValue: provider.googleMapsApiKey,
+                          decoration: const InputDecoration(
+                            labelText: 'Google Maps API Key',
+                            hintText: 'Enter your Google Maps API Key',
+                            border: OutlineInputBorder(),
+                          ),
+                          onChanged: (val) {
+                            context
+                                .read<SettingsProvider>()
+                                .updateGoogleMapsApiKey(val.trim());
+                          },
+                        ),
+                      ),
                   ],
                 ),
               ),
