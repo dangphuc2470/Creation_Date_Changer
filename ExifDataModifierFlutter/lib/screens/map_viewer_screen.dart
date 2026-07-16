@@ -1148,15 +1148,84 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       }
     }
 
-    // Draw the currently selected active path in purple on top
+    // Determine selection item details if viewAsPath is true
+    final timelineItems = _clusterTimeline(pointsToShow, timeOffset);
+    LatLng? selectedStayPointCenter;
+    MoveSegmentItem? selectedMoveSegment;
+
+    if (_viewAsPath && _selectedTimelineItemIndex != null && _selectedTimelineItemIndex! < timelineItems.length) {
+      final selectedItem = timelineItems[_selectedTimelineItemIndex!];
+      if (selectedItem is StayPointItem) {
+        selectedStayPointCenter = selectedItem.center;
+      } else if (selectedItem is MoveSegmentItem) {
+        selectedMoveSegment = selectedItem;
+      }
+    }
+
+    // Draw the currently selected active path on top
     if (pointsToShow.isNotEmpty) {
-      polylines.add(
-        Polyline(
-          points: pointsToShow.map((p) => p.latLng).toList(),
-          strokeWidth: isEditing ? 5.0 : 4.0,
-          color: isEditing ? Colors.orange : Colors.purple,
-        ),
-      );
+      if (isEditing) {
+        polylines.add(
+          Polyline(
+            points: pointsToShow.map((p) => p.latLng).toList(),
+            strokeWidth: 5.0,
+            color: Colors.orange,
+          ),
+        );
+      } else if (_viewAsPath && timelineItems.isNotEmpty) {
+        // Render each MoveSegmentItem as a separate polyline with conditional colors/thickness
+        for (final item in timelineItems) {
+          if (item is MoveSegmentItem && item.points.isNotEmpty) {
+            final isCurrentSelected = (selectedMoveSegment == item);
+            final hasAnySelection = (selectedMoveSegment != null);
+
+            Color lineColor;
+            double width;
+
+            if (hasAnySelection) {
+              if (isCurrentSelected) {
+                lineColor = Colors.purple; // Bold purple
+                width = 5.5;
+              } else {
+                lineColor = Colors.purple.withValues(alpha: 0.15); // Faded purple
+                width = 3.5;
+              }
+            } else {
+              lineColor = Colors.purple; // Default bold purple
+              width = 4.5;
+            }
+
+            // Create a continuous, connected path segment by pre-pending and post-pending neighboring coordinates
+            final List<LatLng> pathLatLngs = [];
+            final startIdx = pointsToShow.indexOf(item.points.first);
+            if (startIdx > 0) {
+              pathLatLngs.add(pointsToShow[startIdx - 1].latLng);
+            }
+            pathLatLngs.addAll(item.points.map((p) => p.latLng));
+            final endIdx = pointsToShow.indexOf(item.points.last);
+            if (endIdx >= 0 && endIdx < pointsToShow.length - 1) {
+              pathLatLngs.add(pointsToShow[endIdx + 1].latLng);
+            }
+
+            polylines.add(
+              Polyline(
+                points: pathLatLngs,
+                strokeWidth: width,
+                color: lineColor,
+              ),
+            );
+          }
+        }
+      } else {
+        // Standard path view
+        polylines.add(
+          Polyline(
+            points: pointsToShow.map((p) => p.latLng).toList(),
+            strokeWidth: 4.0,
+            color: Colors.purple,
+          ),
+        );
+      }
     }
 
     // Build Markers
@@ -1221,6 +1290,28 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 1.5),
             ),
+          ),
+        ),
+      );
+    }
+
+    // Selected Stay Point marker
+    if (!isEditing && selectedStayPointCenter != null) {
+      markers.add(
+        Marker(
+          point: selectedStayPointCenter,
+          width: 36,
+          height: 36,
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF795548), // Brown to match stay point list item icon
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: const [
+                BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 2)),
+              ],
+            ),
+            child: const Icon(Icons.place, color: Colors.white, size: 18),
           ),
         ),
       );
