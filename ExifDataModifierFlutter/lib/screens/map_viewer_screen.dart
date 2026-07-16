@@ -1462,17 +1462,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               width = TimelineConstants.polylineStrokeWidthDefault;
             }
 
-            // Create a continuous, connected path segment by pre-pending and post-pending neighboring coordinates
-            final List<LatLng> pathLatLngs = [];
-            final startIdx = pointsToShow.indexOf(item.points.first);
-            if (startIdx > 0) {
-              pathLatLngs.add(pointsToShow[startIdx - 1].latLng);
-            }
-            pathLatLngs.addAll(item.points.map((p) => p.latLng));
-            final endIdx = pointsToShow.indexOf(item.points.last);
-            if (endIdx >= 0 && endIdx < pointsToShow.length - 1) {
-              pathLatLngs.add(pointsToShow[endIdx + 1].latLng);
-            }
+            final List<LatLng> pathLatLngs =
+                item.points.map((p) => p.latLng).toList();
 
             polylines.add(
               Polyline(
@@ -1987,7 +1978,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         final endTime = (nextStayStart < n) ? points[nextStayStart].timestamp : points[nextStayStart - 1].timestamp;
 
         items.add(MoveSegmentItem(
-          points: movePoints,
+          points: pathPoints,
           startTime: startTime,
           endTime: endTime,
           distance: distSum,
