@@ -1003,7 +1003,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                   itemBuilder: (context, idx) {
                                     final item = timelineItems[idx];
                                     final isSelected = _selectedTimelineItemIndex == idx;
-                                    return _buildTimelineItem(context, item, offset, idx, isSelected);
+                                    final isFirst = idx == 0;
+                                    final isLast = idx == timelineItems.length - 1;
+                                    return _buildTimelineItem(
+                                        context, item, offset, idx, isSelected, isFirst, isLast);
                                   },
                                 );
                               }()
@@ -1362,6 +1365,48 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               ],
             ),
             child: const Icon(Icons.place, color: Colors.white, size: 18),
+          ),
+        ),
+      );
+    }
+
+    // Selected Move Segment start and end point markers
+    if (!isEditing && selectedMoveSegment != null && selectedMoveSegment.points.isNotEmpty) {
+      final startPt = selectedMoveSegment.points.first;
+      final endPt = selectedMoveSegment.points.last;
+
+      markers.add(
+        Marker(
+          point: startPt.latLng,
+          width: 22,
+          height: 22,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.purple.withValues(alpha: 0.5),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: const [
+                BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 1)),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      markers.add(
+        Marker(
+          point: endPt.latLng,
+          width: 22,
+          height: 22,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.purple,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: const [
+                BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 1)),
+              ],
+            ),
           ),
         ),
       );
@@ -1791,7 +1836,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   }
 
   Widget _buildTimelineItem(
-      BuildContext context, TimelineItem item, double timezoneOffset, int index, bool isSelected) {
+      BuildContext context, TimelineItem item, double timezoneOffset, int index, bool isSelected, bool isFirst, bool isLast) {
     const blueAxis = Color(0xFF1A73E8);
     // Col 1: place icon / expand icon
     const iconColWidth = 44.0;
@@ -1841,10 +1886,23 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      // Full-height blue line (runs through the whole item)
+                      // Equal-height top and bottom line segments
                       Positioned.fill(
-                        child: Center(
-                          child: Container(width: 4, color: blueAxis),
+                        child: Column(
+                          children: [
+                            Expanded(
+                              child: Container(
+                                width: 4,
+                                color: isFirst ? Colors.transparent : blueAxis,
+                              ),
+                            ),
+                            Expanded(
+                              child: Container(
+                                width: 4,
+                                color: isLast ? Colors.transparent : blueAxis,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       // Large circle dot at this stay point
