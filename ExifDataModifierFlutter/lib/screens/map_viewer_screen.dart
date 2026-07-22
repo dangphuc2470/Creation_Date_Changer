@@ -1,6 +1,9 @@
 import 'dart:math';
 import 'dart:convert';
 import 'dart:io';
+import 'package:desktop_drop/desktop_drop.dart';
+import 'package:exif/exif.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/services.dart';
@@ -86,6 +89,19 @@ class IndexPoint {
   IndexPoint(this.index, this.point);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Photo entry: dropped/picked photo with optional EXIF GPS
+// ─────────────────────────────────────────────────────────────────────────────
+class _PhotoEntry {
+  final File file;
+  final String filename;
+  DateTime? dateTaken; // from EXIF DateTimeOriginal (UTC)
+  LatLng? gpsLatLng; // from EXIF GPS (if present)
+  bool addedToTimeline = false;
+
+  _PhotoEntry({required this.file, required this.filename});
+}
+
 class MapViewerScreen extends StatefulWidget {
   const MapViewerScreen({super.key});
 
@@ -93,7 +109,8 @@ class MapViewerScreen extends StatefulWidget {
   State<MapViewerScreen> createState() => _MapViewerScreenState();
 }
 
-class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderStateMixin {
+class _MapViewerScreenState extends State<MapViewerScreen>
+    with TickerProviderStateMixin {
   final MapController _mapController = MapController();
   AnimationController? _mapAnimationController;
 
@@ -113,6 +130,12 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   bool _isDraggingPoint = false;
   int? _selectedTimelineItemIndex;
   LocationPoint? _previousDayLastStayPoint;
+
+  // ── Photo layer ─────────────────────────────────────────────────────────
+  final List<_PhotoEntry> _photos = [];
+  bool _isDraggingPhotoOver = false;
+  _PhotoEntry? _selectedPhoto; // for strip/preview
+  bool _showPhotoGrid = false;
 
   @override
   void initState() {
@@ -141,7 +164,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   Future<void> _saveLastSelectedDate(DateTime date) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('last_selected_map_date', DateFormat('yyyy-MM-dd').format(date));
+      await prefs.setString(
+          'last_selected_map_date', DateFormat('yyyy-MM-dd').format(date));
     } catch (e) {
       debugPrint('Error saving last selected map date: $e');
     }
@@ -177,7 +201,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       );
 
       if (prevDateInfo.filePath.isNotEmpty) {
-        final prevPoints = await LocationManager.loadLocationFile(prevDateInfo.filePath);
+        final prevPoints =
+            await LocationManager.loadLocationFile(prevDateInfo.filePath);
         if (!mounted) return;
         if (prevPoints.isNotEmpty) {
           final settings = context.read<SettingsProvider>();
@@ -239,6 +264,172 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     super.dispose();
   }
 
+  // ── Read EXIF from photo file ────────────────────────────────────────────
+  Future<void> _readExifFromPhoto(_PhotoEntry entry) async {
+    try {
+      final bytes = await entry.file.readAsBytes();
+      final tags = await readExifFromBytes(bytes);
+
+      // Date
+      final dateTag = tags['EXIF DateTimeOriginal'] ?? tags['Image DateTime'];
+      if (dateTag != null) {
+        final raw = dateTag.printable; // e.g. "2024:05:10 13:45:22"
+        final parts = raw.split(' ');
+        if (parts.length == 2) {
+          final dateParts = parts[0].split(':');
+          final timeParts = parts[1].split(':');
+          if (dateParts.length == 3 && timeParts.length == 3) {
+            entry.dateTaken = DateTime.utc(
+              int.parse(dateParts[0]),
+              int.parse(dateParts[1]),
+              int.parse(dateParts[2]),
+              int.parse(timeParts[0]),
+              int.parse(timeParts[1]),
+              int.parse(timeParts[2]),
+            );
+          }
+        }
+      }
+
+      // GPS
+      final latTag = tags['GPS GPSLatitude'];
+      final latRef = tags['GPS GPSLatitudeRef'];
+      final lngTag = tags['GPS GPSLongitude'];
+      final lngRef = tags['GPS GPSLongitudeRef'];
+
+      if (latTag != null && lngTag != null) {
+        double parseDms(IfdTag tag) {
+          final vals = tag.values as IfdRatios;
+          final d = vals.ratios[0].numerator / vals.ratios[0].denominator;
+          final m = vals.ratios[1].numerator / vals.ratios[1].denominator;
+          final s = vals.ratios[2].numerator / vals.ratios[2].denominator;
+          return d + m / 60 + s / 3600;
+        }
+
+        double lat = parseDms(latTag);
+        double lng = parseDms(lngTag);
+        if (latRef?.printable == 'S') lat = -lat;
+        if (lngRef?.printable == 'W') lng = -lng;
+        entry.gpsLatLng = LatLng(lat, lng);
+      }
+    } catch (e) {
+      debugPrint('EXIF read error for ${entry.filename}: $e');
+    }
+  }
+
+  // ── Load photos (from drop or picker) ───────────────────────────────────
+  Future<void> _loadPhotosFromFiles(List<File> files) async {
+    final newEntries = <_PhotoEntry>[];
+    for (final f in files) {
+      final ext = f.path.toLowerCase();
+      if (ext.endsWith('.jpg') ||
+          ext.endsWith('.jpeg') ||
+          ext.endsWith('.png') ||
+          ext.endsWith('.heic') ||
+          ext.endsWith('.arw') ||
+          ext.endsWith('.cr2') ||
+          ext.endsWith('.nef') ||
+          ext.endsWith('.dng') ||
+          ext.endsWith('.raw')) {
+        if (_photos.any((p) => p.file.path == f.path)) continue;
+        final entry = _PhotoEntry(
+          file: f,
+          filename: f.uri.pathSegments.last,
+        );
+        newEntries.add(entry);
+      }
+    }
+    if (newEntries.isEmpty) return;
+
+    // Read EXIF in parallel
+    await Future.wait(newEntries.map(_readExifFromPhoto));
+
+    setState(() {
+      _photos.addAll(newEntries);
+    });
+
+    // Auto-select date to first photo's date if nothing selected
+    if (_selectedDate == null && newEntries.isNotEmpty) {
+      final firstDate = newEntries
+          .firstWhere((e) => e.dateTaken != null,
+              orElse: () => newEntries.first)
+          .dateTaken;
+      if (firstDate != null && mounted) {
+        setState(() => _selectedDate = firstDate);
+        _loadPointsForSelectedDate();
+      }
+    }
+  }
+
+  // ── Insert photo GPS as a LocationPoint into timeline ───────────────────
+  Future<void> _addPhotoGpsToTimeline(_PhotoEntry photo) async {
+    if (photo.gpsLatLng == null) return;
+    final appState = context.read<AppStateProvider>();
+    final settings = context.read<SettingsProvider>();
+
+    final currentDateInfo = appState.allDates.firstWhere(
+      (d) =>
+          _selectedDate != null &&
+          d.date.year == _selectedDate!.year &&
+          d.date.month == _selectedDate!.month &&
+          d.date.day == _selectedDate!.day,
+      orElse: () => DateInfo(
+        date: _selectedDate ?? DateTime.now(),
+        pointCount: 0,
+        filePath: '',
+        distance: 0.0,
+        state: 'original',
+        source: 'merge',
+        hasTimelineBackup: false,
+        hasGpxBackup: false,
+      ),
+    );
+
+    // Determine timestamp: use photo's EXIF date (adjust for timezone offset)
+    DateTime timestamp;
+    if (photo.dateTaken != null) {
+      final offset = settings.geotagTimezone;
+      // dateTaken stored as local time in EXIF — convert to UTC
+      timestamp =
+          photo.dateTaken!.subtract(Duration(minutes: (offset * 60).toInt()));
+    } else {
+      timestamp = DateTime.now().toUtc();
+    }
+
+    final newPoint = LocationPoint(
+      latitude: photo.gpsLatLng!.latitude,
+      longitude: photo.gpsLatLng!.longitude,
+      timestamp: timestamp,
+    );
+
+    List<LocationPoint> current = [];
+    if (currentDateInfo.filePath.isNotEmpty) {
+      current =
+          await LocationManager.loadLocationFile(currentDateInfo.filePath);
+    }
+
+    // Insert in sorted order by timestamp
+    current.add(newPoint);
+    current.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    await appState.saveListPoints(currentDateInfo, current);
+    _loadPointsForSelectedDate();
+
+    setState(() {
+      photo.addedToTimeline = true;
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Added GPS from "${photo.filename}" to timeline '
+            '(${photo.gpsLatLng!.latitude.toStringAsFixed(5)}, '
+            '${photo.gpsLatLng!.longitude.toStringAsFixed(5)})'),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 3),
+      ));
+    }
+  }
+
   void _animatedMapMove(LatLng destCenter, double destZoom) {
     _mapAnimationController?.stop();
     _mapAnimationController?.dispose();
@@ -259,15 +450,18 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
     controller.addListener(() {
       final double t = animation.value;
-      final double lat = startCenter.latitude + (destCenter.latitude - startCenter.latitude) * t;
-      final double lng = startCenter.longitude + (destCenter.longitude - startCenter.longitude) * t;
+      final double lat = startCenter.latitude +
+          (destCenter.latitude - startCenter.latitude) * t;
+      final double lng = startCenter.longitude +
+          (destCenter.longitude - startCenter.longitude) * t;
       final double zoom = startZoom + (destZoom - startZoom) * t;
 
       _mapController.move(LatLng(lat, lng), zoom);
     });
 
     controller.addStatusListener((status) {
-      if (status == AnimationStatus.completed || status == AnimationStatus.dismissed) {
+      if (status == AnimationStatus.completed ||
+          status == AnimationStatus.dismissed) {
         controller.dispose();
         if (_mapAnimationController == controller) {
           _mapAnimationController = null;
@@ -479,9 +673,11 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     }
   }
 
-  Future<List<LatLng>> _fetchRouteCoordinates(LatLng start, LatLng end, bool useGoogle, String googleApiKey) async {
+  Future<List<LatLng>> _fetchRouteCoordinates(
+      LatLng start, LatLng end, bool useGoogle, String googleApiKey) async {
     if (useGoogle) {
-      final url = 'https://roads.googleapis.com/v1/snapToRoads?path=${start.latitude},${start.longitude}|${end.latitude},${end.longitude}&interpolate=true&key=$googleApiKey';
+      final url =
+          'https://roads.googleapis.com/v1/snapToRoads?path=${start.latitude},${start.longitude}|${end.latitude},${end.longitude}&interpolate=true&key=$googleApiKey';
       final client = HttpClient();
       try {
         final request = await client.getUrl(Uri.parse(url));
@@ -546,7 +742,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
     if (useGoogle && googleApiKey.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please configure your Google Maps API Key in Settings to snap roads.')),
+        const SnackBar(
+            content: Text(
+                'Please configure your Google Maps API Key in Settings to snap roads.')),
       );
       return;
     }
@@ -572,8 +770,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
     // Parallel fetch routes
     final futures = await Future.wait([
-      _fetchRouteCoordinates(editingPoints[a].latLng, editingPoints[draggedIdx].latLng, useGoogle, googleApiKey),
-      _fetchRouteCoordinates(editingPoints[draggedIdx].latLng, editingPoints[b].latLng, useGoogle, googleApiKey),
+      _fetchRouteCoordinates(editingPoints[a].latLng,
+          editingPoints[draggedIdx].latLng, useGoogle, googleApiKey),
+      _fetchRouteCoordinates(editingPoints[draggedIdx].latLng,
+          editingPoints[b].latLng, useGoogle, googleApiKey),
     ]);
 
     final List<LatLng> route1 = futures[0];
@@ -605,7 +805,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         dists.add(totalD);
       }
       for (int k = 0; k < route1.length; k++) {
-        final ratio = totalD > 0 ? (dists[k] / totalD) : (k / (route1.length - 1));
+        final ratio =
+            totalD > 0 ? (dists[k] / totalD) : (k / (route1.length - 1));
         segment1.add(LocationPoint(
           latitude: route1[k].latitude,
           longitude: route1[k].longitude,
@@ -635,7 +836,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         dists.add(totalD);
       }
       for (int k = 1; k < route2.length; k++) {
-        final ratio = totalD > 0 ? (dists[k] / totalD) : (k / (route2.length - 1));
+        final ratio =
+            totalD > 0 ? (dists[k] / totalD) : (k / (route2.length - 1));
         segment2.add(LocationPoint(
           latitude: route2[k].latitude,
           longitude: route2[k].longitude,
@@ -661,11 +863,12 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     for (final oldIdx in pinnedIndices) {
       if (oldIdx == 0 || oldIdx == editingPoints.length - 1) continue;
       final oldTime = editingPoints[oldIdx].timestamp;
-      
+
       int nearestIdx = 0;
       int minDiffMs = double.maxFinite.toInt();
       for (int i = 0; i < finalPoints.length; i++) {
-        final diff = finalPoints[i].timestamp.difference(oldTime).inMilliseconds.abs();
+        final diff =
+            finalPoints[i].timestamp.difference(oldTime).inMilliseconds.abs();
         if (diff < minDiffMs) {
           minDiffMs = diff;
           nearestIdx = i;
@@ -676,12 +879,13 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
     appState.setEditingPoints(finalPoints);
     appState.setPinnedPointIndices(newPinnedIndices);
-    
+
     final oldTime = editingPoints[draggedIdx].timestamp;
     int nearestIdx = 0;
     int minDiffMs = double.maxFinite.toInt();
     for (int i = 0; i < finalPoints.length; i++) {
-      final diff = finalPoints[i].timestamp.difference(oldTime).inMilliseconds.abs();
+      final diff =
+          finalPoints[i].timestamp.difference(oldTime).inMilliseconds.abs();
       if (diff < minDiffMs) {
         minDiffMs = diff;
         nearestIdx = i;
@@ -920,7 +1124,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                 children: [
                   Expanded(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 2),
                       decoration: BoxDecoration(
                         border: Border.all(color: Colors.grey.shade300),
                         borderRadius: BorderRadius.circular(8),
@@ -935,21 +1140,35 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                 isExpanded: true,
                                 value: _selectedDate?.day,
                                 items: List.generate(
-                                  DateTime(_selectedDate?.year ?? DateTime.now().year, (_selectedDate?.month ?? DateTime.now().month) + 1, 0).day,
+                                  DateTime(
+                                          _selectedDate?.year ??
+                                              DateTime.now().year,
+                                          (_selectedDate?.month ??
+                                                  DateTime.now().month) +
+                                              1,
+                                          0)
+                                      .day,
                                   (i) => i + 1,
-                                ).map((d) => DropdownMenuItem(
-                                  value: d,
-                                  child: Center(
-                                    child: Text(
-                                      d.toString().padLeft(2, '0'),
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                    ),
-                                  ),
-                                )).toList(),
+                                )
+                                    .map((d) => DropdownMenuItem(
+                                          value: d,
+                                          child: Center(
+                                            child: Text(
+                                              d.toString().padLeft(2, '0'),
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 14),
+                                            ),
+                                          ),
+                                        ))
+                                    .toList(),
                                 onChanged: (day) {
                                   if (day != null) {
                                     setState(() {
-                                      _selectedDate = DateTime(_selectedDate!.year, _selectedDate!.month, day);
+                                      _selectedDate = DateTime(
+                                          _selectedDate!.year,
+                                          _selectedDate!.month,
+                                          day);
                                     });
                                     _loadPointsForSelectedDate();
                                   }
@@ -957,28 +1176,40 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                               ),
                             ),
                           ),
-                          const Text('/', style: TextStyle(color: Colors.grey, fontSize: 14)),
+                          const Text('/',
+                              style:
+                                  TextStyle(color: Colors.grey, fontSize: 14)),
                           // Month Dropdown
                           Expanded(
                             child: DropdownButtonHideUnderline(
                               child: DropdownButton<int>(
                                 isExpanded: true,
                                 value: _selectedDate?.month,
-                                items: List.generate(12, (i) => i + 1).map((m) => DropdownMenuItem(
-                                  value: m,
-                                  child: Center(
-                                    child: Text(
-                                      m.toString().padLeft(2, '0'),
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                    ),
-                                  ),
-                                )).toList(),
+                                items: List.generate(12, (i) => i + 1)
+                                    .map((m) => DropdownMenuItem(
+                                          value: m,
+                                          child: Center(
+                                            child: Text(
+                                              m.toString().padLeft(2, '0'),
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 14),
+                                            ),
+                                          ),
+                                        ))
+                                    .toList(),
                                 onChanged: (month) {
                                   if (month != null) {
-                                    final daysInMonth = DateTime(_selectedDate!.year, month + 1, 0).day;
-                                    final targetDay = _selectedDate!.day.clamp(1, daysInMonth);
+                                    final daysInMonth = DateTime(
+                                            _selectedDate!.year, month + 1, 0)
+                                        .day;
+                                    final targetDay = _selectedDate!.day
+                                        .clamp(1, daysInMonth);
                                     setState(() {
-                                      _selectedDate = DateTime(_selectedDate!.year, month, targetDay);
+                                      _selectedDate = DateTime(
+                                          _selectedDate!.year,
+                                          month,
+                                          targetDay);
                                     });
                                     _loadPointsForSelectedDate();
                                   }
@@ -986,7 +1217,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                               ),
                             ),
                           ),
-                          const Text('/', style: TextStyle(color: Colors.grey, fontSize: 14)),
+                          const Text('/',
+                              style:
+                                  TextStyle(color: Colors.grey, fontSize: 14)),
                           // Year Dropdown
                           Expanded(
                             flex: 2,
@@ -994,21 +1227,31 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                               child: DropdownButton<int>(
                                 isExpanded: true,
                                 value: _selectedDate?.year,
-                                items: List.generate(DateTime.now().year - 2000 + 1, (i) => 2000 + i).map((y) => DropdownMenuItem(
-                                  value: y,
-                                  child: Center(
-                                    child: Text(
-                                      y.toString(),
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                    ),
-                                  ),
-                                )).toList(),
+                                items: List.generate(
+                                        DateTime.now().year - 2000 + 1,
+                                        (i) => 2000 + i)
+                                    .map((y) => DropdownMenuItem(
+                                          value: y,
+                                          child: Center(
+                                            child: Text(
+                                              y.toString(),
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 14),
+                                            ),
+                                          ),
+                                        ))
+                                    .toList(),
                                 onChanged: (year) {
                                   if (year != null) {
-                                    final daysInMonth = DateTime(year, _selectedDate!.month + 1, 0).day;
-                                    final targetDay = _selectedDate!.day.clamp(1, daysInMonth);
+                                    final daysInMonth = DateTime(
+                                            year, _selectedDate!.month + 1, 0)
+                                        .day;
+                                    final targetDay = _selectedDate!.day
+                                        .clamp(1, daysInMonth);
                                     setState(() {
-                                      _selectedDate = DateTime(year, _selectedDate!.month, targetDay);
+                                      _selectedDate = DateTime(year,
+                                          _selectedDate!.month, targetDay);
                                     });
                                     _loadPointsForSelectedDate();
                                   }
@@ -1022,7 +1265,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                   ),
                   const SizedBox(width: 8),
                   IconButton.filledTonal(
-                    icon: Icon(_showCalendar ? Icons.calendar_today : Icons.calendar_month),
+                    icon: Icon(_showCalendar
+                        ? Icons.calendar_today
+                        : Icons.calendar_month),
                     onPressed: () {
                       setState(() {
                         _showCalendar = !_showCalendar;
@@ -1215,17 +1460,21 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                               _viewAsPath
                                   ? 'Timeline Path'
                                   : 'Track Details (${points.length} pts)',
-                              style: const TextStyle(fontWeight: FontWeight.bold),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             const Spacer(),
                             IconButton(
-                              icon: Icon(_viewAsPath ? Icons.list : Icons.timeline),
+                              icon: Icon(
+                                  _viewAsPath ? Icons.list : Icons.timeline),
                               onPressed: () {
                                 setState(() {
                                   _viewAsPath = !_viewAsPath;
                                 });
                               },
-                              tooltip: _viewAsPath ? 'Show Raw List' : 'Show Timeline Path',
+                              tooltip: _viewAsPath
+                                  ? 'Show Raw List'
+                                  : 'Show Timeline Path',
                             ),
                             IconButton(
                               icon: const Icon(Icons.add_circle_outline,
@@ -1243,7 +1492,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                       Expanded(
                         child: _viewAsPath
                             ? () {
-                                final timelineItems = _clusterTimeline(points, offset);
+                                final timelineItems =
+                                    _clusterTimeline(points, offset);
                                 if (timelineItems.isEmpty) {
                                   return const Center(
                                     child: Text('No timeline points.'),
@@ -1252,114 +1502,133 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                 return ListView.builder(
                                   itemCount: timelineItems.length,
                                   itemBuilder: (context, idx) {
-                                    final isSelected = _selectedTimelineItemIndex == idx;
+                                    final isSelected =
+                                        _selectedTimelineItemIndex == idx;
                                     final isFirst = idx == 0;
-                                    final isLast = idx == timelineItems.length - 1;
+                                    final isLast =
+                                        idx == timelineItems.length - 1;
                                     return _buildTimelineItem(
-                                        context, timelineItems, idx, offset, isSelected, isFirst, isLast);
+                                        context,
+                                        timelineItems,
+                                        idx,
+                                        offset,
+                                        isSelected,
+                                        isFirst,
+                                        isLast);
                                   },
                                 );
                               }()
                             : ListView.builder(
-                          itemCount: points.length,
-                          itemBuilder: (context, idx) {
-                            final p = points[idx];
-                            return ListTile(
-                              dense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 0),
-                              leading: CircleAvatar(
-                                radius: 10,
-                                backgroundColor: Theme.of(context)
-                                    .colorScheme
-                                    .primaryContainer,
-                                child: Text(
-                                  (idx + 1).toString(),
-                                  style: TextStyle(
-                                      fontSize: 8,
-                                      color: Theme.of(context)
+                                itemCount: points.length,
+                                itemBuilder: (context, idx) {
+                                  final p = points[idx];
+                                  return ListTile(
+                                    dense: true,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 0),
+                                    leading: CircleAvatar(
+                                      radius: 10,
+                                      backgroundColor: Theme.of(context)
                                           .colorScheme
-                                          .onPrimaryContainer),
-                                ),
+                                          .primaryContainer,
+                                      child: Text(
+                                        (idx + 1).toString(),
+                                        style: TextStyle(
+                                            fontSize: 8,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onPrimaryContainer),
+                                      ),
+                                    ),
+                                    title: Text(
+                                      _formatPointTime(p.timestamp, offset),
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                    subtitle: Text(
+                                      '${p.latitude.toStringAsFixed(6)}, ${p.longitude.toStringAsFixed(6)}',
+                                      style: const TextStyle(
+                                          fontFamily: 'monospace',
+                                          fontSize: 10),
+                                    ),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon:
+                                              const Icon(Icons.edit, size: 16),
+                                          onPressed: isEditing
+                                              ? null
+                                              : () => _openEditPointDialog(
+                                                  context,
+                                                  appState,
+                                                  dateInfo,
+                                                  points,
+                                                  idx),
+                                          tooltip: 'Edit Point',
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.delete_outline,
+                                              size: 16, color: Colors.red),
+                                          onPressed: isEditing
+                                              ? null
+                                              : () async {
+                                                  final confirm =
+                                                      await showDialog<bool>(
+                                                    context: context,
+                                                    builder: (ctx) =>
+                                                        AlertDialog(
+                                                      title: const Text(
+                                                          'Delete Point'),
+                                                      content: const Text(
+                                                          'Delete this coordinate point from the timeline?'),
+                                                      actions: [
+                                                        TextButton(
+                                                            onPressed: () =>
+                                                                Navigator.pop(
+                                                                    ctx, false),
+                                                            child: const Text(
+                                                                'Cancel')),
+                                                        ElevatedButton(
+                                                          onPressed: () =>
+                                                              Navigator.pop(
+                                                                  ctx, true),
+                                                          style: ElevatedButton
+                                                              .styleFrom(
+                                                                  backgroundColor:
+                                                                      Colors
+                                                                          .red,
+                                                                  foregroundColor:
+                                                                      Colors
+                                                                          .white),
+                                                          child: const Text(
+                                                              'Delete'),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                  if (confirm == true) {
+                                                    final newPts = List<
+                                                            LocationPoint>.from(
+                                                        points)
+                                                      ..removeAt(idx);
+                                                    await appState
+                                                        .saveListPoints(
+                                                            dateInfo, newPts);
+                                                    _loadPointsForSelectedDate();
+                                                  }
+                                                },
+                                          tooltip: 'Delete Point',
+                                        ),
+                                      ],
+                                    ),
+                                    onTap: () {
+                                      _animatedMapMove(
+                                          p.latLng, _mapController.camera.zoom);
+                                    },
+                                  );
+                                },
                               ),
-                              title: Text(
-                                _formatPointTime(p.timestamp, offset),
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
-                              ),
-                              subtitle: Text(
-                                '${p.latitude.toStringAsFixed(6)}, ${p.longitude.toStringAsFixed(6)}',
-                                style: const TextStyle(
-                                    fontFamily: 'monospace', fontSize: 10),
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.edit, size: 16),
-                                    onPressed: isEditing
-                                        ? null
-                                        : () => _openEditPointDialog(context,
-                                            appState, dateInfo, points, idx),
-                                    tooltip: 'Edit Point',
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete_outline,
-                                        size: 16, color: Colors.red),
-                                    onPressed: isEditing
-                                        ? null
-                                        : () async {
-                                            final confirm =
-                                                await showDialog<bool>(
-                                              context: context,
-                                              builder: (ctx) => AlertDialog(
-                                                title:
-                                                    const Text('Delete Point'),
-                                                content: const Text(
-                                                    'Delete this coordinate point from the timeline?'),
-                                                actions: [
-                                                  TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                              ctx, false),
-                                                      child:
-                                                          const Text('Cancel')),
-                                                  ElevatedButton(
-                                                    onPressed: () =>
-                                                        Navigator.pop(
-                                                            ctx, true),
-                                                    style: ElevatedButton
-                                                        .styleFrom(
-                                                            backgroundColor:
-                                                                Colors.red,
-                                                            foregroundColor:
-                                                                Colors.white),
-                                                    child: const Text('Delete'),
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-                                            if (confirm == true) {
-                                              final newPts =
-                                                  List<LocationPoint>.from(
-                                                      points)
-                                                    ..removeAt(idx);
-                                              await appState.saveListPoints(
-                                                  dateInfo, newPts);
-                                              _loadPointsForSelectedDate();
-                                            }
-                                          },
-                                    tooltip: 'Delete Point',
-                                  ),
-                                ],
-                              ),
-                              onTap: () {
-                                _animatedMapMove(
-                                    p.latLng, _mapController.camera.zoom);
-                              },
-                            );
-                          },
-                        ),
                       ),
                     ],
                   ),
@@ -1456,7 +1725,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     LatLng? selectedStayPointCenter;
     MoveSegmentItem? selectedMoveSegment;
 
-    if (_viewAsPath && _selectedTimelineItemIndex != null && _selectedTimelineItemIndex! < timelineItems.length) {
+    if (_viewAsPath &&
+        _selectedTimelineItemIndex != null &&
+        _selectedTimelineItemIndex! < timelineItems.length) {
       final selectedItem = timelineItems[_selectedTimelineItemIndex!];
       if (selectedItem is StayPointItem) {
         selectedStayPointCenter = selectedItem.center;
@@ -1494,17 +1765,20 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                   lineColor = TimelineConstants.activeRouteColor;
                   width = TimelineConstants.polylineStrokeWidthSelected;
                 } else {
-                  lineColor = TimelineConstants.activeRouteColor.withValues(alpha: 0.15);
+                  lineColor = TimelineConstants.activeRouteColor
+                      .withValues(alpha: 0.15);
                   width = TimelineConstants.polylineStrokeWidthUnselected;
                 }
               } else if (selectedItem is StayPointItem) {
                 // If a stay point is selected, highlight only the 2 adjacent roads (idx == selected - 1 or idx == selected + 1)
-                final isAdjacent = (idx == _selectedTimelineItemIndex! - 1) || (idx == _selectedTimelineItemIndex! + 1);
+                final isAdjacent = (idx == _selectedTimelineItemIndex! - 1) ||
+                    (idx == _selectedTimelineItemIndex! + 1);
                 if (isAdjacent) {
                   lineColor = TimelineConstants.activeRouteColor;
                   width = TimelineConstants.polylineStrokeWidthSelected;
                 } else {
-                  lineColor = TimelineConstants.activeRouteColor.withValues(alpha: 0.15);
+                  lineColor = TimelineConstants.activeRouteColor
+                      .withValues(alpha: 0.15);
                   width = TimelineConstants.polylineStrokeWidthUnselected;
                 }
               } else {
@@ -1617,11 +1891,13 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
           height: 36,
           child: Container(
             decoration: BoxDecoration(
-              color: TimelineConstants.stayPointIconColor, // Brown stay point icon
+              color:
+                  TimelineConstants.stayPointIconColor, // Brown stay point icon
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 3),
               boxShadow: const [
-                BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 2)),
+                BoxShadow(
+                    color: Colors.black38, blurRadius: 6, offset: Offset(0, 2)),
               ],
             ),
             child: const Icon(Icons.place, color: Colors.white, size: 18),
@@ -1631,7 +1907,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     }
 
     // Selected Move Segment start and end point markers
-    if (!isEditing && selectedMoveSegment != null && selectedMoveSegment.points.isNotEmpty) {
+    if (!isEditing &&
+        selectedMoveSegment != null &&
+        selectedMoveSegment.points.isNotEmpty) {
       final startPt = selectedMoveSegment.points.first;
       final endPt = selectedMoveSegment.points.last;
 
@@ -1646,7 +1924,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 3),
               boxShadow: const [
-                BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 1)),
+                BoxShadow(
+                    color: Colors.black26, blurRadius: 4, offset: Offset(0, 1)),
               ],
             ),
           ),
@@ -1664,7 +1943,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 3),
               boxShadow: const [
-                BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 1)),
+                BoxShadow(
+                    color: Colors.black26, blurRadius: 4, offset: Offset(0, 1)),
               ],
             ),
           ),
@@ -1740,6 +2020,53 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       );
     }
 
+    // ── Photo markers ────────────────────────────────────────────────────
+    for (final photo in _photos) {
+      final loc = photo.gpsLatLng;
+      if (loc == null) continue;
+      final isSelected = _selectedPhoto == photo;
+      markers.add(Marker(
+        point: loc,
+        width: isSelected ? 60 : 48,
+        height: isSelected ? 60 : 48,
+        child: GestureDetector(
+          onTap: () => setState(() {
+            _selectedPhoto = (_selectedPhoto == photo) ? null : photo;
+            _showPhotoGrid = false;
+          }),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: photo.addedToTimeline
+                    ? Colors.green
+                    : (isSelected ? Colors.amber : Colors.white),
+                width: isSelected ? 3 : 2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.4),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: ClipOval(
+              child: Image.file(
+                photo.file,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  color: Colors.grey.shade300,
+                  child: const Icon(Icons.broken_image, size: 20),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ));
+    }
+
     return MapWidget(
       mapController: _mapController,
       tileLayer: tileLayer,
@@ -1797,136 +2124,624 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         ? appState.editingPoints
         : (appState.activePaths[currentDateInfo.filePath] ?? []);
 
-    return Scaffold(
-      body: Row(
-        children: [
-          Container(
-            width: _sidebarWidth,
-            color: Theme.of(context).colorScheme.surface,
-            child:
-                _buildSidebar(context, appState, currentDateInfo, pointsToShow),
-          ),
-          GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onHorizontalDragUpdate: (details) {
-              setState(() {
-                _sidebarWidth = (_sidebarWidth + details.delta.dx).clamp(280.0, 800.0);
-              });
-            },
-            child: MouseRegion(
-              cursor: SystemMouseCursors.resizeLeftRight,
-              child: Container(
-                width: 8,
-                color: Colors.transparent,
-                child: const Center(
-                  child: VerticalDivider(width: 1, thickness: 1),
-                ),
-              ),
-            ),
-          ),
-          // Map Panel
-          Expanded(
-            child: Stack(
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _isDraggingPhotoOver = true),
+      onDragExited: (_) => setState(() => _isDraggingPhotoOver = false),
+      onDragDone: (detail) {
+        setState(() => _isDraggingPhotoOver = false);
+        _loadPhotosFromFiles(detail.files.map((f) => File(f.path)).toList());
+      },
+      child: Scaffold(
+        body: Stack(
+          children: [
+            Row(
               children: [
-                _buildMap(context, appState, settings, pointsToShow),
-
-                 // Map mode toggle
-                if (!isEditing && currentDateInfo.filePath.isNotEmpty)
-                  Positioned(
-                    top: 16,
-                    left: _showCalendar ? 350 : 16,
-                    child: FloatingActionButton.extended(
-                      heroTag: 'edit_route',
-                      onPressed: () {
-                        appState.startEditing(currentDateInfo.filePath);
-                      },
-                      icon: const Icon(Icons.edit_road),
-                      label: const Text('Edit Path Coordinates'),
-                      backgroundColor:
-                          Theme.of(context).colorScheme.primaryContainer,
-                      foregroundColor:
-                          Theme.of(context).colorScheme.onPrimaryContainer,
+                Container(
+                  width: _sidebarWidth,
+                  color: Theme.of(context).colorScheme.surface,
+                  child: _buildSidebar(
+                      context, appState, currentDateInfo, pointsToShow),
+                ),
+                GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragUpdate: (details) {
+                    setState(() {
+                      _sidebarWidth = (_sidebarWidth + details.delta.dx)
+                          .clamp(280.0, 800.0);
+                    });
+                  },
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.resizeLeftRight,
+                    child: Container(
+                      width: 8,
+                      color: Colors.transparent,
+                      child: const Center(
+                          child: VerticalDivider(width: 1, thickness: 1)),
                     ),
                   ),
+                ),
+                // Map Panel
+                Expanded(
+                  child: Stack(
+                    children: [
+                      _buildMap(context, appState, settings, pointsToShow),
 
-                // Floating Calendar Overlay
-                if (_showCalendar)
-                  Positioned(
-                    top: 16,
-                    left: 16,
-                    child: Material(
-                      elevation: 8,
-                      borderRadius: BorderRadius.circular(12),
-                      shadowColor: Colors.black38,
-                      child: SizedBox(
-                        width: 320,
-                        child: CustomCalendarInline(
-                          selectedDate: _selectedDate ?? DateTime.now(),
-                          allDates: appState.allDates,
-                          onDateSelected: (date) {
-                            setState(() {
-                              _selectedDate = date;
-                            });
-                            _loadPointsForSelectedDate();
-                          },
-                          onClose: () {
-                            setState(() {
-                              _showCalendar = false;
-                            });
-                          },
+                      // Map mode / Add Photos toolbar
+                      Positioned(
+                        top: 16,
+                        left: _showCalendar ? 350 : 16,
+                        child: Row(
+                          children: [
+                            if (!isEditing &&
+                                currentDateInfo.filePath.isNotEmpty)
+                              FloatingActionButton.extended(
+                                heroTag: 'edit_route',
+                                onPressed: () => appState
+                                    .startEditing(currentDateInfo.filePath),
+                                icon: const Icon(Icons.edit_road),
+                                label: const Text('Edit Path'),
+                                backgroundColor: Theme.of(context)
+                                    .colorScheme
+                                    .primaryContainer,
+                                foregroundColor: Theme.of(context)
+                                    .colorScheme
+                                    .onPrimaryContainer,
+                              ),
+                            const SizedBox(width: 8),
+                            FloatingActionButton.extended(
+                              heroTag: 'add_photos',
+                              onPressed: () async {
+                                final result = await FilePicker.platform
+                                    .pickFiles(
+                                        allowMultiple: true,
+                                        type: FileType.image);
+                                if (result != null && mounted) {
+                                  await _loadPhotosFromFiles(result.paths
+                                      .whereType<String>()
+                                      .map(File.new)
+                                      .toList());
+                                }
+                              },
+                              icon: const Icon(Icons.add_photo_alternate),
+                              label: Text(_photos.isEmpty
+                                  ? 'Add Photos'
+                                  : '${_photos.length} Photos'),
+                              backgroundColor: Colors.deepPurple.shade400,
+                              foregroundColor: Colors.white,
+                            ),
+                            if (_photos.isNotEmpty) ...[
+                              const SizedBox(width: 8),
+                              FloatingActionButton(
+                                heroTag: 'clear_photos',
+                                mini: true,
+                                onPressed: () => setState(() {
+                                  _photos.clear();
+                                  _selectedPhoto = null;
+                                  _showPhotoGrid = false;
+                                }),
+                                backgroundColor: Colors.red.shade400,
+                                foregroundColor: Colors.white,
+                                tooltip: 'Clear all photos',
+                                child: const Icon(Icons.clear_all),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
+
+                      // Floating Calendar Overlay
+                      if (_showCalendar)
+                        Positioned(
+                          top: 16,
+                          left: 16,
+                          child: Material(
+                            elevation: 8,
+                            borderRadius: BorderRadius.circular(12),
+                            shadowColor: Colors.black38,
+                            child: SizedBox(
+                              width: 320,
+                              child: CustomCalendarInline(
+                                selectedDate: _selectedDate ?? DateTime.now(),
+                                allDates: appState.allDates,
+                                onDateSelected: (date) {
+                                  setState(() => _selectedDate = date);
+                                  _loadPointsForSelectedDate();
+                                },
+                                onClose: () =>
+                                    setState(() => _showCalendar = false),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                      // Save / Cancel Floating Buttons
+                      if (isEditing)
+                        Positioned(
+                          bottom: _photos.isNotEmpty ? 160 : 20,
+                          left: 16,
+                          child: Row(
+                            children: [
+                              FloatingActionButton.extended(
+                                heroTag: 'save_edit',
+                                onPressed: () async {
+                                  await appState.saveEditingChanges(timeOffset);
+                                  setState(() => _selectedPointIndex = null);
+                                  _loadPointsForSelectedDate();
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                          content:
+                                              Text('Timeline edits saved.')),
+                                    );
+                                  }
+                                },
+                                icon: const Icon(Icons.save),
+                                label: const Text('Save Changes'),
+                                backgroundColor: Colors.green,
+                                foregroundColor: Colors.white,
+                              ),
+                              const SizedBox(width: 8),
+                              FloatingActionButton.extended(
+                                heroTag: 'cancel_edit',
+                                onPressed: () {
+                                  appState.cancelEditing();
+                                  setState(() {
+                                    _selectedPointIndex = null;
+                                    _hoveredLatLng = null;
+                                    _hoveredProjection = null;
+                                  });
+                                },
+                                icon: const Icon(Icons.cancel),
+                                label: const Text('Cancel'),
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      // Photo strip / preview panel
+                      if (_photos.isNotEmpty)
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          child: _buildPhotoPanel(
+                              context, appState, currentDateInfo, settings),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            // Drag-over overlay
+            if (_isDraggingPhotoOver)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurple.withValues(alpha: 0.18),
+                      border: Border.all(color: Colors.deepPurple, width: 3),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.add_photo_alternate,
+                            size: 80, color: Colors.deepPurple.shade300),
+                        const SizedBox(height: 12),
+                        Text('Drop photos here',
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineSmall
+                                ?.copyWith(color: Colors.deepPurple)),
+                      ],
                     ),
                   ),
+                ),
+              ),
 
-                // Save / Cancel Floating Buttons
-                if (isEditing)
-                  Positioned(
-                    bottom: 20,
-                    left: 16,
-                    child: Row(
+            // Photo grid overlay
+            if (_showPhotoGrid)
+              Positioned.fill(
+                child: _buildPhotoGrid(
+                    context, appState, currentDateInfo, settings),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Photo strip panel (bottom) ───────────────────────────────────────────
+  Widget _buildPhotoPanel(BuildContext context, AppStateProvider appState,
+      DateInfo currentDateInfo, SettingsProvider settings) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.95),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.2),
+              blurRadius: 12,
+              offset: const Offset(0, -4)),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle + header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 8, 4),
+            child: Row(
+              children: [
+                Icon(Icons.photo_library,
+                    size: 16, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 6),
+                Text('${_photos.length} photo${_photos.length > 1 ? 's' : ''}',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(width: 4),
+                Text(
+                  '· ${_photos.where((p) => p.gpsLatLng != null).length} with GPS'
+                  ' · ${_photos.where((p) => p.addedToTimeline).length} added',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.grid_view, size: 18),
+                  tooltip: 'Expand Grid',
+                  onPressed: () => setState(() => _showPhotoGrid = true),
+                  visualDensity: VisualDensity.compact,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  tooltip: 'Collapse',
+                  onPressed: () => setState(() {
+                    _selectedPhoto = null;
+                  }),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+
+          // Horizontal scroll strip
+          SizedBox(
+            height: 110,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              itemCount: _photos.length,
+              itemBuilder: (context, idx) {
+                final photo = _photos[idx];
+                final isSelected = _selectedPhoto == photo;
+                return GestureDetector(
+                  onTap: () => setState(() {
+                    _selectedPhoto = isSelected ? null : photo;
+                    // Pan map to photo location
+                    if (!isSelected && photo.gpsLatLng != null) {
+                      _animatedMapMove(photo.gpsLatLng!, 15.0);
+                    }
+                  }),
+                  child: Container(
+                    width: 80,
+                    margin: const EdgeInsets.only(right: 8),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isSelected
+                            ? Theme.of(context).colorScheme.primary
+                            : (photo.addedToTimeline
+                                ? Colors.green
+                                : Colors.transparent),
+                        width: 2,
+                      ),
+                    ),
+                    child: Stack(
                       children: [
-                        FloatingActionButton.extended(
-                          heroTag: 'save_edit',
-                          onPressed: () async {
-                            await appState.saveEditingChanges(timeOffset);
-                            setState(() {
-                              _selectedPointIndex = null;
-                            });
-                            _loadPointsForSelectedDate();
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text(
-                                        'Timeline edits saved successfully.')),
-                              );
-                            }
-                          },
-                          icon: const Icon(Icons.save),
-                          label: const Text('Save Changes'),
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.file(photo.file,
+                              width: 80,
+                              height: double.infinity,
+                              fit: BoxFit.cover),
                         ),
-                        const SizedBox(width: 8),
-                        FloatingActionButton.extended(
-                          heroTag: 'cancel_edit',
-                          onPressed: () {
-                            appState.cancelEditing();
-                            setState(() {
-                              _selectedPointIndex = null;
-                              _hoveredLatLng = null;
-                              _hoveredProjection = null;
-                            });
-                          },
-                          icon: const Icon(Icons.cancel),
-                          label: const Text('Cancel'),
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
+                        // GPS badge
+                        if (photo.gpsLatLng != null)
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: Container(
+                              padding: const EdgeInsets.all(2),
+                              decoration: BoxDecoration(
+                                color: photo.addedToTimeline
+                                    ? Colors.green
+                                    : Colors.blue,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                photo.addedToTimeline
+                                    ? Icons.check
+                                    : Icons.gps_fixed,
+                                size: 10,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        // File name
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 3, vertical: 2),
+                            color: Colors.black54,
+                            child: Text(
+                              photo.filename,
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 8),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
+                );
+              },
+            ),
+          ),
+
+          // Selected photo action bar
+          if (_selectedPhoto != null)
+            _buildSelectedPhotoActions(
+                context, appState, currentDateInfo, settings),
+        ],
+      ),
+    );
+  }
+
+  // ── Selected photo action row ────────────────────────────────────────────
+  Widget _buildSelectedPhotoActions(
+      BuildContext context,
+      AppStateProvider appState,
+      DateInfo currentDateInfo,
+      SettingsProvider settings) {
+    final photo = _selectedPhoto!;
+    final offset = settings.geotagTimezone;
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          // Thumbnail
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: Image.file(photo.file,
+                width: 48, height: 48, fit: BoxFit.cover),
+          ),
+          const SizedBox(width: 12),
+          // Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(photo.filename,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 13),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                if (photo.dateTaken != null)
+                  Text(
+                    DateFormat('yyyy-MM-dd HH:mm:ss').format(photo.dateTaken!
+                        .add(Duration(minutes: (offset * 60).toInt()))),
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                if (photo.gpsLatLng != null)
+                  Text(
+                    'GPS: ${photo.gpsLatLng!.latitude.toStringAsFixed(5)}, '
+                    '${photo.gpsLatLng!.longitude.toStringAsFixed(5)}',
+                    style:
+                        const TextStyle(fontSize: 11, color: Colors.blueAccent),
+                  )
+                else
+                  const Text('No GPS in EXIF',
+                      style: TextStyle(fontSize: 11, color: Colors.orange)),
               ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Actions
+          if (photo.gpsLatLng != null && !photo.addedToTimeline)
+            FilledButton.icon(
+              onPressed: () => _addPhotoGpsToTimeline(photo),
+              icon: const Icon(Icons.timeline, size: 16),
+              label: const Text('Add to Timeline'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.indigo,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                textStyle: const TextStyle(fontSize: 12),
+              ),
+            )
+          else if (photo.addedToTimeline)
+            Chip(
+              label: const Text('Added ✓',
+                  style: TextStyle(fontSize: 11, color: Colors.white)),
+              backgroundColor: Colors.green.shade600,
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+            ),
+          const SizedBox(width: 8),
+          if (photo.gpsLatLng != null)
+            OutlinedButton.icon(
+              onPressed: () => _animatedMapMove(photo.gpsLatLng!, 16),
+              icon: const Icon(Icons.center_focus_strong, size: 16),
+              label: const Text('Go to', style: TextStyle(fontSize: 12)),
+            ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: () => setState(() {
+              _photos.remove(photo);
+              _selectedPhoto = null;
+            }),
+            tooltip: 'Remove photo',
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Photo grid overlay ───────────────────────────────────────────────────
+  Widget _buildPhotoGrid(BuildContext context, AppStateProvider appState,
+      DateInfo currentDateInfo, SettingsProvider settings) {
+    return Container(
+      color: Colors.black.withValues(alpha: 0.85),
+      child: Column(
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+            child: Row(
+              children: [
+                const Icon(Icons.photo_library, color: Colors.white),
+                const SizedBox(width: 8),
+                Text('${_photos.length} Photos',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16)),
+                const SizedBox(width: 8),
+                Text(
+                  '${_photos.where((p) => p.gpsLatLng != null).length} with GPS',
+                  style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                ),
+                const Spacer(),
+                // Add all GPS to timeline
+                if (_photos
+                    .any((p) => p.gpsLatLng != null && !p.addedToTimeline))
+                  FilledButton.icon(
+                    onPressed: () async {
+                      for (final p in _photos) {
+                        if (p.gpsLatLng != null && !p.addedToTimeline) {
+                          await _addPhotoGpsToTimeline(p);
+                        }
+                      }
+                      setState(() {});
+                    },
+                    icon: const Icon(Icons.timeline, size: 16),
+                    label: const Text('Add All GPS to Timeline'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.indigo,
+                      textStyle: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => setState(() => _showPhotoGrid = false),
+                  tooltip: 'Close Grid',
+                ),
+              ],
+            ),
+          ),
+          const Divider(color: Colors.white24, height: 1),
+
+          // Grid
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.all(12),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 5,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 1,
+              ),
+              itemCount: _photos.length,
+              itemBuilder: (context, idx) {
+                final photo = _photos[idx];
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _selectedPhoto = photo;
+                      _showPhotoGrid = false;
+                    });
+                    if (photo.gpsLatLng != null) {
+                      _animatedMapMove(photo.gpsLatLng!, 15);
+                    }
+                  },
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(photo.file,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                    color: Colors.grey.shade800,
+                                    child: const Icon(Icons.broken_image,
+                                        color: Colors.white54),
+                                  )),
+                        ),
+                      ),
+                      // Status badge
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            color: photo.addedToTimeline
+                                ? Colors.green
+                                : (photo.gpsLatLng != null
+                                    ? Colors.blue
+                                    : Colors.orange),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            photo.addedToTimeline
+                                ? Icons.check
+                                : (photo.gpsLatLng != null
+                                    ? Icons.gps_fixed
+                                    : Icons.gps_off),
+                            size: 12,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                      // Quick Add button on hover
+                      if (photo.gpsLatLng != null && !photo.addedToTimeline)
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          child: Container(
+                            color: Colors.black54,
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: GestureDetector(
+                              onTap: () => _addPhotoGpsToTimeline(photo),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.add,
+                                      size: 12, color: Colors.white),
+                                  SizedBox(width: 2),
+                                  Text('Timeline',
+                                      style: TextStyle(
+                                          color: Colors.white, fontSize: 9)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         ],
@@ -1944,7 +2759,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     }
   }
 
-  List<TimelineItem> _clusterTimelineRaw(List<LocationPoint> points, double timezoneOffset) {
+  List<TimelineItem> _clusterTimelineRaw(
+      List<LocationPoint> points, double timezoneOffset) {
     if (points.isEmpty) return [];
     if (points.length < 2) {
       return [
@@ -1958,7 +2774,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     }
 
     final List<TimelineItem> items = [];
-    final double distThreshold = TimelineConstants.stayPointDistanceThreshold; // meters
+    final double distThreshold =
+        TimelineConstants.stayPointDistanceThreshold; // meters
     final Duration timeThreshold = TimelineConstants.stayPointDurationThreshold;
 
     int i = 0;
@@ -1985,7 +2802,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
           latSum += p.latitude;
           lngSum += p.longitude;
         }
-        final center = LatLng(latSum / stayPoints.length, lngSum / stayPoints.length);
+        final center =
+            LatLng(latSum / stayPoints.length, lngSum / stayPoints.length);
 
         items.add(StayPointItem(
           points: stayPoints,
@@ -2000,14 +2818,16 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         for (int m = i + 1; m < n; m++) {
           int nextJ = m + 1;
           while (nextJ < n) {
-            final d = GeoUtils.distanceBetween(points[m].latLng, nextJ < n ? points[nextJ].latLng : points[m].latLng);
+            final d = GeoUtils.distanceBetween(points[m].latLng,
+                nextJ < n ? points[nextJ].latLng : points[m].latLng);
             if (d < distThreshold) {
               nextJ++;
             } else {
               break;
             }
           }
-          final nextDur = points[nextJ - 1].timestamp.difference(points[m].timestamp);
+          final nextDur =
+              points[nextJ - 1].timestamp.difference(points[m].timestamp);
           if (nextDur >= timeThreshold && (nextJ - m) >= 2) {
             nextStayStart = m;
             break;
@@ -2026,11 +2846,15 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         }
 
         for (int m = 0; m < pathPoints.length - 1; m++) {
-          distSum += GeoUtils.distanceBetween(pathPoints[m].latLng, pathPoints[m + 1].latLng);
+          distSum += GeoUtils.distanceBetween(
+              pathPoints[m].latLng, pathPoints[m + 1].latLng);
         }
 
-        final startTime = (i > 0) ? points[i - 1].timestamp : points[i].timestamp;
-        final endTime = (nextStayStart < n) ? points[nextStayStart].timestamp : points[nextStayStart - 1].timestamp;
+        final startTime =
+            (i > 0) ? points[i - 1].timestamp : points[i].timestamp;
+        final endTime = (nextStayStart < n)
+            ? points[nextStayStart].timestamp
+            : points[nextStayStart - 1].timestamp;
 
         items.add(MoveSegmentItem(
           points: pathPoints,
@@ -2046,15 +2870,19 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     return items;
   }
 
-  List<TimelineItem> _clusterTimeline(List<LocationPoint> points, double timezoneOffset) {
-    final List<TimelineItem> rawItems = _clusterTimelineRaw(points, timezoneOffset);
+  List<TimelineItem> _clusterTimeline(
+      List<LocationPoint> points, double timezoneOffset) {
+    final List<TimelineItem> rawItems =
+        _clusterTimelineRaw(points, timezoneOffset);
 
     if (_previousDayLastStayPoint != null && _selectedDate != null) {
       final currentDayMidnight = DateTime.utc(
         _selectedDate!.year,
         _selectedDate!.month,
         _selectedDate!.day,
-        0, 0, 0,
+        0,
+        0,
+        0,
       );
 
       if (rawItems.isNotEmpty) {
@@ -2077,7 +2905,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
             points: stayPoints,
             startTime: currentDayMidnight,
             endTime: firstItem.startTime,
-            center: LatLng(_previousDayLastStayPoint!.latitude, _previousDayLastStayPoint!.longitude),
+            center: LatLng(_previousDayLastStayPoint!.latitude,
+                _previousDayLastStayPoint!.longitude),
           );
 
           rawItems.insert(0, initialStay);
@@ -2101,7 +2930,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
           points: stayPoints,
           startTime: currentDayMidnight,
           endTime: currentDayEnd,
-          center: LatLng(_previousDayLastStayPoint!.latitude, _previousDayLastStayPoint!.longitude),
+          center: LatLng(_previousDayLastStayPoint!.latitude,
+              _previousDayLastStayPoint!.longitude),
         );
 
         rawItems.add(initialStay);
@@ -2112,7 +2942,13 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
   }
 
   Widget _buildTimelineItem(
-      BuildContext context, List<TimelineItem> allItems, int index, double timezoneOffset, bool isSelected, bool isFirst, bool isLast) {
+      BuildContext context,
+      List<TimelineItem> allItems,
+      int index,
+      double timezoneOffset,
+      bool isSelected,
+      bool isFirst,
+      bool isLast) {
     final item = allItems[index];
     const blueAxis = TimelineConstants.timelineAxisColor;
     final hasAnySelection = _selectedTimelineItemIndex != null;
@@ -2126,9 +2962,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
     if (item is StayPointItem) {
       final startTime = _formatPointTime(item.startTime, timezoneOffset);
-      final endTime   = _formatPointTime(item.endTime,   timezoneOffset);
+      final endTime = _formatPointTime(item.endTime, timezoneOffset);
       final durationStr = _formatDuration(item.duration);
-      final coordStr = '${item.center.latitude.toStringAsFixed(5)}, ${item.center.longitude.toStringAsFixed(5)}';
+      final coordStr =
+          '${item.center.latitude.toStringAsFixed(5)}, ${item.center.longitude.toStringAsFixed(5)}';
 
       return _TimelineTileWrapper(
         isSelected: isSelected,
@@ -2155,7 +2992,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                         color: TimelineConstants.stayPointIconColor,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.place, color: Colors.white, size: 20),
+                      child: const Icon(Icons.place,
+                          color: Colors.white, size: 20),
                     ),
                   ),
                 ),
@@ -2174,13 +3012,17 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                             Expanded(
                               child: Container(
                                 width: TimelineConstants.timelineLineThickness,
-                                color: isFirst ? Colors.transparent : lineActiveColor,
+                                color: isFirst
+                                    ? Colors.transparent
+                                    : lineActiveColor,
                               ),
                             ),
                             Expanded(
                               child: Container(
                                 width: TimelineConstants.timelineLineThickness,
-                                color: isLast ? Colors.transparent : lineActiveColor,
+                                color: isLast
+                                    ? Colors.transparent
+                                    : lineActiveColor,
                               ),
                             ),
                           ],
@@ -2214,9 +3056,12 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                             children: [
                               // Place name box
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest,
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Row(
@@ -2225,7 +3070,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                     Flexible(
                                       child: Text(
                                         'Stay Point (${item.points.length} pts)',
-                                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 13),
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
@@ -2240,7 +3087,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                 coordStr,
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
                                   fontFamily: 'monospace',
                                 ),
                               ),
@@ -2250,7 +3099,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                 '$startTime – $endTime  ($durationStr)',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
                                 ),
                               ),
                             ],
@@ -2265,13 +3116,18 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                               startTime,
                               style: TextStyle(
                                 fontSize: 13,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                               ),
                             ),
                             const SizedBox(height: 2),
                             PopupMenuButton<String>(
-                              icon: Icon(Icons.more_vert, size: 18,
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              icon: Icon(Icons.more_vert,
+                                  size: 18,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant),
                               padding: EdgeInsets.zero,
                               itemBuilder: (context) => [
                                 const PopupMenuItem(
@@ -2299,7 +3155,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                 if (val == 'copy_json') {
                                   _copySegmentJson(context, item);
                                 } else if (val == 'copy_json_neighbors') {
-                                  _copyJsonWithNeighbors(context, allItems, index);
+                                  _copyJsonWithNeighbors(
+                                      context, allItems, index);
                                 }
                               },
                             ),
@@ -2331,7 +3188,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               item.points.map((p) => p.latLng).toList(),
             );
             _mapController.fitCamera(
-              CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40)),
+              CameraFit.bounds(
+                  bounds: bounds, padding: const EdgeInsets.all(40)),
             );
           }
         },
@@ -2398,12 +3256,16 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                           '$durationStr  ·  $distStr',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                         PopupMenuButton<String>(
-                          icon: Icon(Icons.more_vert, size: 18,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          icon: Icon(Icons.more_vert,
+                              size: 18,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant),
                           padding: EdgeInsets.zero,
                           itemBuilder: (context) => [
                             const PopupMenuItem(
@@ -2457,8 +3319,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                                   hasGpxBackup: false,
                                 ),
                               );
-                              final dayPoints = appState.activePaths[dateInfo.filePath] ?? [];
-                              _snapSegmentToRoads(context, appState, dateInfo, dayPoints, item);
+                              final dayPoints =
+                                  appState.activePaths[dateInfo.filePath] ?? [];
+                              _snapSegmentToRoads(
+                                  context, appState, dateInfo, dayPoints, item);
                             } else if (val == 'copy_json') {
                               _copySegmentJson(context, item);
                             } else if (val == 'copy_json_neighbors') {
@@ -2502,22 +3366,30 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
   IconData _getTransitIcon(String mode) {
     final norm = mode.toUpperCase();
-    if (norm.contains('WALK') || norm.contains('FOOT') || norm.contains('RUN')) {
+    if (norm.contains('WALK') ||
+        norm.contains('FOOT') ||
+        norm.contains('RUN')) {
       return Icons.directions_walk;
     }
-    if (norm.contains('BIKE') || norm.contains('BICYCLE') || norm.contains('CYCLE')) {
+    if (norm.contains('BIKE') ||
+        norm.contains('BICYCLE') ||
+        norm.contains('CYCLE')) {
       return Icons.directions_bike;
     }
     if (norm.contains('BUS')) {
       return Icons.directions_bus;
     }
-    if (norm.contains('TRAIN') || norm.contains('SUBWAY') || norm.contains('RAIL')) {
+    if (norm.contains('TRAIN') ||
+        norm.contains('SUBWAY') ||
+        norm.contains('RAIL')) {
       return Icons.directions_railway;
     }
     if (norm.contains('FLY') || norm.contains('AIR')) {
       return Icons.local_airport;
     }
-    if (norm.contains('SAIL') || norm.contains('BOAT') || norm.contains('SHIP')) {
+    if (norm.contains('SAIL') ||
+        norm.contains('BOAT') ||
+        norm.contains('SHIP')) {
       return Icons.directions_boat;
     }
     return Icons.directions_car;
@@ -2558,7 +3430,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
 
     if (useGoogle && googleApiKey.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please configure your Google Maps API Key in Settings.')),
+        const SnackBar(
+            content:
+                Text('Please configure your Google Maps API Key in Settings.')),
       );
       return;
     }
@@ -2578,7 +3452,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               children: [
                 const CircularProgressIndicator(),
                 const SizedBox(height: 16),
-                Text(useGoogle ? 'Routing segment with Google Roads API...' : 'Routing segment with OSRM...'),
+                Text(useGoogle
+                    ? 'Routing segment with Google Roads API...'
+                    : 'Routing segment with OSRM...'),
               ],
             ),
           ),
@@ -2594,11 +3470,15 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
       // Google Roads API snapToRoads accepts max 100 points per request.
       // Chunk to handle longer paths robustly.
       for (int start = 0; start < originalPoints.length; start += 99) {
-        final end = (start + 100 < originalPoints.length) ? start + 100 : originalPoints.length;
+        final end = (start + 100 < originalPoints.length)
+            ? start + 100
+            : originalPoints.length;
         final chunk = originalPoints.sublist(start, end);
-        final pathString = chunk.map((p) => '${p.latitude},${p.longitude}').join('|');
+        final pathString =
+            chunk.map((p) => '${p.latitude},${p.longitude}').join('|');
 
-        final url = 'https://roads.googleapis.com/v1/snapToRoads?path=$pathString&interpolate=true&key=$googleApiKey';
+        final url =
+            'https://roads.googleapis.com/v1/snapToRoads?path=$pathString&interpolate=true&key=$googleApiKey';
 
         final client = HttpClient();
         try {
@@ -2620,7 +3500,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
             }
           } else {
             routingSuccess = false;
-            debugPrint('Google Roads API error: Status code ${response.statusCode}');
+            debugPrint(
+                'Google Roads API error: Status code ${response.statusCode}');
           }
         } catch (e) {
           routingSuccess = false;
@@ -2639,7 +3520,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
           final origIdx = s['originalIndex'] as int?;
 
           DateTime timestamp;
-          if (origIdx != null && origIdx >= 0 && origIdx < originalPoints.length) {
+          if (origIdx != null &&
+              origIdx >= 0 &&
+              origIdx < originalPoints.length) {
             timestamp = originalPoints[origIdx].timestamp;
           } else {
             // Find preceding and succeeding original index coordinates to interpolate between
@@ -2662,7 +3545,7 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
             if (prevOrigIdx != null && nextOrigIdx != null) {
               final startTime = originalPoints[prevOrigIdx].timestamp;
               final endTime = originalPoints[nextOrigIdx].timestamp;
-              
+
               int interpCount = 0;
               int myInterpIndex = 0;
               for (int m = k - 1; m >= 0; m--) {
@@ -2682,8 +3565,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
             } else if (nextOrigIdx != null) {
               timestamp = originalPoints[nextOrigIdx].timestamp;
             } else {
-              final totalDuration = segment.endTime.difference(segment.startTime);
-              timestamp = segment.startTime.add(totalDuration * (k / (snappedPoints.length - 1)));
+              final totalDuration =
+                  segment.endTime.difference(segment.startTime);
+              timestamp = segment.startTime
+                  .add(totalDuration * (k / (snappedPoints.length - 1)));
             }
           }
 
@@ -2691,7 +3576,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
             latitude: lat,
             longitude: lng,
             timestamp: timestamp,
-            activityType: segment.points.isNotEmpty ? segment.points.first.activityType : 'IN_PASSENGER_VEHICLE',
+            activityType: segment.points.isNotEmpty
+                ? segment.points.first.activityType
+                : 'IN_PASSENGER_VEHICLE',
           ));
         }
       }
@@ -2732,20 +3619,25 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
         final List<double> cumulativeDistances = [0.0];
         double totalDist = 0.0;
         for (int k = 0; k < routedCoords.length - 1; k++) {
-          final d = GeoUtils.distanceBetween(routedCoords[k], routedCoords[k + 1]);
+          final d =
+              GeoUtils.distanceBetween(routedCoords[k], routedCoords[k + 1]);
           totalDist += d;
           cumulativeDistances.add(totalDist);
         }
 
         final totalDuration = segment.endTime.difference(segment.startTime);
         for (int k = 0; k < routedCoords.length; k++) {
-          final ratio = totalDist > 0 ? (cumulativeDistances[k] / totalDist) : (k / (routedCoords.length - 1));
+          final ratio = totalDist > 0
+              ? (cumulativeDistances[k] / totalDist)
+              : (k / (routedCoords.length - 1));
           final timestamp = segment.startTime.add(totalDuration * ratio);
           newPoints.add(LocationPoint(
             latitude: routedCoords[k].latitude,
             longitude: routedCoords[k].longitude,
             timestamp: timestamp,
-            activityType: segment.points.isNotEmpty ? segment.points.first.activityType : 'IN_PASSENGER_VEHICLE',
+            activityType: segment.points.isNotEmpty
+                ? segment.points.first.activityType
+                : 'IN_PASSENGER_VEHICLE',
           ));
         }
       }
@@ -2759,7 +3651,9 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     if (newPoints.isEmpty) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to route segment using ${useGoogle ? 'Google Roads API' : 'OSRM'}.')),
+          SnackBar(
+              content: Text(
+                  'Failed to route segment using ${useGoogle ? 'Google Roads API' : 'OSRM'}.')),
         );
       }
       return;
@@ -2786,7 +3680,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     }
   }
 
-  void _copyToClipboard(BuildContext context, String text, String successMessage) {
+  void _copyToClipboard(
+      BuildContext context, String text, String successMessage) {
     Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(successMessage)),
@@ -2808,7 +3703,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
     _copyToClipboard(context, jsonStr, 'Segment JSON copied to clipboard!');
   }
 
-  void _copyJsonWithNeighbors(BuildContext context, List<TimelineItem> allItems, int currentIndex) {
+  void _copyJsonWithNeighbors(
+      BuildContext context, List<TimelineItem> allItems, int currentIndex) {
     final ctrl = TextEditingController(text: '2');
     showDialog(
       context: context,
@@ -2818,7 +3714,8 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Enter number of neighboring segments to include before & after:'),
+            const Text(
+                'Enter number of neighboring segments to include before & after:'),
             const SizedBox(height: 12),
             TextField(
               controller: ctrl,
@@ -2840,16 +3737,21 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
               final neighbors = int.tryParse(ctrl.text.trim()) ?? 2;
               Navigator.of(dialogCtx).pop();
 
-              final start = (currentIndex - neighbors).clamp(0, allItems.length - 1);
-              final end = (currentIndex + neighbors).clamp(0, allItems.length - 1);
+              final start =
+                  (currentIndex - neighbors).clamp(0, allItems.length - 1);
+              final end =
+                  (currentIndex + neighbors).clamp(0, allItems.length - 1);
 
               final List<Map<String, dynamic>> output = [];
               for (int i = start; i <= end; i++) {
                 final item = allItems[i];
                 final isCurrent = i == currentIndex;
-                
-                final String type = item is StayPointItem ? 'stay_point' : 'move_segment';
-                final List<LocationPoint> pts = item is StayPointItem ? item.points : (item as MoveSegmentItem).points;
+
+                final String type =
+                    item is StayPointItem ? 'stay_point' : 'move_segment';
+                final List<LocationPoint> pts = item is StayPointItem
+                    ? item.points
+                    : (item as MoveSegmentItem).points;
 
                 output.add({
                   'segmentIndex': i,
@@ -2861,8 +3763,10 @@ class _MapViewerScreenState extends State<MapViewerScreen> with TickerProviderSt
                 });
               }
 
-              final jsonStr = const JsonEncoder.withIndent('  ').convert(output);
-              _copyToClipboard(context, jsonStr, 'JSON with neighbors copied to clipboard!');
+              final jsonStr =
+                  const JsonEncoder.withIndent('  ').convert(output);
+              _copyToClipboard(
+                  context, jsonStr, 'JSON with neighbors copied to clipboard!');
             },
             child: const Text('Copy'),
           ),
@@ -2894,9 +3798,15 @@ class _TimelineTileWrapperState extends State<_TimelineTileWrapper> {
   Widget build(BuildContext context) {
     Color? backgroundColor;
     if (widget.isSelected) {
-      backgroundColor = Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.25);
+      backgroundColor = Theme.of(context)
+          .colorScheme
+          .primaryContainer
+          .withValues(alpha: 0.25);
     } else if (_isHovered) {
-      backgroundColor = Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4);
+      backgroundColor = Theme.of(context)
+          .colorScheme
+          .surfaceContainerHighest
+          .withValues(alpha: 0.4);
     }
 
     return MouseRegion(
@@ -2913,8 +3823,6 @@ class _TimelineTileWrapperState extends State<_TimelineTileWrapper> {
     );
   }
 }
-
-
 
 class MapWidget extends StatelessWidget {
   final MapController mapController;
@@ -3261,10 +4169,11 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
     List<double> distances = [];
     List<String> labels = [];
     double maxDist = 1.0;
-    
+
     // Monthly/Daily mode local vars
     final daysInMonth =
-        DateTime(widget.selectedDate.year, widget.selectedDate.month + 1, 0).day;
+        DateTime(widget.selectedDate.year, widget.selectedDate.month + 1, 0)
+            .day;
     final Map<int, DateInfo> monthData = {};
 
     if (_mode == 'daily') {
@@ -3279,8 +4188,8 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
           }
         }
       }
-      distances = List.generate(
-          daysInMonth, (i) => monthData[i + 1]?.distance ?? 0.0);
+      distances =
+          List.generate(daysInMonth, (i) => monthData[i + 1]?.distance ?? 0.0);
       labels = List.generate(daysInMonth, (i) => (i + 1).toString());
     } else if (_mode == 'monthly') {
       // Show months Jan..Dec of the selected year
@@ -3293,18 +4202,23 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
             .fold(0.0, (sum, d) => sum + d.distance);
       }
       distances = monthlyDistances;
-      maxDist = distances.fold(
-          1.0, (maxVal, val) => val > maxVal ? val : maxVal);
-      labels = List.generate(12, (index) =>
-          DateFormat('MMM').format(DateTime(2020, index + 1)));
+      maxDist =
+          distances.fold(1.0, (maxVal, val) => val > maxVal ? val : maxVal);
+      labels = List.generate(
+          12, (index) => DateFormat('MMM').format(DateTime(2020, index + 1)));
     } else {
       // Show 7 years centered around the selected year
       final currentYear = widget.selectedDate.year;
       final List<int> years = List.generate(7, (i) => currentYear - 3 + i);
       itemCount = 7;
-      distances = years.map((y) => widget.allDates.where((d) => d.date.year == y).fold(0.0, (sum, d) => sum + d.distance)).toList();
+      distances = years
+          .map((y) => widget.allDates
+              .where((d) => d.date.year == y)
+              .fold(0.0, (sum, d) => sum + d.distance))
+          .toList();
       labels = years.map((y) => y.toString()).toList();
-      maxDist = distances.fold(1.0, (maxVal, val) => val > maxVal ? val : maxVal);
+      maxDist =
+          distances.fold(1.0, (maxVal, val) => val > maxVal ? val : maxVal);
     }
 
     final selectedDateInfo = widget.allDates.firstWhere(
@@ -3348,8 +4262,8 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
           ),
         );
       } else if (_mode == 'monthly') {
-        final monthName = DateFormat('MMMM').format(
-            DateTime(widget.selectedDate.year, _hoveredIndex! + 1));
+        final monthName = DateFormat('MMMM')
+            .format(DateTime(widget.selectedDate.year, _hoveredIndex! + 1));
         hoverSubtitle = Text(
           '$monthName: ${_formatDistance(distances[_hoveredIndex!])}',
           style: TextStyle(
@@ -3415,18 +4329,30 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                       constraints: const BoxConstraints(),
                       onPressed: () {
                         if (_mode == 'daily') {
-                          widget.onDateSelected(widget.selectedDate.subtract(const Duration(days: 1)));
+                          widget.onDateSelected(widget.selectedDate
+                              .subtract(const Duration(days: 1)));
                         } else if (_mode == 'monthly') {
-                          final newMonth = widget.selectedDate.month == 1 ? 12 : widget.selectedDate.month - 1;
-                          final newYear = widget.selectedDate.month == 1 ? widget.selectedDate.year - 1 : widget.selectedDate.year;
-                          final daysInNewMonth = DateTime(newYear, newMonth + 1, 0).day;
-                          final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
-                          widget.onDateSelected(DateTime(newYear, newMonth, targetDay));
+                          final newMonth = widget.selectedDate.month == 1
+                              ? 12
+                              : widget.selectedDate.month - 1;
+                          final newYear = widget.selectedDate.month == 1
+                              ? widget.selectedDate.year - 1
+                              : widget.selectedDate.year;
+                          final daysInNewMonth =
+                              DateTime(newYear, newMonth + 1, 0).day;
+                          final targetDay =
+                              widget.selectedDate.day.clamp(1, daysInNewMonth);
+                          widget.onDateSelected(
+                              DateTime(newYear, newMonth, targetDay));
                         } else {
                           final newYear = widget.selectedDate.year - 1;
-                          final daysInNewMonth = DateTime(newYear, widget.selectedDate.month + 1, 0).day;
-                          final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
-                          widget.onDateSelected(DateTime(newYear, widget.selectedDate.month, targetDay));
+                          final daysInNewMonth = DateTime(
+                                  newYear, widget.selectedDate.month + 1, 0)
+                              .day;
+                          final targetDay =
+                              widget.selectedDate.day.clamp(1, daysInNewMonth);
+                          widget.onDateSelected(DateTime(
+                              newYear, widget.selectedDate.month, targetDay));
                         }
                       },
                     ),
@@ -3437,18 +4363,30 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                       constraints: const BoxConstraints(),
                       onPressed: () {
                         if (_mode == 'daily') {
-                          widget.onDateSelected(widget.selectedDate.add(const Duration(days: 1)));
+                          widget.onDateSelected(
+                              widget.selectedDate.add(const Duration(days: 1)));
                         } else if (_mode == 'monthly') {
-                          final newMonth = widget.selectedDate.month == 12 ? 1 : widget.selectedDate.month + 1;
-                          final newYear = widget.selectedDate.month == 12 ? widget.selectedDate.year + 1 : widget.selectedDate.year;
-                          final daysInNewMonth = DateTime(newYear, newMonth + 1, 0).day;
-                          final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
-                          widget.onDateSelected(DateTime(newYear, newMonth, targetDay));
+                          final newMonth = widget.selectedDate.month == 12
+                              ? 1
+                              : widget.selectedDate.month + 1;
+                          final newYear = widget.selectedDate.month == 12
+                              ? widget.selectedDate.year + 1
+                              : widget.selectedDate.year;
+                          final daysInNewMonth =
+                              DateTime(newYear, newMonth + 1, 0).day;
+                          final targetDay =
+                              widget.selectedDate.day.clamp(1, daysInNewMonth);
+                          widget.onDateSelected(
+                              DateTime(newYear, newMonth, targetDay));
                         } else {
                           final newYear = widget.selectedDate.year + 1;
-                          final daysInNewMonth = DateTime(newYear, widget.selectedDate.month + 1, 0).day;
-                          final targetDay = widget.selectedDate.day.clamp(1, daysInNewMonth);
-                          widget.onDateSelected(DateTime(newYear, widget.selectedDate.month, targetDay));
+                          final daysInNewMonth = DateTime(
+                                  newYear, widget.selectedDate.month + 1, 0)
+                              .day;
+                          final targetDay =
+                              widget.selectedDate.day.clamp(1, daysInNewMonth);
+                          widget.onDateSelected(DateTime(
+                              newYear, widget.selectedDate.month, targetDay));
                         }
                       },
                     ),
@@ -3511,7 +4449,8 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                     isActive = (index + 1) == widget.selectedDate.month;
                   } else {
                     final currentYear = widget.selectedDate.year;
-                    final List<int> years = List.generate(7, (i) => currentYear - 3 + i);
+                    final List<int> years =
+                        List.generate(7, (i) => currentYear - 3 + i);
                     isActive = years[index] == widget.selectedDate.year;
                   }
 
@@ -3544,7 +4483,8 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                         widget.onDateSelected(clickedDate);
                       } else {
                         final currentYear = widget.selectedDate.year;
-                        final List<int> years = List.generate(7, (i) => currentYear - 3 + i);
+                        final List<int> years =
+                            List.generate(7, (i) => currentYear - 3 + i);
                         final clickedDate = DateTime(
                           years[index],
                           widget.selectedDate.month,
@@ -3718,14 +4658,19 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
   @override
   Widget build(BuildContext context) {
     final daysInMonth = DateTime(_displayYear, _displayMonth + 1, 0).day;
-    final firstDayOfWeek = DateTime(_displayYear, _displayMonth, 1).weekday; // 1 = Monday, 7 = Sunday
+    final firstDayOfWeek = DateTime(_displayYear, _displayMonth, 1)
+        .weekday; // 1 = Monday, 7 = Sunday
     final paddingCount = firstDayOfWeek - 1;
 
-    final monthName = DateFormat('MMMM yyyy').format(DateTime(_displayYear, _displayMonth));
+    final monthName =
+        DateFormat('MMMM yyyy').format(DateTime(_displayYear, _displayMonth));
 
     return Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+        color: Theme.of(context)
+            .colorScheme
+            .surfaceContainerHighest
+            .withValues(alpha: 0.3),
         border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -3753,7 +4698,8 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
               ),
               Text(
                 monthName,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
               ),
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -3777,7 +4723,8 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
                   TextButton(
                     onPressed: widget.onClose,
                     style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       minimumSize: Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
@@ -3874,7 +4821,8 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
                     day.toString(),
                     style: TextStyle(
                       fontSize: 12,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
                       color: isSelected
                           ? Theme.of(context).colorScheme.onPrimary
                           : textColor,
