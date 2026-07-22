@@ -25,6 +25,21 @@ void CreateAndAttachConsole() {
 }
 
 bool AttachParentConsole() {
+  // If stdout is already a Pipe, Flutter CLI is capturing our output for its
+  // log reader (to detect the Dart VM Service port). Calling AttachConsole()
+  // would reassign the stdout handle to the console buffer and break the pipe,
+  // causing: "Error waiting for a debug connection: The log reader stopped
+  // unexpectedly, or never started."
+  // In that case, do NOT attach to the parent console at all.
+  HANDLE hStdOut = ::GetStdHandle(STD_OUTPUT_HANDLE);
+  if (hStdOut != INVALID_HANDLE_VALUE && hStdOut != nullptr) {
+    DWORD fileType = ::GetFileType(hStdOut);
+    if (fileType == FILE_TYPE_PIPE) {
+      // Already connected to Flutter CLI pipe — leave it alone.
+      return true;
+    }
+  }
+
   if (::AttachConsole(ATTACH_PARENT_PROCESS)) {
     RedirectIOToConsole();
     return true;
