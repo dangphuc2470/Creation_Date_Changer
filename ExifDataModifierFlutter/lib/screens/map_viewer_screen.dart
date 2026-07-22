@@ -19,6 +19,10 @@ import '../services/location_manager.dart';
 import '../constants/timeline_constants.dart';
 import '../utils/geo_utils.dart';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION: Top-level helpers — ProjectionResult, IndexPoint, _PhotoEntry
+// ═══════════════════════════════════════════════════════════════════════════
+
 class ProjectionResult {
   final int insertIndex;
   final LatLng point;
@@ -136,6 +140,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   bool _isDraggingPhotoOver = false;
   _PhotoEntry? _selectedPhoto; // for strip/preview
   bool _showPhotoGrid = false;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Lifecycle — initState, dispose, load/save last selected date
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   void initState() {
@@ -263,6 +271,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     _mapAnimationController?.dispose();
     super.dispose();
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Photo / EXIF — drag-drop, file picker, EXIF read, GPS→timeline
+  // ─────────────────────────────────────────────────────────────────────────
 
   // ── Read EXIF from photo file ────────────────────────────────────────────
   Future<void> _readExifFromPhoto(_PhotoEntry entry) async {
@@ -430,6 +442,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Map animation & fit — _animatedMapMove, _fitBounds
+  // ─────────────────────────────────────────────────────────────────────────
+
   void _animatedMapMove(LatLng destCenter, double destZoom) {
     _mapAnimationController?.stop();
     _mapAnimationController?.dispose();
@@ -490,6 +506,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       ),
     );
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Pointer / drag interactions — hover, pointer down/move/up
+  // ─────────────────────────────────────────────────────────────────────────
 
   void _handleHover(PointerHoverEvent event, LatLng point) {
     final appState = context.read<AppStateProvider>();
@@ -672,6 +692,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       _snapAfterDragRelease();
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Road snapping — _fetchRouteCoordinates, _snapAfterDragRelease
+  // ─────────────────────────────────────────────────────────────────────────
 
   Future<List<LatLng>> _fetchRouteCoordinates(
       LatLng start, LatLng end, bool useGoogle, String googleApiKey) async {
@@ -902,6 +926,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     return DateFormat('HH:mm:ss').format(localTime);
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Point dialogs — add point, edit point
+  // ─────────────────────────────────────────────────────────────────────────
+
   void _openAddPointDialog(BuildContext context, AppStateProvider appState,
       DateInfo dateInfo, List<LocationPoint> currentPoints) {
     final latCtrl = TextEditingController();
@@ -1085,6 +1113,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       ),
     );
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Sidebar — date list, day stats, source controls, action buttons
+  // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildSidebar(BuildContext context, AppStateProvider appState,
       DateInfo dateInfo, List<LocationPoint> points) {
@@ -1637,6 +1669,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       ],
     );
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Map layer builders — tile layer, map build, markers, polylines
+  // ─────────────────────────────────────────────────────────────────────────
 
   TileLayer _buildTileLayer(String mapProvider) {
     String urlTemplate;
@@ -2354,6 +2390,13 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   }
 
   // ── Photo strip panel (bottom) ───────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Photo Panel — strip gallery, selected-photo actions, grid view
+  //   • _buildPhotoPanel   : bottom horizontal scroll strip
+  //   • _buildSelectedPhotoActions : action bar shown when a photo is tapped
+  //   • _buildPhotoGrid    : full-screen grid expand view
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildPhotoPanel(BuildContext context, AppStateProvider appState,
       DateInfo currentDateInfo, SettingsProvider settings) {
     return Container(
@@ -2749,6 +2792,13 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Timeline clustering — group points into StayPoint / MoveSegment
+  //   • _formatDuration     : human-readable duration string
+  //   • _clusterTimelineRaw : raw grouping algorithm
+  //   • _clusterTimeline    : wrapper that returns typed TimelineItem list
+  // ─────────────────────────────────────────────────────────────────────────
+
   String _formatDuration(Duration d) {
     final h = d.inHours;
     final m = d.inMinutes % 60;
@@ -2940,6 +2990,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
     return rawItems;
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Timeline item renderer — stay-point card, move-segment card,
+  //          transit icons, road-snap, clipboard copy helpers
+  // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildTimelineItem(
       BuildContext context,
