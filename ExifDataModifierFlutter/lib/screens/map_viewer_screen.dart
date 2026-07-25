@@ -339,7 +339,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── Read EXIF from photo file (Header-only fast read) ──────────────────────
-  Future<Uint8List> _readFileHeaderBytes(File file, {int maxHeaderBytes = 131072}) async {
+  Future<Uint8List> _readFileHeaderBytes(File file,
+      {int maxHeaderBytes = 131072}) async {
     try {
       final raf = await file.open(mode: FileMode.read);
       try {
@@ -426,7 +427,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         ext.endsWith('.raw');
   }
 
-  Future<List<File>> _collectAllImageFilesRecursively(List<File> inputFiles) async {
+  Future<List<File>> _collectAllImageFilesRecursively(
+      List<File> inputFiles) async {
     final List<File> collectedFiles = [];
     final Set<String> visitedPaths = {};
 
@@ -439,7 +441,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         final type = await FileSystemEntity.type(path);
         if (type == FileSystemEntityType.directory) {
           final dir = Directory(path);
-          await for (final entity in dir.list(recursive: true, followLinks: false)) {
+          await for (final entity
+              in dir.list(recursive: true, followLinks: false)) {
             if (entity is File && _isImageFile(entity.path)) {
               if (!visitedPaths.contains(entity.path)) {
                 visitedPaths.add(entity.path);
@@ -465,9 +468,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       if (_photos.any((p) => p.file.path == f.path)) continue;
       final entry = PhotoEntry(
         file: f,
-        filename: f.uri.pathSegments.isNotEmpty
-            ? f.uri.pathSegments.last
-            : f.path,
+        filename:
+            f.uri.pathSegments.isNotEmpty ? f.uri.pathSegments.last : f.path,
       );
       newEntries.add(entry);
     }
@@ -477,7 +479,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     const int batchSize = 50;
     for (int i = 0; i < newEntries.length; i += batchSize) {
       final batch = newEntries.sublist(
-          i, i + batchSize > newEntries.length ? newEntries.length : i + batchSize);
+          i,
+          i + batchSize > newEntries.length
+              ? newEntries.length
+              : i + batchSize);
       await Future.wait(batch.map(_readExifFromPhoto));
     }
     if (!mounted) return;
@@ -885,7 +890,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     final isGeo = photo.hasExifGps;
     final Color borderColor = isSel
         ? Colors.amber
-        : (isGeo ? Colors.white : Colors.lightBlue.shade300);
+        : (isGeo ? Colors.white70 : Colors.lightBlue.shade200);
 
     return GestureDetector(
       onTap: () => setState(() {
@@ -905,17 +910,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         height: 38,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: borderColor, width: isSel ? 2.5 : 2.0),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
-              blurRadius: 3,
-              offset: const Offset(0, 1),
-            ),
-          ],
+          border: Border.all(color: borderColor, width: isSel ? 2.0 : 1.5),
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(6.5),
           child: Image.file(
             photo.file,
             fit: BoxFit.cover,
@@ -3835,7 +3833,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
       final Color borderColor = isDragging || isSelected
           ? Colors.amber
-          : (isGeotagged ? Colors.white : Colors.lightBlue.shade300);
+          : (isGeotagged ? Colors.white70 : Colors.lightBlue.shade200);
 
       final double size = isDragging ? 64 : (isSelected ? 58 : 48);
 
@@ -3861,17 +3859,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             duration: const Duration(milliseconds: 150),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: borderColor, width: isSelected ? 3 : 2),
-              boxShadow: [
-                BoxShadow(
-                  color: isGeotagged
-                      ? Colors.black.withValues(alpha: 0.4)
-                      : Colors.lightBlue.withValues(alpha: 0.35),
-                  blurRadius: isDragging ? 12 : 6,
-                  spreadRadius: isDragging ? 2 : 0,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+              border:
+                  Border.all(color: borderColor, width: isSelected ? 2.5 : 1.5),
             ),
             child: ClipOval(
               child: Image.file(
@@ -4092,10 +4081,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                             FloatingActionButton.extended(
                               heroTag: 'add_folder',
                               onPressed: () async {
-                                final folderPath =
-                                    await FilePicker.platform.getDirectoryPath();
+                                final folderPath = await FilePicker.platform
+                                    .getDirectoryPath();
                                 if (folderPath != null && mounted) {
-                                  await _loadPhotosFromFiles([File(folderPath)]);
+                                  await _loadPhotosFromFiles(
+                                      [File(folderPath)]);
                                 }
                               },
                               icon: const Icon(Icons.create_new_folder),
