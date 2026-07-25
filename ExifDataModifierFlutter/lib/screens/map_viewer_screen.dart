@@ -382,14 +382,16 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           final dateParts = parts[0].split(':');
           final timeParts = parts[1].split(':');
           if (dateParts.length == 3 && timeParts.length == 3) {
-            entry.dateTaken = DateTime.utc(
-              int.parse(dateParts[0]),
-              int.parse(dateParts[1]),
-              int.parse(dateParts[2]),
-              int.parse(timeParts[0]),
-              int.parse(timeParts[1]),
-              int.parse(timeParts[2]),
-            );
+            try {
+              entry.dateTaken = DateTime.utc(
+                int.parse(dateParts[0]),
+                int.parse(dateParts[1]),
+                int.parse(dateParts[2]),
+                int.parse(timeParts[0]),
+                int.parse(timeParts[1]),
+                int.parse(timeParts[2]),
+              );
+            } catch (_) {}
           }
         }
       }
@@ -401,19 +403,30 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       final lngRef = tags['GPS GPSLongitudeRef'];
 
       if (latTag != null && lngTag != null) {
-        double parseDms(IfdTag tag) {
-          final vals = tag.values as IfdRatios;
-          final d = vals.ratios[0].numerator / vals.ratios[0].denominator;
-          final m = vals.ratios[1].numerator / vals.ratios[1].denominator;
-          final s = vals.ratios[2].numerator / vals.ratios[2].denominator;
-          return d + m / 60 + s / 3600;
+        double? parseDms(IfdTag tag) {
+          try {
+            if (tag.values is IfdRatios) {
+              final vals = tag.values as IfdRatios;
+              if (vals.ratios.length >= 3) {
+                final d = vals.ratios[0].numerator / (vals.ratios[0].denominator == 0 ? 1 : vals.ratios[0].denominator);
+                final m = vals.ratios[1].numerator / (vals.ratios[1].denominator == 0 ? 1 : vals.ratios[1].denominator);
+                final s = vals.ratios[2].numerator / (vals.ratios[2].denominator == 0 ? 1 : vals.ratios[2].denominator);
+                return d + m / 60 + s / 3600;
+              }
+            }
+          } catch (_) {}
+          return null;
         }
 
-        double lat = parseDms(latTag);
-        double lng = parseDms(lngTag);
-        if (latRef?.printable == 'S') lat = -lat;
-        if (lngRef?.printable == 'W') lng = -lng;
-        entry.gpsLatLng = LatLng(lat, lng);
+        final lat = parseDms(latTag);
+        final lng = parseDms(lngTag);
+        if (lat != null && lng != null) {
+          double finalLat = lat;
+          double finalLng = lng;
+          if (latRef?.printable == 'S') finalLat = -finalLat;
+          if (lngRef?.printable == 'W') finalLng = -finalLng;
+          entry.gpsLatLng = LatLng(finalLat, finalLng);
+        }
       }
     } catch (e) {
       debugPrint('EXIF read error for ${entry.filename}: $e');
@@ -4790,6 +4803,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                             height: 80,
                             fit: BoxFit.cover,
                             cacheWidth: 150,
+                            errorBuilder: (_, __, ___) => Container(
+                              color: Colors.grey.shade800,
+                              child: const Icon(Icons.broken_image,
+                                  size: 16, color: Colors.white54),
+                            ),
                           ),
                         ),
                         // GPS badge
@@ -4871,6 +4889,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               height: 48,
               fit: BoxFit.cover,
               cacheWidth: 100,
+              errorBuilder: (_, __, ___) => Container(
+                color: Colors.grey.shade800,
+                child: const Icon(Icons.broken_image,
+                    size: 16, color: Colors.white54),
+              ),
             ),
           ),
           const SizedBox(width: 12),
