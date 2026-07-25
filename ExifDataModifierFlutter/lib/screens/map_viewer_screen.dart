@@ -4430,9 +4430,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                 if (value == 'edit_path') {
                                   appState
                                       .startEditing(currentDateInfo.filePath);
-                                } else if (value == 'toggle_ctrl_edit') {
-                                  settings.updateRequireCtrlToDrag(
-                                      !settings.requireCtrlToDrag);
                                 } else if (value == 'add_photos') {
                                   final result = await FilePicker.platform
                                       .pickFiles(
@@ -4473,22 +4470,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                       ],
                                     ),
                                   ),
-                                PopupMenuItem(
-                                  value: 'toggle_ctrl_edit',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.keyboard_command_key,
-                                          size: 18, color: Colors.indigo),
-                                      const SizedBox(width: 8),
-                                      const Text('Require Ctrl to Edit/Drag'),
-                                      if (settings.requireCtrlToDrag) ...[
-                                        const Spacer(),
-                                        const Icon(Icons.check,
-                                            size: 16, color: Colors.teal),
-                                      ],
-                                    ],
-                                  ),
-                                ),
                                 const PopupMenuItem(
                                   value: 'add_photos',
                                   child: Row(
@@ -4629,6 +4610,68 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                             ],
                           ),
                         ),
+
+                      // Require Ctrl To Edit / Drag Toggle Button (Bottom-Right)
+                      Positioned(
+                        right: 16,
+                        bottom: _photos.isNotEmpty ? 124 : 16,
+                        child: Tooltip(
+                          message: settings.requireCtrlToDrag
+                              ? 'Hold Ctrl key to edit/drag points (Prevent Accidental Drag: ON)'
+                              : 'Click to require Ctrl key before editing/dragging points',
+                          child: Material(
+                            color: settings.requireCtrlToDrag
+                                ? Colors.deepPurple.shade600
+                                : Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(20),
+                            elevation: 3,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(20),
+                              onTap: () {
+                                settings.updateRequireCtrlToDrag(
+                                    !settings.requireCtrlToDrag);
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 7),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      settings.requireCtrlToDrag
+                                          ? Icons.lock
+                                          : Icons.lock_open_outlined,
+                                      size: 15,
+                                      color: settings.requireCtrlToDrag
+                                          ? Colors.white
+                                          : Theme.of(context)
+                                              .colorScheme
+                                              .onSurface,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      settings.requireCtrlToDrag
+                                          ? 'Ctrl Edit: ON'
+                                          : 'Ctrl Edit: OFF',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: settings.requireCtrlToDrag
+                                            ? Colors.white
+                                            : Theme.of(context)
+                                                .colorScheme
+                                                .onSurface,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
 
                       // Photo strip / preview panel
                       if (_photos.isNotEmpty)
