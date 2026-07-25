@@ -6115,7 +6115,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       // OSRM routing
       final startPoint = segment.points.first;
       final endPoint = segment.points.last;
-      final url = 'https://router.project-osrm.org/route/v1/driving/'
+      final osrmProfile = settings.osrmProfile;
+      final url = 'https://router.project-osrm.org/route/v1/$osrmProfile/'
           '${startPoint.longitude},${startPoint.latitude};${endPoint.longitude},${endPoint.latitude}'
           '?overview=full&geometries=geojson';
 

@@ -145,6 +145,33 @@ class SettingsScreen extends StatelessWidget {
                         },
                       ),
                     ),
+                    if (provider.routingProvider == 'osrm')
+                      ListTile(
+                        title: const Text('OSRM Vehicle Profile (Chế độ di chuyển)'),
+                        subtitle: const Text(
+                            'Select vehicle type. "Bike / Xe máy" supports small alleys and shortcuts.'),
+                        trailing: DropdownButton<String>(
+                          value: provider.osrmProfile,
+                          items: const [
+                            DropdownMenuItem(
+                                value: 'bike',
+                                child: Text('🏍️ Xe máy / Hẻm nhỏ (OSRM Bike)')),
+                            DropdownMenuItem(
+                                value: 'driving',
+                                child: Text('🚗 Ô tô / Đường lớn (OSRM Driving)')),
+                            DropdownMenuItem(
+                                value: 'foot',
+                                child: Text('🚶 Đi bộ (OSRM Foot)')),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) {
+                              context
+                                  .read<SettingsProvider>()
+                                  .updateOsrmProfile(val);
+                            }
+                          },
+                        ),
+                      ),
                     if (provider.routingProvider == 'google')
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),

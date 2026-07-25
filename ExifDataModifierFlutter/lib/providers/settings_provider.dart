@@ -16,6 +16,7 @@ class SettingsProvider extends ChangeNotifier {
       {}; // Key: "focal_aperture", Value: "lensId"
   int geotagTimezone = 7;
   String routingProvider = 'osrm';
+  String osrmProfile = 'bike'; // 'bike' (motorcycle/alleys), 'driving' (car), 'foot' (walk)
   String googleMapsApiKey = '';
 
   bool get isLoaded => _isLoaded;
@@ -33,6 +34,7 @@ class SettingsProvider extends ChangeNotifier {
     mapProvider = _prefs.getString('mapProvider') ?? 'google_roadmap';
     geotagTimezone = _prefs.getInt('geotagTimezone') ?? 7;
     routingProvider = _prefs.getString('routingProvider') ?? 'osrm';
+    osrmProfile = _prefs.getString('osrmProfile') ?? 'bike';
     googleMapsApiKey = _prefs.getString('googleMapsApiKey') ?? '';
 
     final lensesJson = _prefs.getStringList('lensTemplates');
@@ -152,6 +154,12 @@ class SettingsProvider extends ChangeNotifier {
   Future<void> updateRoutingProvider(String val) async {
     routingProvider = val;
     await _prefs.setString('routingProvider', val);
+    notifyListeners();
+  }
+
+  Future<void> updateOsrmProfile(String val) async {
+    osrmProfile = val;
+    await _prefs.setString('osrmProfile', val);
     notifyListeners();
   }
 
