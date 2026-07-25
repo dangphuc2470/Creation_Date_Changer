@@ -413,27 +413,63 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
+  bool _isImageFile(String path) {
+    final ext = path.toLowerCase();
+    return ext.endsWith('.jpg') ||
+        ext.endsWith('.jpeg') ||
+        ext.endsWith('.png') ||
+        ext.endsWith('.heic') ||
+        ext.endsWith('.arw') ||
+        ext.endsWith('.cr2') ||
+        ext.endsWith('.nef') ||
+        ext.endsWith('.dng') ||
+        ext.endsWith('.raw');
+  }
+
+  Future<List<File>> _collectAllImageFilesRecursively(List<File> inputFiles) async {
+    final List<File> collectedFiles = [];
+    final Set<String> visitedPaths = {};
+
+    for (final file in inputFiles) {
+      final path = file.path;
+      if (visitedPaths.contains(path)) continue;
+      visitedPaths.add(path);
+
+      try {
+        final type = await FileSystemEntity.type(path);
+        if (type == FileSystemEntityType.directory) {
+          final dir = Directory(path);
+          await for (final entity in dir.list(recursive: true, followLinks: false)) {
+            if (entity is File && _isImageFile(entity.path)) {
+              if (!visitedPaths.contains(entity.path)) {
+                visitedPaths.add(entity.path);
+                collectedFiles.add(entity);
+              }
+            }
+          }
+        } else if (type == FileSystemEntityType.file && _isImageFile(path)) {
+          collectedFiles.add(file);
+        }
+      } catch (e) {
+        debugPrint('Error inspecting file/directory $path: $e');
+      }
+    }
+    return collectedFiles;
+  }
+
   // ── Load photos (from drop or picker) ───────────────────────────────────
   Future<void> _loadPhotosFromFiles(List<File> files) async {
+    final allFiles = await _collectAllImageFilesRecursively(files);
     final newEntries = <PhotoEntry>[];
-    for (final f in files) {
-      final ext = f.path.toLowerCase();
-      if (ext.endsWith('.jpg') ||
-          ext.endsWith('.jpeg') ||
-          ext.endsWith('.png') ||
-          ext.endsWith('.heic') ||
-          ext.endsWith('.arw') ||
-          ext.endsWith('.cr2') ||
-          ext.endsWith('.nef') ||
-          ext.endsWith('.dng') ||
-          ext.endsWith('.raw')) {
-        if (_photos.any((p) => p.file.path == f.path)) continue;
-        final entry = PhotoEntry(
-          file: f,
-          filename: f.uri.pathSegments.last,
-        );
-        newEntries.add(entry);
-      }
+    for (final f in allFiles) {
+      if (_photos.any((p) => p.file.path == f.path)) continue;
+      final entry = PhotoEntry(
+        file: f,
+        filename: f.uri.pathSegments.isNotEmpty
+            ? f.uri.pathSegments.last
+            : f.path,
+      );
+      newEntries.add(entry);
     }
     if (newEntries.isEmpty) return;
 
@@ -4037,6 +4073,21 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                   ? 'Add Photos'
                                   : '${_photos.length} Photos'),
                               backgroundColor: Colors.deepPurple.shade400,
+                              foregroundColor: Colors.white,
+                            ),
+                            const SizedBox(width: 8),
+                            FloatingActionButton.extended(
+                              heroTag: 'add_folder',
+                              onPressed: () async {
+                                final folderPath =
+                                    await FilePicker.platform.getDirectoryPath();
+                                if (folderPath != null && mounted) {
+                                  await _loadPhotosFromFiles([File(folderPath)]);
+                                }
+                              },
+                              icon: const Icon(Icons.create_new_folder),
+                              label: const Text('Add Folder'),
+                              backgroundColor: Colors.deepPurple.shade600,
                               foregroundColor: Colors.white,
                             ),
                             if (_photos.isNotEmpty) ...[
