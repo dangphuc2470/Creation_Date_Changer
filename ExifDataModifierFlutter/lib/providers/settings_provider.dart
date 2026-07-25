@@ -18,7 +18,8 @@ class SettingsProvider extends ChangeNotifier {
   String routingProvider = 'osrm';
   String osrmProfile = 'bike'; // 'bike' (motorcycle/alleys), 'driving' (car), 'foot' (walk)
   String googleMapsApiKey = '';
-  bool requireCtrlToDrag = false;
+  bool requireShiftToDrag = false;
+  bool get requireCtrlToDrag => requireShiftToDrag;
 
   bool get isLoaded => _isLoaded;
 
@@ -37,7 +38,9 @@ class SettingsProvider extends ChangeNotifier {
     routingProvider = _prefs.getString('routingProvider') ?? 'osrm';
     osrmProfile = _prefs.getString('osrmProfile') ?? 'bike';
     googleMapsApiKey = _prefs.getString('googleMapsApiKey') ?? '';
-    requireCtrlToDrag = _prefs.getBool('requireCtrlToDrag') ?? false;
+    requireShiftToDrag = _prefs.getBool('requireShiftToDrag') ??
+        _prefs.getBool('requireCtrlToDrag') ??
+        false;
 
     final lensesJson = _prefs.getStringList('lensTemplates');
     if (lensesJson != null) {
@@ -171,9 +174,12 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> updateRequireCtrlToDrag(bool val) async {
-    requireCtrlToDrag = val;
-    await _prefs.setBool('requireCtrlToDrag', val);
+  Future<void> updateRequireShiftToDrag(bool val) async {
+    requireShiftToDrag = val;
+    await _prefs.setBool('requireShiftToDrag', val);
     notifyListeners();
   }
+
+  Future<void> updateRequireCtrlToDrag(bool val) =>
+      updateRequireShiftToDrag(val);
 }

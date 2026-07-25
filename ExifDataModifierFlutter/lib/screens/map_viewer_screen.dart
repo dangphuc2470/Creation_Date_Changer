@@ -1891,8 +1891,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       );
       final rawDayPoints = appState.activePaths[currentDayInfo.filePath] ?? [];
       final settings = context.read<SettingsProvider>();
-      final isCtrlPressed = HardwareKeyboard.instance.isControlPressed;
-      final canDragOrEdit = !settings.requireCtrlToDrag || isCtrlPressed;
+      final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
+      final canDragOrEdit = !settings.requireShiftToDrag || isShiftPressed;
       final timeOffset = settings.geotagTimezone.toDouble();
       final timelineItems = _clusterTimeline(rawDayPoints, timeOffset);
 
@@ -1917,8 +1917,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
 
     final settings = context.read<SettingsProvider>();
-    final isCtrlPressed = HardwareKeyboard.instance.isControlPressed;
-    final canDragOrEdit = !settings.requireCtrlToDrag || isCtrlPressed;
+    final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
+    final canDragOrEdit = !settings.requireShiftToDrag || isShiftPressed;
 
     // ── Right click: Start multi-point selection drag box ────────────────────
     if (event.buttons == kSecondaryButton) {
@@ -4576,7 +4576,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                       // Save / Cancel Floating Buttons
                       if (isEditing)
                         Positioned(
-                          bottom: _photos.isNotEmpty ? 160 : 20,
+                          bottom: _photos.isNotEmpty ? 168 : 20,
                           left: 16,
                           child: Row(
                             children: [
@@ -4619,16 +4619,16 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                           ),
                         ),
 
-                      // Require Ctrl To Edit / Drag Toggle Button (Bottom-Right)
+                      // Require Shift To Edit / Drag Toggle Button (Bottom-Right, positioned above rotation circle)
                       Positioned(
                         right: 16,
-                        bottom: _photos.isNotEmpty ? 124 : 16,
+                        bottom: _photos.isNotEmpty ? 160 : 64,
                         child: Tooltip(
-                          message: settings.requireCtrlToDrag
-                              ? 'Hold Ctrl key to edit/drag points (Prevent Accidental Drag: ON)'
-                              : 'Click to require Ctrl key before editing/dragging points',
+                          message: settings.requireShiftToDrag
+                              ? 'Hold Shift key to edit/drag points (Prevent Accidental Drag: ON)'
+                              : 'Click to require Shift key before editing/dragging points',
                           child: Material(
-                            color: settings.requireCtrlToDrag
+                            color: settings.requireShiftToDrag
                                 ? Colors.deepPurple.shade600
                                 : Theme.of(context)
                                     .colorScheme
@@ -4638,8 +4638,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                             child: InkWell(
                               borderRadius: BorderRadius.circular(20),
                               onTap: () {
-                                settings.updateRequireCtrlToDrag(
-                                    !settings.requireCtrlToDrag);
+                                settings.updateRequireShiftToDrag(
+                                    !settings.requireShiftToDrag);
                               },
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
@@ -4648,11 +4648,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(
-                                      settings.requireCtrlToDrag
+                                      settings.requireShiftToDrag
                                           ? Icons.lock
                                           : Icons.lock_open_outlined,
                                       size: 15,
-                                      color: settings.requireCtrlToDrag
+                                      color: settings.requireShiftToDrag
                                           ? Colors.white
                                           : Theme.of(context)
                                               .colorScheme
@@ -4660,13 +4660,13 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
-                                      settings.requireCtrlToDrag
-                                          ? 'Ctrl Edit: ON'
-                                          : 'Ctrl Edit: OFF',
+                                      settings.requireShiftToDrag
+                                          ? 'Shift Edit: ON'
+                                          : 'Shift Edit: OFF',
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold,
-                                        color: settings.requireCtrlToDrag
+                                        color: settings.requireShiftToDrag
                                             ? Colors.white
                                             : Theme.of(context)
                                                 .colorScheme
@@ -6370,35 +6370,86 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         }
       }
     } else {
-      // OSRM routing
-      final startPoint = segment.points.first;
-      final endPoint = segment.points.last;
+      // OSRM Map Matching API (/match/v1/) passing ALL segment points
       final osrmProfile = settings.osrmProfile;
-      final url = 'https://router.project-osrm.org/route/v1/$osrmProfile/'
-          '${startPoint.longitude},${startPoint.latitude};${endPoint.longitude},${endPoint.latitude}'
-          '?overview=full&geometries=geojson';
-
-      final client = HttpClient();
       List<LatLng> routedCoords = [];
+      final client = HttpClient();
+
       try {
-        final request = await client.getUrl(Uri.parse(url));
-        final response = await request.close();
-        if (response.statusCode == 200) {
-          final responseBody = await response.transform(utf8.decoder).join();
-          final data = jsonDecode(responseBody);
-          if (data['routes'] != null && data['routes'].isNotEmpty) {
-            final geometry = data['routes'][0]['geometry'];
-            final coordinates = geometry['coordinates'] as List;
-            routedCoords = coordinates.map((coord) {
-              final lng = coord[0] as double;
-              final lat = coord[1] as double;
-              return LatLng(lat, lng);
-            }).toList();
+        // Chunk points in batches of 90 points (with 1 point overlap)
+        const int chunkSize = 90;
+        for (int start = 0;
+            start < originalPoints.length;
+            start += (chunkSize - 1)) {
+          final end = (start + chunkSize < originalPoints.length)
+              ? start + chunkSize
+              : originalPoints.length;
+          final chunk = originalPoints.sublist(start, end);
+          if (chunk.isEmpty) break;
+
+          final coordsString =
+              chunk.map((p) => '${p.longitude},${p.latitude}').join(';');
+
+          // Primary: OSRM Map Matching Service (/match/v1/)
+          final matchUrl =
+              'https://router.project-osrm.org/match/v1/$osrmProfile/$coordsString?overview=full&geometries=geojson';
+
+          final request = await client.getUrl(Uri.parse(matchUrl));
+          final response = await request.close();
+          bool matchOk = false;
+
+          if (response.statusCode == 200) {
+            final responseBody = await response.transform(utf8.decoder).join();
+            final data = jsonDecode(responseBody);
+            if (data['matchings'] != null &&
+                (data['matchings'] as List).isNotEmpty) {
+              matchOk = true;
+              for (final matchItem in data['matchings']) {
+                final geometry = matchItem['geometry'];
+                if (geometry != null && geometry['coordinates'] != null) {
+                  final coordinates = geometry['coordinates'] as List;
+                  final chunkCoords = coordinates.map((coord) {
+                    final lng = (coord[0] as num).toDouble();
+                    final lat = (coord[1] as num).toDouble();
+                    return LatLng(lat, lng);
+                  }).toList();
+                  routedCoords.addAll(chunkCoords);
+                }
+              }
+            }
           }
+
+          // Fallback if match fails on sparse points: OSRM Route (/route/v1/)
+          if (!matchOk) {
+            final routeUrl =
+                'https://router.project-osrm.org/route/v1/$osrmProfile/$coordsString?overview=full&geometries=geojson';
+            final routeReq = await client.getUrl(Uri.parse(routeUrl));
+            final routeRes = await routeReq.close();
+            if (routeRes.statusCode == 200) {
+              final routeBody =
+                  await routeRes.transform(utf8.decoder).join();
+              final routeData = jsonDecode(routeBody);
+              if (routeData['routes'] != null &&
+                  (routeData['routes'] as List).isNotEmpty) {
+                final geometry = routeData['routes'][0]['geometry'];
+                if (geometry != null && geometry['coordinates'] != null) {
+                  final coordinates = geometry['coordinates'] as List;
+                  final chunkCoords = coordinates.map((coord) {
+                    final lng = (coord[0] as num).toDouble();
+                    final lat = (coord[1] as num).toDouble();
+                    return LatLng(lat, lng);
+                  }).toList();
+                  routedCoords.addAll(chunkCoords);
+                }
+              }
+            }
+          }
+
+          if (end == originalPoints.length) break;
         }
       } catch (e) {
         routingSuccess = false;
-        debugPrint('OSRM routing failed: $e');
+        debugPrint('OSRM Map Matching failed: $e');
       } finally {
         client.close();
       }
