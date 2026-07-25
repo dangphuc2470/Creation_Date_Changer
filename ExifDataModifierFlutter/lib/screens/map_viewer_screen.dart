@@ -173,6 +173,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   PhotoEntry? _selectedPhoto; // for strip/preview
   bool _showPhotoGrid = false;
 
+  // ── Import Progress State ────────────────────────────────────────────────
+  bool _isImportingPhotos = false;
+  int _importTotalPhotos = 0;
+  int _importProcessedPhotos = 0;
+  String _importCurrentStatus = '';
+
   // ── Photo drag on map ─────────────────────────────────────────────────
   PhotoEntry? _draggingPhoto;
   bool _isDraggingPhoto = false;
@@ -462,6 +468,13 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
   // ── Load photos (from drop or picker) ───────────────────────────────────
   Future<void> _loadPhotosFromFiles(List<File> files) async {
+    setState(() {
+      _isImportingPhotos = true;
+      _importTotalPhotos = 0;
+      _importProcessedPhotos = 0;
+      _importCurrentStatus = 'Scanning files and directories...';
+    });
+
     final allFiles = await _collectAllImageFilesRecursively(files);
     final newEntries = <PhotoEntry>[];
     for (final f in allFiles) {
@@ -473,7 +486,24 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       );
       newEntries.add(entry);
     }
-    if (newEntries.isEmpty) return;
+
+    if (newEntries.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _isImportingPhotos = false;
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _importTotalPhotos = newEntries.length;
+        _importProcessedPhotos = 0;
+        _importCurrentStatus =
+            'Reading EXIF metadata (0 / $_importTotalPhotos)...';
+      });
+    }
 
     // Read EXIF in chunks of 50 to maintain low RAM & 60FPS UI responsiveness
     const int batchSize = 50;
@@ -484,22 +514,37 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               ? newEntries.length
               : i + batchSize);
       await Future.wait(batch.map(_readExifFromPhoto));
+      if (mounted) {
+        final processed = min(i + batchSize, newEntries.length);
+        setState(() {
+          _importProcessedPhotos = processed;
+          _importCurrentStatus =
+              'Reading EXIF metadata ($processed / $_importTotalPhotos)...';
+        });
+      }
     }
     if (!mounted) return;
 
     setState(() {
+      _importCurrentStatus = 'Inserting photos into timeline...';
       _photos.addAll(newEntries);
     });
 
     // Auto-insert geotagged photos into timeline + rebuild assignments
     await _autoInsertGeotaggedPhotoPoints(newEntries);
 
+    if (mounted) {
+      setState(() {
+        _isImportingPhotos = false;
+      });
+    }
+
     // Analyze unique dates in imported photos
     final Map<DateTime, int> importedDatesCount = {};
     for (final entry in newEntries) {
       if (entry.dateTaken != null) {
-        final dayKey = DateTime(
-            entry.dateTaken!.year, entry.dateTaken!.month, entry.dateTaken!.day);
+        final dayKey = DateTime(entry.dateTaken!.year, entry.dateTaken!.month,
+            entry.dateTaken!.day);
         importedDatesCount[dayKey] = (importedDatesCount[dayKey] ?? 0) + 1;
       }
     }
@@ -566,8 +611,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
                     return ListTile(
                       dense: true,
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 4),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
                       title: Text(
                         dateStr,
                         style: TextStyle(
@@ -603,6 +647,111 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             child: const Text('Close'),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildImportProgressOverlay(BuildContext context) {
+    final progress = _importTotalPhotos > 0
+        ? (_importProcessedPhotos / _importTotalPhotos).clamp(0.0, 1.0)
+        : null;
+
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black54,
+        child: Center(
+          child: Material(
+            borderRadius: BorderRadius.circular(16),
+            color: Theme.of(context).colorScheme.surface,
+            elevation: 8,
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              width: 380,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.shade50,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.unarchive,
+                            color: Colors.deepPurple, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Importing Photos...',
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              'Processing EXIF headers & GPS tags',
+                              style: TextStyle(
+                                  fontSize: 11, color: Colors.grey),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 8,
+                      backgroundColor: Colors.deepPurple.shade50,
+                      color: Colors.deepPurple,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _importTotalPhotos > 0
+                            ? '$_importProcessedPhotos / $_importTotalPhotos photos'
+                            : 'Scanning files...',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      Text(
+                        progress != null ? '${(progress * 100).toInt()}%' : '',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.deepPurple,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _importCurrentStatus,
+                      style:
+                          TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -4492,6 +4641,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 child: _buildPhotoGrid(
                     context, appState, currentDateInfo, settings),
               ),
+
+            // Import progress overlay
+            if (_isImportingPhotos)
+              _buildImportProgressOverlay(context),
 
             // Saving-to-disk indicator (bottom-right, disappears when done)
             if (_isSaving)
