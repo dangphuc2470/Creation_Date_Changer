@@ -2928,19 +2928,45 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
                 final allDayPoints = List<LocationPoint>.from(
                     appState.activePaths[dateInfo.filePath] ?? []);
-                final targetIdx = allDayPoints.indexWhere((p) =>
+
+                int targetIdx = allDayPoints.indexWhere((p) =>
                     p == pt ||
-                    (p.latitude == pt.latitude &&
-                        p.longitude == pt.longitude &&
-                        p.timestamp == pt.timestamp));
+                    (p.timestamp.millisecondsSinceEpoch ==
+                            pt.timestamp.millisecondsSinceEpoch &&
+                        (p.latitude - pt.latitude).abs() < 0.00001 &&
+                        (p.longitude - pt.longitude).abs() < 0.00001));
+
+                if (targetIdx == -1) {
+                  // Fallback: match by closest timestamp within 5 seconds
+                  int closestIdx = -1;
+                  int minDiff = 999999999;
+                  for (int i = 0; i < allDayPoints.length; i++) {
+                    final diff = (allDayPoints[i]
+                                .timestamp
+                                .millisecondsSinceEpoch -
+                            pt.timestamp.millisecondsSinceEpoch)
+                        .abs();
+                    if (diff < minDiff && diff < 5000) {
+                      minDiff = diff;
+                      closestIdx = i;
+                    }
+                  }
+                  targetIdx = closestIdx;
+                }
+
                 if (targetIdx != -1) {
                   allDayPoints[targetIdx] = updatedPoint;
                 } else {
                   allDayPoints.add(updatedPoint);
                 }
+
                 allDayPoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-                await appState.saveListPoints(dateInfo, allDayPoints);
+                // Instantly update active paths in memory (0ms lag!)
+                setState(() {
+                  appState.activePaths[dateInfo.filePath] = allDayPoints;
+                });
+                _saveWithIndicator(appState, dateInfo, allDayPoints);
                 _loadPointsForSelectedDate();
                 if (ctx.mounted) Navigator.pop(ctx);
               } catch (_) {
