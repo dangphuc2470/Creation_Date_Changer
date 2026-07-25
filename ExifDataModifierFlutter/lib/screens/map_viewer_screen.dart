@@ -338,11 +338,33 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   // SECTION: Photo / EXIF — drag-drop, file picker, EXIF read, GPS→timeline
   // ─────────────────────────────────────────────────────────────────────────
 
-  // ── Read EXIF from photo file ────────────────────────────────────────────
+  // ── Read EXIF from photo file (Header-only fast read) ──────────────────────
+  Future<Uint8List> _readFileHeaderBytes(File file, {int maxHeaderBytes = 131072}) async {
+    try {
+      final raf = await file.open(mode: FileMode.read);
+      try {
+        final length = await raf.length();
+        final bytesToRead = length < maxHeaderBytes ? length : maxHeaderBytes;
+        return await raf.read(bytesToRead);
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return await file.readAsBytes();
+    }
+  }
+
   Future<void> _readExifFromPhoto(PhotoEntry entry) async {
     try {
-      final bytes = await entry.file.readAsBytes();
-      final tags = await readExifFromBytes(bytes);
+      Map<String, IfdTag> tags;
+      try {
+        final headerBytes = await _readFileHeaderBytes(entry.file);
+        tags = await readExifFromBytes(headerBytes);
+      } catch (_) {
+        // Fallback to full file if header parse fails
+        final bytes = await entry.file.readAsBytes();
+        tags = await readExifFromBytes(bytes);
+      }
 
       // Date
       final dateTag = tags['EXIF DateTimeOriginal'] ?? tags['Image DateTime'];
@@ -415,8 +437,13 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
     if (newEntries.isEmpty) return;
 
-    // Read EXIF in parallel
-    await Future.wait(newEntries.map(_readExifFromPhoto));
+    // Read EXIF in chunks of 50 to maintain low RAM & 60FPS UI responsiveness
+    const int batchSize = 50;
+    for (int i = 0; i < newEntries.length; i += batchSize) {
+      final batch = newEntries.sublist(
+          i, i + batchSize > newEntries.length ? newEntries.length : i + batchSize);
+      await Future.wait(batch.map(_readExifFromPhoto));
+    }
     if (!mounted) return;
 
     setState(() {
@@ -843,6 +870,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           child: Image.file(
             photo.file,
             fit: BoxFit.cover,
+            cacheWidth: 80,
+            cacheHeight: 80,
             errorBuilder: (_, __, ___) => Container(
               color: Colors.grey.shade800,
               child: const Icon(Icons.broken_image,
@@ -3799,6 +3828,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               child: Image.file(
                 photo.file,
                 fit: BoxFit.cover,
+                cacheWidth: 120,
+                cacheHeight: 120,
                 errorBuilder: (_, __, ___) => Container(
                   color: Colors.grey.shade300,
                   child: const Icon(Icons.broken_image, size: 20),
@@ -4284,10 +4315,14 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(6),
-                          child: Image.file(photo.file,
-                              width: 80,
-                              height: double.infinity,
-                              fit: BoxFit.cover),
+                          child: Image.file(
+                            photo.file,
+                            width: 80,
+                            height: double.infinity,
+                            fit: BoxFit.cover,
+                            cacheWidth: 150,
+                            cacheHeight: 150,
+                          ),
                         ),
                         // GPS badge
                         if (photo.gpsLatLng != null)
@@ -4362,8 +4397,14 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           // Thumbnail
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
-            child: Image.file(photo.file,
-                width: 48, height: 48, fit: BoxFit.cover),
+            child: Image.file(
+              photo.file,
+              width: 48,
+              height: 48,
+              fit: BoxFit.cover,
+              cacheWidth: 100,
+              cacheHeight: 100,
+            ),
           ),
           const SizedBox(width: 12),
           // Info
