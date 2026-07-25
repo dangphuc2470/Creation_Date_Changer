@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:convert';
 import 'dart:io';
 import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:exif/exif.dart';
 import 'package:file_picker/file_picker.dart';
@@ -444,6 +445,44 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       }
     } catch (e) {
       debugPrint('EXIF read error for ${entry.filename}: $e');
+    }
+  }
+  /// Write updated GPS coordinates directly into file EXIF using ExifTool
+  Future<void> _writePhotoGpsToExif(List<PhotoEntry> photos) async {
+    try {
+      String exe = 'exiftool';
+      const cPath = r'C:\exiftool\exiftool.exe';
+      if (await File(cPath).exists()) {
+        exe = cPath;
+      } else {
+        try {
+          final appDir = await getApplicationSupportDirectory();
+          final localExe = File(path.join(appDir.path, 'exiftool.exe'));
+          if (await localExe.exists()) {
+            exe = localExe.path;
+          }
+        } catch (_) {}
+      }
+
+      for (final photo in photos) {
+        final loc = photo.assignedLatLng;
+        if (loc == null) continue;
+        final lat = loc.latitude.abs();
+        final latRef = loc.latitude >= 0 ? 'N' : 'S';
+        final lng = loc.longitude.abs();
+        final lngRef = loc.longitude >= 0 ? 'E' : 'W';
+
+        await Process.run(exe, [
+          '-overwrite_original',
+          '-GPSLatitude=$lat',
+          '-GPSLatitudeRef=$latRef',
+          '-GPSLongitude=$lng',
+          '-GPSLongitudeRef=$lngRef',
+          photo.file.path,
+        ]);
+      }
+    } catch (e) {
+      debugPrint('ExifTool write error: $e');
     }
   }
 
@@ -2490,6 +2529,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     if (_isDraggingPhoto) {
       final draggedCount = _initialPhotoLocations.length;
       final targetLoc = _draggingPhoto?.assignedLatLng;
+      final draggedPhotos = List<PhotoEntry>.from(_initialPhotoLocations.keys);
 
       setState(() {
         _isDraggingPhoto = false;
@@ -2505,11 +2545,14 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       final points = appState.activePaths[dateInfo.filePath] ?? [];
       _assignPhotosToTimelineItems(points, settings.geotagTimezone.toDouble());
 
+      // Permanently write new GPS coordinates directly into file EXIF using ExifTool
+      _writePhotoGpsToExif(draggedPhotos);
+
       if (targetLoc != null && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Updated geotag for $draggedCount photo${draggedCount > 1 ? 's' : ''} to ${targetLoc.latitude.toStringAsFixed(5)}, ${targetLoc.longitude.toStringAsFixed(5)}',
+              'Updated EXIF geotag for $draggedCount photo${draggedCount > 1 ? 's' : ''} to ${targetLoc.latitude.toStringAsFixed(5)}, ${targetLoc.longitude.toStringAsFixed(5)}',
             ),
             duration: const Duration(seconds: 2),
           ),
