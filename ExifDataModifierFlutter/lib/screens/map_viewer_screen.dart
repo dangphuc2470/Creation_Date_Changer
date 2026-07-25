@@ -6199,8 +6199,15 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       updatedPoints.addAll(newPoints);
     }
 
-    await appState.saveListPoints(dateInfo, updatedPoints);
-    _loadPointsForSelectedDate(fitBounds: false, keepSelection: true);
+    // Update in-memory state IMMEDIATELY (0ms UI lag!)
+    final tz = settings.geotagTimezone.toDouble();
+    setState(() {
+      appState.activePaths[dateInfo.filePath] = updatedPoints;
+      _assignPhotosToTimelineItems(updatedPoints, tz);
+    });
+
+    // Save to disk asynchronously in background without blocking UI
+    appState.saveListPoints(dateInfo, updatedPoints);
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -6232,18 +6239,23 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
     updated.insertAll(insertIdx, originalBackup);
 
-    // Save & reload
-    await appState.saveListPoints(dateInfo, updated);
-
+    // Update in-memory state IMMEDIATELY (0ms UI lag!)
+    final settings = context.read<SettingsProvider>();
+    final tz = settings.geotagTimezone.toDouble();
     setState(() {
+      appState.activePaths[dateInfo.filePath] = updated;
       _unsnappedSegmentBackups.remove(segmentKey);
+      _assignPhotosToTimelineItems(updated, tz);
     });
 
-    _loadPointsForSelectedDate(fitBounds: false, keepSelection: true);
+    // Save to disk asynchronously in background without blocking UI
+    appState.saveListPoints(dateInfo, updated);
   }
 
   Future<void> _restoreSegmentToOriginal(TimelinePath segment,
       AppStateProvider appState, DateInfo dateInfo) async {
+    final settings = context.read<SettingsProvider>();
+    final tz = settings.geotagTimezone.toDouble();
     final originalDir =
         await appState.getAppTimelinesDirectoryPath(active: false);
     final dateStr = DateFormat('yyyy-MM-dd').format(dateInfo.date);
@@ -6305,10 +6317,16 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       updated.insertAll(insertIdx, origSegmentPoints);
 
       final segmentKey = _getSegmentKey(segment.startTime, segment.endTime);
-      _unsnappedSegmentBackups.remove(segmentKey);
 
-      await appState.saveListPoints(dateInfo, updated);
-      _loadPointsForSelectedDate(fitBounds: false, keepSelection: true);
+      // Update in-memory state IMMEDIATELY (0ms UI lag!)
+      setState(() {
+        appState.activePaths[dateInfo.filePath] = updated;
+        _unsnappedSegmentBackups.remove(segmentKey);
+        _assignPhotosToTimelineItems(updated, tz);
+      });
+
+      // Save to disk asynchronously in background without blocking UI
+      appState.saveListPoints(dateInfo, updated);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -6552,8 +6570,15 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
     updated.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-    await appState.saveListPoints(dateInfo, updated);
-    _loadPointsForSelectedDate(fitBounds: false, keepSelection: true);
+    // Update in-memory state IMMEDIATELY (0ms UI lag!)
+    final tz = settings.geotagTimezone.toDouble();
+    setState(() {
+      appState.activePaths[dateInfo.filePath] = updated;
+      _assignPhotosToTimelineItems(updated, tz);
+    });
+
+    // Save to disk asynchronously in background without blocking UI
+    appState.saveListPoints(dateInfo, updated);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
