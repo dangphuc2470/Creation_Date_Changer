@@ -189,6 +189,45 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   // ── Multi-select (Ctrl+click) ─────────────────────────────────────────
   final Set<PhotoEntry> _selectedPhotoSet = {};
 
+  // ── Step-by-step Edit Undo Stack ─────────────────────────────────────
+  final List<List<LocationPoint>> _editHistoryStack = [];
+
+  void _pushUndoState(List<LocationPoint> points) {
+    if (points.isNotEmpty) {
+      _editHistoryStack.add(List<LocationPoint>.from(points));
+      if (_editHistoryStack.length > 50) {
+        _editHistoryStack.removeAt(0);
+      }
+    }
+  }
+
+  void _performUndoStep(
+      AppStateProvider appState, DateInfo dateInfo, double tz) {
+    if (_editHistoryStack.isEmpty) return;
+    final prevPoints = _editHistoryStack.removeLast();
+
+    setState(() {
+      appState.activePaths[dateInfo.filePath] = prevPoints;
+      _assignPhotosToTimelineItems(prevPoints, tz);
+      _hoveredLatLng = null;
+      _hoveredPoint = null;
+    });
+
+    _saveWithIndicator(appState, dateInfo, prevPoints);
+    _loadPointsForSelectedDate(keepSelection: true);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Undid 1 edit step (${_editHistoryStack.length} step${_editHistoryStack.length == 1 ? '' : 's'} remaining)',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   // ── Cached photo-assigned timeline items ──────────────────────────────
   /// Built by _assignPhotosToTimelineItems(); shared by sidebar + map.
   List<TimelineItem>? _timelineItemsWithPhotos;
@@ -1746,7 +1785,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         return;
       }
 
-      final points = _getActiveHoverPoints(rawDayPoints, timeOffset);
+      final points = rawDayPoints;
       if (points.isEmpty) {
         if (_hoveredLatLng != null) {
           setState(() {
@@ -2041,6 +2080,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         final allPoints = appState.isEditing
             ? appState.editingPoints
             : (appState.activePaths[currentDayInfo.filePath] ?? []);
+        _pushUndoState(allPoints);
 
         final timeOffset = settings.geotagTimezone.toDouble();
         final points = appState.isEditing
@@ -2873,6 +2913,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
                 final allDayPoints = List<LocationPoint>.from(
                     appState.activePaths[dateInfo.filePath] ?? []);
+                _pushUndoState(allDayPoints);
                 allDayPoints.add(newPoint);
                 allDayPoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
@@ -2973,6 +3014,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
                 final allDayPoints = List<LocationPoint>.from(
                     appState.activePaths[dateInfo.filePath] ?? []);
+                _pushUndoState(allDayPoints);
 
                 int targetIdx = allDayPoints.indexWhere((p) =>
                     p == pt ||
@@ -4857,6 +4899,47 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                     ),
                   ),
 
+                  // Undo 1 Step Button (Appears when there are edits in history stack)
+                  if (_editHistoryStack.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Tooltip(
+                      message:
+                          'Undo 1 edit step (${_editHistoryStack.length} step(s) available)',
+                      child: Material(
+                        color: Colors.amber.shade700,
+                        borderRadius: BorderRadius.circular(20),
+                        elevation: 3,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(20),
+                          onTap: () {
+                            final tz = settings.geotagTimezone.toDouble();
+                            _performUndoStep(appState, currentDateInfo, tz);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 7),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.undo,
+                                    size: 15, color: Colors.white),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Undo 1 Step (${_editHistoryStack.length})',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+
                   // Saving Indicator (Appears directly below Shift Edit when saving)
                   if (_isSaving) ...[
                     const SizedBox(height: 8),
@@ -6634,6 +6717,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       return;
     }
 
+    _pushUndoState(dayPoints);
     final List<LocationPoint> updatedPoints = List.from(dayPoints);
     final firstIdx = updatedPoints.indexOf(segment.points.first);
     final lastIdx = updatedPoints.indexOf(segment.points.last);
