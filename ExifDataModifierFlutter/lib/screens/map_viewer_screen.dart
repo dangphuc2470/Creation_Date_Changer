@@ -1870,54 +1870,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       });
     }
 
-    // ── Place marker dragging check ──────────────────────────────────────────
-    if (event.buttons != kSecondaryButton &&
-        _selectedTimelineItemIndex != null &&
-        !appState.isEditing) {
-      final currentDayInfo = appState.allDates.firstWhere(
-        (d) =>
-            _selectedDate != null &&
-            d.date.year == _selectedDate!.year &&
-            d.date.month == _selectedDate!.month &&
-            d.date.day == _selectedDate!.day,
-        orElse: () => DateInfo(
-          date: _selectedDate ?? DateTime.now(),
-          pointCount: 0,
-          filePath: '',
-          distance: 0.0,
-          state: 'original',
-          source: 'merge',
-          hasTimelineBackup: false,
-          hasGpxBackup: false,
-        ),
-      );
-      final rawDayPoints = appState.activePaths[currentDayInfo.filePath] ?? [];
-      final settings = context.read<SettingsProvider>();
-      final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
-      final canDragOrEdit = !settings.requireShiftToDrag || isShiftPressed;
-      final timeOffset = settings.geotagTimezone.toDouble();
-      final timelineItems = _clusterTimeline(rawDayPoints, timeOffset);
-
-      if (canDragOrEdit && _selectedTimelineItemIndex! < timelineItems.length) {
-        final item = timelineItems[_selectedTimelineItemIndex!];
-        if (item is TimelinePlace) {
-          final double threshold = 0.065 / pow(2, currentZoom - 10);
-          final double thresholdSq = threshold * threshold;
-          final dy = item.center.latitude - tapLatLng.latitude;
-          final dx = item.center.longitude - tapLatLng.longitude;
-          if (dy * dy + dx * dx < thresholdSq) {
-            setState(() {
-              _isDraggingPlace = true;
-              _draggingPlaceIndex = _selectedTimelineItemIndex;
-              _draggingPlaceStartLatLng = tapLatLng;
-              _draggedPlaceCurrentLatLng = item.center;
-            });
-            return;
-          }
-        }
-      }
-    }
-
     final settings = context.read<SettingsProvider>();
     final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
     final canDragOrEdit = !settings.requireShiftToDrag || isShiftPressed;
@@ -1969,6 +1921,56 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       });
       return; // consume event — don't edit route
     }
+
+    // ── Place marker dragging check ──────────────────────────────────────────
+    if (event.buttons != kSecondaryButton &&
+        _selectedTimelineItemIndex != null &&
+        !appState.isEditing) {
+      final currentDayInfo = appState.allDates.firstWhere(
+        (d) =>
+            _selectedDate != null &&
+            d.date.year == _selectedDate!.year &&
+            d.date.month == _selectedDate!.month &&
+            d.date.day == _selectedDate!.day,
+        orElse: () => DateInfo(
+          date: _selectedDate ?? DateTime.now(),
+          pointCount: 0,
+          filePath: '',
+          distance: 0.0,
+          state: 'original',
+          source: 'merge',
+          hasTimelineBackup: false,
+          hasGpxBackup: false,
+        ),
+      );
+      final rawDayPoints = appState.activePaths[currentDayInfo.filePath] ?? [];
+      final settings = context.read<SettingsProvider>();
+      final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
+      final canDragOrEdit = !settings.requireShiftToDrag || isShiftPressed;
+      final timeOffset = settings.geotagTimezone.toDouble();
+      final timelineItems = _clusterTimeline(rawDayPoints, timeOffset);
+
+      if (canDragOrEdit && _selectedTimelineItemIndex! < timelineItems.length) {
+        final item = timelineItems[_selectedTimelineItemIndex!];
+        if (item is TimelinePlace) {
+          final double threshold = 0.065 / pow(2, currentZoom - 10);
+          final double thresholdSq = threshold * threshold;
+          final dy = item.center.latitude - tapLatLng.latitude;
+          final dx = item.center.longitude - tapLatLng.longitude;
+          if (dy * dy + dx * dx < thresholdSq) {
+            setState(() {
+              _isDraggingPlace = true;
+              _draggingPlaceIndex = _selectedTimelineItemIndex;
+              _draggingPlaceStartLatLng = tapLatLng;
+              _draggedPlaceCurrentLatLng = item.center;
+            });
+            return;
+          }
+        }
+      }
+    }
+
+
 
     // Check if clicked near the hover dot
     if (canDragOrEdit && _hoveredLatLng != null && _hoveredPoint != null) {
@@ -4287,6 +4289,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       isRightClickSelecting: _isRightClickSelecting,
       isDraggingHoverDot: _isDraggingHoverDot,
       isDraggingPlace: _isDraggingPlace,
+      isDraggingPhoto: _isDraggingPhoto,
       onHover: _handleHover,
       onPointerDown: _handlePointerDown,
       onPointerMove: _handlePointerMove,
@@ -4692,67 +4695,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                           ),
                         ),
 
-                      // Require Shift To Edit / Drag Toggle Button (Bottom-Right, positioned above rotation circle)
-                      Positioned(
-                        right: 16,
-                        bottom: _photos.isNotEmpty ? 160 : 64,
-                        child: Tooltip(
-                          message: settings.requireShiftToDrag
-                              ? 'Hold Shift key to edit/drag points (Prevent Accidental Drag: ON)'
-                              : 'Click to require Shift key before editing/dragging points',
-                          child: Material(
-                            color: settings.requireShiftToDrag
-                                ? Colors.deepPurple.shade600
-                                : Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(20),
-                            elevation: 3,
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(20),
-                              onTap: () {
-                                settings.updateRequireShiftToDrag(
-                                    !settings.requireShiftToDrag);
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 7),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      settings.requireShiftToDrag
-                                          ? Icons.lock
-                                          : Icons.lock_open_outlined,
-                                      size: 15,
-                                      color: settings.requireShiftToDrag
-                                          ? Colors.white
-                                          : Theme.of(context)
-                                              .colorScheme
-                                              .onSurface,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      settings.requireShiftToDrag
-                                          ? 'Shift Edit: ON'
-                                          : 'Shift Edit: OFF',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: settings.requireShiftToDrag
-                                            ? Colors.white
-                                            : Theme.of(context)
-                                                .colorScheme
-                                                .onSurface,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
+
 
                       // Photo strip / preview panel
                       if (_photos.isNotEmpty)
@@ -4805,40 +4748,118 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             // Import progress overlay
             if (_isImportingPhotos) _buildImportProgressOverlay(context),
 
-            // Saving-to-disk indicator (bottom-right, disappears when done)
-            if (_isSaving)
-              Positioned(
-                right: 16,
-                bottom: _photos.isNotEmpty ? 112 : 16,
-                child: IgnorePointer(
-                  child: AnimatedOpacity(
-                    opacity: _isSaving ? 0.55 : 0.0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
-                        shape: BoxShape.circle,
-                        boxShadow: const [
-                          BoxShadow(
-                              color: Colors.black26,
-                              blurRadius: 6,
-                              offset: Offset(0, 2))
-                        ],
-                      ),
-                      child: const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.grey),
+            // Top-Right Controls: Shift Edit Toggle & Saving Indicator
+            Positioned(
+              top: 16,
+              right: 16,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Shift Edit Toggle Button
+                  Tooltip(
+                    message: settings.requireShiftToDrag
+                        ? 'Hold Shift key to edit/drag points (Prevent Accidental Drag: ON)'
+                        : 'Click to require Shift key before editing/dragging points',
+                    child: Material(
+                      color: settings.requireShiftToDrag
+                          ? Colors.deepPurple.shade600
+                          : Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(20),
+                      elevation: 3,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: () {
+                          settings.updateRequireShiftToDrag(
+                              !settings.requireShiftToDrag);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 7),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                settings.requireShiftToDrag
+                                    ? Icons.lock
+                                    : Icons.lock_open_outlined,
+                                size: 15,
+                                color: settings.requireShiftToDrag
+                                    ? Colors.white
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .onSurface,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                settings.requireShiftToDrag
+                                    ? 'Shift Edit: ON'
+                                    : 'Shift Edit: OFF',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: settings.requireShiftToDrag
+                                      ? Colors.white
+                                      : Theme.of(context)
+                                          .colorScheme
+                                          .onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
+
+                  // Saving Indicator (Appears directly below Shift Edit when saving)
+                  if (_isSaving) ...[
+                    const SizedBox(height: 8),
+                    IgnorePointer(
+                      child: AnimatedOpacity(
+                        opacity: _isSaving ? 1.0 : 0.0,
+                        duration: const Duration(milliseconds: 200),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: const [
+                              BoxShadow(
+                                  color: Colors.black26,
+                                  blurRadius: 6,
+                                  offset: Offset(0, 2))
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'Saving...',
+                                style: TextStyle(
+                                    fontSize: 11, fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
+            ),
           ],
         ),
       ),
@@ -6969,6 +6990,7 @@ class MapWidget extends StatelessWidget {
   final bool isRightClickSelecting;
   final bool isDraggingHoverDot;
   final bool isDraggingPlace;
+  final bool isDraggingPhoto;
   final Function(PointerHoverEvent, LatLng) onHover;
   final Function(PointerDownEvent, LatLng) onPointerDown;
   final Function(PointerMoveEvent, LatLng) onPointerMove;
@@ -6989,6 +7011,7 @@ class MapWidget extends StatelessWidget {
     this.isRightClickSelecting = false,
     this.isDraggingHoverDot = false,
     this.isDraggingPlace = false,
+    this.isDraggingPhoto = false,
     required this.onHover,
     required this.onPointerDown,
     required this.onPointerMove,
@@ -7047,7 +7070,8 @@ class MapWidget extends StatelessWidget {
                   flags: (isEditing ||
                           isRightClickSelecting ||
                           isDraggingHoverDot ||
-                          isDraggingPlace)
+                          isDraggingPlace ||
+                          isDraggingPhoto)
                       ? InteractiveFlag.all & ~InteractiveFlag.drag
                       : InteractiveFlag.all,
                 ),
