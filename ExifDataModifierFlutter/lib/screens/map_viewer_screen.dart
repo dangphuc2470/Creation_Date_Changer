@@ -2809,9 +2809,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   timestamp: utcDate,
                 );
 
-                final newPoints = List<LocationPoint>.from(currentPoints)
-                  ..add(newPoint);
-                await appState.saveListPoints(dateInfo, newPoints);
+                final allDayPoints = List<LocationPoint>.from(
+                    appState.activePaths[dateInfo.filePath] ?? []);
+                allDayPoints.add(newPoint);
+                allDayPoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+                await appState.saveListPoints(dateInfo, allDayPoints);
                 _loadPointsForSelectedDate();
                 if (ctx.mounted) Navigator.pop(ctx);
               } catch (_) {
@@ -2906,10 +2909,21 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   activityType: pt.activityType,
                 );
 
-                final newPoints = List<LocationPoint>.from(currentPoints);
-                newPoints[index] = updatedPoint;
+                final allDayPoints = List<LocationPoint>.from(
+                    appState.activePaths[dateInfo.filePath] ?? []);
+                final targetIdx = allDayPoints.indexWhere((p) =>
+                    p == pt ||
+                    (p.latitude == pt.latitude &&
+                        p.longitude == pt.longitude &&
+                        p.timestamp == pt.timestamp));
+                if (targetIdx != -1) {
+                  allDayPoints[targetIdx] = updatedPoint;
+                } else {
+                  allDayPoints.add(updatedPoint);
+                }
+                allDayPoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-                await appState.saveListPoints(dateInfo, newPoints);
+                await appState.saveListPoints(dateInfo, allDayPoints);
                 _loadPointsForSelectedDate();
                 if (ctx.mounted) Navigator.pop(ctx);
               } catch (_) {
@@ -3509,16 +3523,18 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                                       ],
                                                     ),
                                                   );
-                                                  if (confirm == true) {
-                                                    final newPts = List<
-                                                            LocationPoint>.from(
-                                                        points)
-                                                      ..removeAt(idx);
-                                                    await appState
-                                                        .saveListPoints(
-                                                            dateInfo, newPts);
-                                                    _loadPointsForSelectedDate();
-                                                  }
+                                                   if (confirm == true) {
+                                                     final targetPt = points[idx];
+                                                     final allDayPoints = List<LocationPoint>.from(
+                                                         appState.activePaths[dateInfo.filePath] ?? []);
+                                                     allDayPoints.removeWhere((p) =>
+                                                         p == targetPt ||
+                                                         (p.latitude == targetPt.latitude &&
+                                                             p.longitude == targetPt.longitude &&
+                                                             p.timestamp == targetPt.timestamp));
+                                                     await appState.saveListPoints(dateInfo, allDayPoints);
+                                                     _loadPointsForSelectedDate();
+                                                   }
                                                 },
                                           tooltip: 'Delete Point',
                                         ),
