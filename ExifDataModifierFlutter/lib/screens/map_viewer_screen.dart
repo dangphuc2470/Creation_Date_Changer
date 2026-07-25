@@ -1,12 +1,14 @@
 import 'dart:math';
 import 'dart:convert';
 import 'dart:io';
+import 'package:path/path.dart' as path;
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:exif/exif.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:intl/intl.dart';
@@ -20,7 +22,7 @@ import '../constants/timeline_constants.dart';
 import '../utils/geo_utils.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SECTION: Top-level helpers — ProjectionResult, IndexPoint, _PhotoEntry
+// SECTION: Top-level helpers — ProjectionResult, IndexPoint, PhotoEntry
 // ═══════════════════════════════════════════════════════════════════════════
 
 class ProjectionResult {
@@ -96,14 +98,27 @@ class IndexPoint {
 // ─────────────────────────────────────────────────────────────────────────────
 // Photo entry: dropped/picked photo with optional EXIF GPS
 // ─────────────────────────────────────────────────────────────────────────────
-class _PhotoEntry {
+class PhotoEntry {
   final File file;
   final String filename;
-  DateTime? dateTaken; // from EXIF DateTimeOriginal (UTC)
-  LatLng? gpsLatLng; // from EXIF GPS (if present)
+
+  /// Stored as DateTime.utc() but with LOCAL time values from EXIF.
+  /// Subtract timezone offset to get proper UTC for comparisons.
+  DateTime? dateTaken;
+
+  /// GPS from EXIF (or user-dragged). Null when photo has no GPS.
+  LatLng? gpsLatLng;
+
+  /// Position inferred by interpolating timeline at dateTaken.
+  /// Only populated for photos without EXIF GPS.
+  LatLng? interpolatedLatLng;
   bool addedToTimeline = false;
 
-  _PhotoEntry({required this.file, required this.filename});
+  PhotoEntry({required this.file, required this.filename});
+
+  /// Position shown on map: EXIF GPS (may be dragged) or interpolated.
+  LatLng? get assignedLatLng => gpsLatLng ?? interpolatedLatLng;
+  bool get hasExifGps => gpsLatLng != null;
 }
 
 class MapViewerScreen extends StatefulWidget {
@@ -133,13 +148,41 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   int? _selectedPointIndex;
   bool _isDraggingPoint = false;
   int? _selectedTimelineItemIndex;
+  int? _hoveredTimelineItemIndex;
   LocationPoint? _previousDayLastStayPoint;
+  bool _isDraggingHoverDot = false;
+  DateTime? _draggedHoverDotTime;
+  int? _draggedHoverDotInsertIndex;
+  LatLng? _draggedHoverDotCurrentLatLng;
+  TimelinePath? _draggedHoverDotSegment;
+  bool _autoSnapOnDrag = false;
+  bool _isRightClickSelecting = false;
+  LatLng? _rightClickStartLatLng;
+  LatLng? _rightClickCurrentLatLng;
+  bool _isDraggingPlace = false;
+  int? _draggingPlaceIndex;
+  LatLng? _draggingPlaceStartLatLng;
+  LatLng? _draggedPlaceCurrentLatLng;
+  final Map<String, List<LocationPoint>> _unsnappedSegmentBackups = {};
+  bool _isSaving = false;
+  int _savingCount = 0; // tracks concurrent saves
 
   // ── Photo layer ─────────────────────────────────────────────────────────
-  final List<_PhotoEntry> _photos = [];
+  final List<PhotoEntry> _photos = [];
   bool _isDraggingPhotoOver = false;
-  _PhotoEntry? _selectedPhoto; // for strip/preview
+  PhotoEntry? _selectedPhoto; // for strip/preview
   bool _showPhotoGrid = false;
+
+  // ── Photo drag on map ─────────────────────────────────────────────────
+  PhotoEntry? _draggingPhoto;
+  bool _isDraggingPhoto = false;
+
+  // ── Multi-select (Ctrl+click) ─────────────────────────────────────────
+  final Set<PhotoEntry> _selectedPhotoSet = {};
+
+  // ── Cached photo-assigned timeline items ──────────────────────────────
+  /// Built by _assignPhotosToTimelineItems(); shared by sidebar + map.
+  List<TimelineItem>? _timelineItemsWithPhotos;
 
   // ─────────────────────────────────────────────────────────────────────────
   // SECTION: Lifecycle — initState, dispose, load/save last selected date
@@ -179,9 +222,14 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
-  void _loadPointsForSelectedDate() async {
+  void _loadPointsForSelectedDate(
+      {bool fitBounds = true, bool keepSelection = false}) async {
     setState(() {
-      _selectedTimelineItemIndex = null;
+      if (!keepSelection) {
+        _selectedTimelineItemIndex = null;
+      }
+      _timelineItemsWithPhotos =
+          null; // clear so sidebar rebuilds with fresh assign
     });
     if (_selectedDate == null) return;
     _saveLastSelectedDate(_selectedDate!);
@@ -217,8 +265,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           final double timeOffset = settings.geotagTimezone.toDouble();
           final prevItems = _clusterTimelineRaw(prevPoints, timeOffset);
           for (int k = prevItems.length - 1; k >= 0; k--) {
-            if (prevItems[k] is StayPointItem) {
-              final stay = prevItems[k] as StayPointItem;
+            if (prevItems[k] is TimelinePlace) {
+              final stay = prevItems[k] as TimelinePlace;
               prevLastStay = LocationPoint(
                 latitude: stay.center.latitude,
                 longitude: stay.center.longitude,
@@ -256,13 +304,27 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
     if (dateInfo.filePath.isNotEmpty) {
       final points = await LocationManager.loadLocationFile(dateInfo.filePath);
+      if (!mounted) return;
       appState.setSelectedDatePath(dateInfo, points);
 
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _fitBounds();
-      });
+      // Rebuild photo-timeline assignments with fresh points
+      if (_photos.isNotEmpty) {
+        final settings = context.read<SettingsProvider>();
+        _assignPhotosToTimelineItems(
+            points, settings.geotagTimezone.toDouble());
+      }
+
+      if (fitBounds) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _fitBounds();
+        });
+      }
     } else {
       appState.setSelectedDatePath(dateInfo, []);
+      if (_photos.isNotEmpty) {
+        final settings = context.read<SettingsProvider>();
+        _assignPhotosToTimelineItems([], settings.geotagTimezone.toDouble());
+      }
     }
   }
 
@@ -277,7 +339,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── Read EXIF from photo file ────────────────────────────────────────────
-  Future<void> _readExifFromPhoto(_PhotoEntry entry) async {
+  Future<void> _readExifFromPhoto(PhotoEntry entry) async {
     try {
       final bytes = await entry.file.readAsBytes();
       final tags = await readExifFromBytes(bytes);
@@ -331,7 +393,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
   // ── Load photos (from drop or picker) ───────────────────────────────────
   Future<void> _loadPhotosFromFiles(List<File> files) async {
-    final newEntries = <_PhotoEntry>[];
+    final newEntries = <PhotoEntry>[];
     for (final f in files) {
       final ext = f.path.toLowerCase();
       if (ext.endsWith('.jpg') ||
@@ -344,7 +406,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           ext.endsWith('.dng') ||
           ext.endsWith('.raw')) {
         if (_photos.any((p) => p.file.path == f.path)) continue;
-        final entry = _PhotoEntry(
+        final entry = PhotoEntry(
           file: f,
           filename: f.uri.pathSegments.last,
         );
@@ -355,6 +417,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
     // Read EXIF in parallel
     await Future.wait(newEntries.map(_readExifFromPhoto));
+    if (!mounted) return;
 
     setState(() {
       _photos.addAll(newEntries);
@@ -369,12 +432,16 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       if (firstDate != null && mounted) {
         setState(() => _selectedDate = firstDate);
         _loadPointsForSelectedDate();
+        return; // _loadPointsForSelectedDate triggers _assignPhotosToTimelineItems
       }
     }
+
+    // Auto-insert geotagged photos into timeline + rebuild assignments
+    await _autoInsertGeotaggedPhotoPoints(newEntries);
   }
 
   // ── Insert photo GPS as a LocationPoint into timeline ───────────────────
-  Future<void> _addPhotoGpsToTimeline(_PhotoEntry photo) async {
+  Future<void> _addPhotoGpsToTimeline(PhotoEntry photo) async {
     if (photo.gpsLatLng == null) return;
     final appState = context.read<AppStateProvider>();
     final settings = context.read<SettingsProvider>();
@@ -443,6 +510,648 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Photo–Timeline integration helpers
+  //  • _autoInsertGeotaggedPhotoPoints  – batch-insert GPS points into track
+  //  • _currentDateInfo                 – DateInfo for current selected date
+  //  • _interpolatePositionAtTime       – find LatLng on track at given time
+  //  • _assignPhotosToTimelineItems     – match photos → Stay/Move items
+  //  • _buildTimelinePhotoRows          – small thumbnail strip for sidebar
+  //  • _applyInterpolatedGeotag         – promote interpolated → GPS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Batch-inserts a LocationPoint for each new geotagged photo into the
+  /// current day's timeline file, then reloads via [_loadPointsForSelectedDate].
+  /// If no photos have GPS, just rebuilds the assignment from existing points.
+  Future<void> _autoInsertGeotaggedPhotoPoints(
+      List<PhotoEntry> newEntries) async {
+    if (!mounted) return;
+    final appState = context.read<AppStateProvider>();
+    final settings = context.read<SettingsProvider>();
+    final double tz = settings.geotagTimezone.toDouble();
+
+    final gpsEntries = newEntries.where((e) => e.gpsLatLng != null).toList();
+    if (gpsEntries.isEmpty) {
+      // No GPS photos — just rebuild assignments from existing track
+      final info = _currentDateInfo(appState);
+      final pts = appState.activePaths[info.filePath] ?? [];
+      _assignPhotosToTimelineItems(pts, tz);
+      return;
+    }
+
+    if (_selectedDate == null) return;
+    final cdi = _currentDateInfo(appState);
+    List<LocationPoint> cur = cdi.filePath.isNotEmpty
+        ? await LocationManager.loadLocationFile(cdi.filePath)
+        : [];
+
+    for (final entry in gpsEntries) {
+      final ts = entry.dateTaken != null
+          ? entry.dateTaken!.subtract(Duration(minutes: (tz * 60).toInt()))
+          : DateTime.now().toUtc();
+      cur.add(LocationPoint(
+        latitude: entry.gpsLatLng!.latitude,
+        longitude: entry.gpsLatLng!.longitude,
+        timestamp: ts,
+      ));
+      entry.addedToTimeline = true;
+    }
+    cur.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    await appState.saveListPoints(cdi, cur);
+    if (!mounted) return;
+    _loadPointsForSelectedDate(); // will call _assignPhotosToTimelineItems
+  }
+
+  /// Returns the [DateInfo] for the currently selected date, or a placeholder.
+  DateInfo _currentDateInfo(AppStateProvider appState) {
+    return appState.allDates.firstWhere(
+      (d) =>
+          _selectedDate != null &&
+          d.date.year == _selectedDate!.year &&
+          d.date.month == _selectedDate!.month &&
+          d.date.day == _selectedDate!.day,
+      orElse: () => DateInfo(
+        date: _selectedDate ?? DateTime.now(),
+        pointCount: 0,
+        filePath: '',
+        distance: 0.0,
+        state: 'original',
+        source: 'merge',
+        hasTimelineBackup: false,
+        hasGpxBackup: false,
+      ),
+    );
+  }
+
+  /// Linearly interpolates a position on the track at [localTimeFakeUtc].
+  /// [localTimeFakeUtc] stores EXIF local time in a DateTime.utc() container;
+  /// subtract [tz] hours to convert to proper UTC before comparing timestamps.
+  LatLng? _interpolatePositionAtTime(
+      DateTime localTimeFakeUtc, List<LocationPoint> points, double tz) {
+    if (points.isEmpty) return null;
+    final utc = localTimeFakeUtc.subtract(Duration(minutes: (tz * 60).toInt()));
+    if (utc.isBefore(points.first.timestamp)) return points.first.latLng;
+    if (utc.isAfter(points.last.timestamp)) return points.last.latLng;
+    for (int i = 0; i < points.length - 1; i++) {
+      final a = points[i];
+      final b = points[i + 1];
+      if (utc.compareTo(a.timestamp) >= 0 && utc.compareTo(b.timestamp) <= 0) {
+        final ms = b.timestamp.difference(a.timestamp).inMilliseconds;
+        if (ms == 0) return a.latLng;
+        final r = utc.difference(a.timestamp).inMilliseconds / ms;
+        return LatLng(
+          a.latitude + (b.latitude - a.latitude) * r,
+          a.longitude + (b.longitude - a.longitude) * r,
+        );
+      }
+    }
+    return points.last.latLng;
+  }
+
+  /// Clusters [points] into [TimelineItem]s, then assigns each [PhotoEntry]
+  /// in [_photos] to the item whose time range contains [dateTaken].
+  /// For photos without GPS, also computes [PhotoEntry.interpolatedLatLng].
+  /// Stores result in [_timelineItemsWithPhotos] and calls [setState].
+  void _assignPhotosToTimelineItems(List<LocationPoint> points, double tz) {
+    final items = _clusterTimeline(points, tz);
+
+    // Reset existing assignments
+    for (final item in items) {
+      if (item is TimelinePlace) {
+        item.geotaggedPhotos = [];
+        item.ungeotaggedPhotos = [];
+      } else if (item is TimelinePath) {
+        item.geotaggedPhotos = [];
+        item.ungeotaggedPhotos = [];
+      }
+    }
+
+    for (final photo in _photos) {
+      // Compute interpolated position for ungeotagged photos
+      if (photo.gpsLatLng == null &&
+          photo.dateTaken != null &&
+          points.isNotEmpty) {
+        photo.interpolatedLatLng =
+            _interpolatePositionAtTime(photo.dateTaken!, points, tz);
+      }
+
+      if (photo.dateTaken == null) continue;
+
+      final utc =
+          photo.dateTaken!.subtract(Duration(minutes: (tz * 60).toInt()));
+
+      TimelineItem? best;
+      for (int i = 0; i < items.length; i++) {
+        final item = items[i];
+        if (utc.compareTo(item.startTime) >= 0 &&
+            utc.compareTo(item.endTime) <= 0) {
+          best = item;
+          break;
+        }
+        // Let the last segment capture photos taken after its endTime
+        if (i == items.length - 1 && utc.isAfter(item.startTime)) {
+          best = item;
+        }
+      }
+      if (best == null) continue;
+
+      if (photo.gpsLatLng != null) {
+        if (best is TimelinePlace) best.geotaggedPhotos.add(photo);
+        if (best is TimelinePath) best.geotaggedPhotos.add(photo);
+      } else if (photo.interpolatedLatLng != null) {
+        if (best is TimelinePlace) best.ungeotaggedPhotos.add(photo);
+        if (best is TimelinePath) best.ungeotaggedPhotos.add(photo);
+      }
+    }
+
+    if (mounted) setState(() => _timelineItemsWithPhotos = items);
+  }
+
+  // ── Photo helpers for Timeline tiles ──────────────────────────────────
+  final Set<int> _expandedPhotoGrids = {};
+
+  void _geotagAllInItem(TimelineItem item) {
+    final ungeotagged = (item is TimelinePlace)
+        ? item.ungeotaggedPhotos
+        : (item is TimelinePath ? item.ungeotaggedPhotos : <PhotoEntry>[]);
+
+    final photosToTag = List<PhotoEntry>.from(ungeotagged);
+    if (photosToTag.isEmpty) return;
+
+    setState(() {
+      for (final photo in photosToTag) {
+        if (photo.interpolatedLatLng != null) {
+          photo.gpsLatLng = photo.interpolatedLatLng;
+          photo.interpolatedLatLng = null;
+          photo.addedToTimeline = true;
+        }
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Applied geotags to ${photosToTag.length} photos'),
+      backgroundColor: Colors.teal,
+      duration: const Duration(seconds: 2),
+    ));
+
+    final appState = context.read<AppStateProvider>();
+    final settings = context.read<SettingsProvider>();
+    final pts = appState.activePaths[_currentDateInfo(appState).filePath] ?? [];
+    _assignPhotosToTimelineItems(pts, settings.geotagTimezone.toDouble());
+  }
+
+  /// Modify Photo Geotag -> Snap photo GPS coordinate to timeline interpolated location
+  void _modifyGeotagsFromTimelineInItem(TimelineItem item) {
+    final geotagged = (item is TimelinePlace)
+        ? item.geotaggedPhotos
+        : (item is TimelinePath ? item.geotaggedPhotos : <PhotoEntry>[]);
+    if (geotagged.isEmpty) return;
+
+    final appState = context.read<AppStateProvider>();
+    final settings = context.read<SettingsProvider>();
+    final double tz = settings.geotagTimezone.toDouble();
+    final dateInfo = _currentDateInfo(appState);
+    final points = appState.activePaths[dateInfo.filePath] ?? [];
+    if (points.isEmpty) return;
+
+    int updatedCount = 0;
+    setState(() {
+      for (final photo in geotagged) {
+        if (photo.dateTaken == null) continue;
+        final LatLng? interpolated =
+            _interpolatePositionAtTime(photo.dateTaken!, points, tz);
+        if (interpolated != null) {
+          photo.gpsLatLng = interpolated;
+          photo.interpolatedLatLng = null;
+          photo.addedToTimeline = true;
+          updatedCount++;
+        }
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content:
+          Text('Updated $updatedCount photo geotag(s) to match timeline track'),
+      backgroundColor: Colors.teal,
+      duration: const Duration(seconds: 2),
+    ));
+
+    _assignPhotosToTimelineItems(points, tz);
+  }
+
+  /// Modify Timeline -> Adjust timeline track points to pass through photo GPS locations
+  Future<void> _modifyTimelineFromPhotosInItem(TimelineItem item) async {
+    final geotagged = (item is TimelinePlace)
+        ? item.geotaggedPhotos
+        : (item is TimelinePath ? item.geotaggedPhotos : <PhotoEntry>[]);
+    if (geotagged.isEmpty) return;
+
+    final appState = context.read<AppStateProvider>();
+    final settings = context.read<SettingsProvider>();
+    final double tz = settings.geotagTimezone.toDouble();
+    final dateInfo = _currentDateInfo(appState);
+
+    List<LocationPoint> points = dateInfo.filePath.isNotEmpty
+        ? await LocationManager.loadLocationFile(dateInfo.filePath)
+        : [];
+
+    int modifiedPointsCount = 0;
+    for (final photo in geotagged) {
+      if (photo.gpsLatLng == null || photo.dateTaken == null) continue;
+      final photoUtc =
+          photo.dateTaken!.subtract(Duration(minutes: (tz * 60).toInt()));
+
+      int nearestIdx = -1;
+      int minDiffMs = 60000; // 60s window
+      for (int i = 0; i < points.length; i++) {
+        final diff =
+            points[i].timestamp.difference(photoUtc).inMilliseconds.abs();
+        if (diff < minDiffMs) {
+          minDiffMs = diff;
+          nearestIdx = i;
+        }
+      }
+
+      if (nearestIdx != -1) {
+        points[nearestIdx] = LocationPoint(
+          latitude: photo.gpsLatLng!.latitude,
+          longitude: photo.gpsLatLng!.longitude,
+          timestamp: points[nearestIdx].timestamp,
+          elevation: points[nearestIdx].elevation,
+          activityType: points[nearestIdx].activityType,
+        );
+      } else {
+        points.add(LocationPoint(
+          latitude: photo.gpsLatLng!.latitude,
+          longitude: photo.gpsLatLng!.longitude,
+          timestamp: photoUtc,
+        ));
+      }
+      photo.addedToTimeline = true;
+      modifiedPointsCount++;
+    }
+
+    points.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    await appState.saveListPoints(dateInfo, points);
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(
+          'Updated timeline track with $modifiedPointsCount photo location(s)'),
+      backgroundColor: Colors.indigo,
+      duration: const Duration(seconds: 2),
+    ));
+
+    _loadPointsForSelectedDate();
+  }
+
+  Widget _buildSquarePhotoTile(PhotoEntry photo) {
+    final isSel = _selectedPhoto == photo || _selectedPhotoSet.contains(photo);
+    final isGeo = photo.hasExifGps;
+    final Color borderColor = isSel
+        ? Colors.amber
+        : (isGeo ? Colors.white : Colors.lightBlue.shade300);
+
+    return GestureDetector(
+      onTap: () => setState(() {
+        if (HardwareKeyboard.instance.isControlPressed) {
+          if (_selectedPhotoSet.contains(photo)) {
+            _selectedPhotoSet.remove(photo);
+          } else {
+            _selectedPhotoSet.add(photo);
+          }
+        } else {
+          _selectedPhotoSet.clear();
+          _selectedPhoto = (_selectedPhoto == photo) ? null : photo;
+        }
+      }),
+      child: Container(
+        width: 38,
+        height: 38,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: borderColor, width: isSel ? 2.5 : 2.0),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.2),
+              blurRadius: 3,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: Image.file(
+            photo.file,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(
+              color: Colors.grey.shade800,
+              child: const Icon(Icons.broken_image,
+                  size: 14, color: Colors.white54),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGeotagAllButton(TimelineItem item) {
+    return Material(
+      color: Colors.teal,
+      borderRadius: BorderRadius.circular(20),
+      elevation: 0,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => _geotagAllInItem(item),
+        child: Container(
+          width: 80,
+          height: 38,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.pin_drop, size: 14, color: Colors.white),
+              SizedBox(width: 3),
+              Expanded(
+                child: Text(
+                  'Geotag All',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.bold,
+                    height: 1.1,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModifyGeotagButton(TimelineItem item) {
+    return Tooltip(
+      message: 'Chỉnh vị trí ảnh cho đúng với đường Timeline',
+      child: Material(
+        color: Colors.teal.shade700,
+        borderRadius: BorderRadius.circular(20),
+        elevation: 0,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => _modifyGeotagsFromTimelineInItem(item),
+          child: Container(
+            height: 38,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.edit_location_alt, size: 14, color: Colors.white),
+                SizedBox(width: 3),
+                Text(
+                  'Modify Geotag',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModifyTimelineButton(TimelineItem item) {
+    return Tooltip(
+      message: 'Chỉnh đường Timeline cho đi qua đúng vị trí chụp ảnh',
+      child: Material(
+        color: Colors.indigo.shade600,
+        borderRadius: BorderRadius.circular(20),
+        elevation: 0,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => _modifyTimelineFromPhotosInItem(item),
+          child: Container(
+            height: 38,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.add_location_alt, size: 14, color: Colors.white),
+                SizedBox(width: 3),
+                Text(
+                  'Modify Timeline',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpandPhotoButton(int itemIndex, bool isExpanded) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Material(
+      color: colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => setState(() {
+          if (isExpanded) {
+            _expandedPhotoGrids.remove(itemIndex);
+          } else {
+            _expandedPhotoGrids.add(itemIndex);
+          }
+        }),
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: colorScheme.outlineVariant,
+              width: 1,
+            ),
+          ),
+          child: Icon(
+            isExpanded ? Icons.expand_less : Icons.grid_view,
+            size: 16,
+            color: colorScheme.primary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimelinePhotoRows(
+      BuildContext context, TimelineItem item, int itemIndex) {
+    final geotagged = (item is TimelinePlace)
+        ? item.geotaggedPhotos
+        : (item is TimelinePath ? item.geotaggedPhotos : <PhotoEntry>[]);
+    final ungeotagged = (item is TimelinePlace)
+        ? item.ungeotaggedPhotos
+        : (item is TimelinePath ? item.ungeotaggedPhotos : <PhotoEntry>[]);
+
+    if (geotagged.isEmpty && ungeotagged.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final isExpanded = _expandedPhotoGrids.contains(itemIndex);
+    final allPhotos = [...geotagged, ...ungeotagged];
+    final hasGeotagged = geotagged.isNotEmpty;
+    final hasUngeotagged = ungeotagged.isNotEmpty;
+
+    final double availableWidth = max(80.0, _sidebarWidth - 118.0);
+
+    const double photoTileW = 38.0;
+    const double geotagBtnW = 80.0;
+    const double modGeotagBtnW = 96.0;
+    const double modTimelineBtnW = 102.0;
+    const double expandBtnW = 38.0;
+    const double gap = 4.0;
+
+    // Calculate total width required if everything is displayed in 1 row
+    double totalRequiredWidth = allPhotos.length * (photoTileW + gap);
+    if (hasUngeotagged) {
+      totalRequiredWidth += (geotagBtnW + gap);
+    }
+    if (hasGeotagged) {
+      totalRequiredWidth += (modGeotagBtnW + gap) + (modTimelineBtnW + gap);
+    }
+    if (totalRequiredWidth > 0) {
+      totalRequiredWidth -= gap; // remove trailing gap
+    }
+
+    // Check if items exceed available width
+    final bool overflows = totalRequiredWidth > availableWidth;
+
+    Widget body;
+
+    if (isExpanded) {
+      // Expanded view: Wrap grid with Collapse button
+      body = Wrap(
+        spacing: gap,
+        runSpacing: gap,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ...allPhotos.map(_buildSquarePhotoTile),
+          if (hasUngeotagged) _buildGeotagAllButton(item),
+          if (hasGeotagged) ...[
+            _buildModifyGeotagButton(item),
+            _buildModifyTimelineButton(item),
+          ],
+          _buildExpandPhotoButton(itemIndex, true),
+        ],
+      );
+    } else if (!overflows) {
+      // Collapsed view but everything fits! No expand button needed.
+      body = Wrap(
+        spacing: gap,
+        runSpacing: gap,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ...allPhotos.map(_buildSquarePhotoTile),
+          if (hasUngeotagged) _buildGeotagAllButton(item),
+          if (hasGeotagged) ...[
+            _buildModifyGeotagButton(item),
+            _buildModifyTimelineButton(item),
+          ],
+        ],
+      );
+    } else {
+      // Collapsed view with overflow: calculate visible photos/buttons
+      final double widthForContent = availableWidth - (expandBtnW + gap);
+      double currentW = 0.0;
+      final List<Widget> visibleWidgets = [];
+
+      for (int i = 0; i < allPhotos.length; i++) {
+        final needed = photoTileW + (visibleWidgets.isEmpty ? 0 : gap);
+        if (currentW + needed <= widthForContent) {
+          visibleWidgets.add(_buildSquarePhotoTile(allPhotos[i]));
+          currentW += needed;
+        } else {
+          break;
+        }
+      }
+
+      // Check if Geotag All button fits in remaining space
+      if (hasUngeotagged) {
+        final neededGeo = geotagBtnW + (visibleWidgets.isEmpty ? 0 : gap);
+        if (currentW + neededGeo <= widthForContent) {
+          visibleWidgets.add(_buildGeotagAllButton(item));
+          currentW += neededGeo;
+        }
+      }
+
+      // Check if Modify Geotag & Modify Timeline buttons fit in remaining space
+      if (hasGeotagged) {
+        final neededModGeo = modGeotagBtnW + (visibleWidgets.isEmpty ? 0 : gap);
+        if (currentW + neededModGeo <= widthForContent) {
+          visibleWidgets.add(_buildModifyGeotagButton(item));
+          currentW += neededModGeo;
+
+          final neededModTime = modTimelineBtnW + gap;
+          if (currentW + neededModTime <= widthForContent) {
+            visibleWidgets.add(_buildModifyTimelineButton(item));
+          }
+        }
+      }
+
+      // Use Wrap instead of Row to eliminate overflow errors
+      body = Wrap(
+        spacing: gap,
+        runSpacing: gap,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ...visibleWidgets,
+          _buildExpandPhotoButton(itemIndex, false),
+        ],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 2),
+      child: body,
+    );
+  }
+
+  /// Promotes the interpolated position of [photo] to its GPS coordinate
+  /// (in memory), moving it from ungeotagged → geotagged.
+  void _applyInterpolatedGeotag(PhotoEntry photo) {
+    final loc = photo.interpolatedLatLng;
+    if (loc == null) return;
+    setState(() {
+      photo.gpsLatLng = loc;
+      photo.interpolatedLatLng = null;
+      photo.addedToTimeline = true;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Geotag applied: "${photo.filename}" '
+          '(${loc.latitude.toStringAsFixed(5)}, '
+          '${loc.longitude.toStringAsFixed(5)})'),
+      backgroundColor: Colors.teal,
+      duration: const Duration(seconds: 2),
+    ));
+    // Rebuild so photo moves from ungeotagged row → geotagged row
+    final appState = context.read<AppStateProvider>();
+    final settings = context.read<SettingsProvider>();
+    final pts = appState.activePaths[_currentDateInfo(appState).filePath] ?? [];
+    _assignPhotosToTimelineItems(pts, settings.geotagTimezone.toDouble());
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // SECTION: Map animation & fit — _animatedMapMove, _fitBounds
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -488,6 +1197,19 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     controller.forward();
   }
 
+  void _animatedFitBounds(LatLngBounds bounds,
+      {EdgeInsets padding = const EdgeInsets.all(40)}) {
+    try {
+      final cameraFit = CameraFit.bounds(bounds: bounds, padding: padding);
+      final targetCamera = cameraFit.fit(_mapController.camera);
+      _animatedMapMove(targetCamera.center, targetCamera.zoom);
+    } catch (_) {
+      _mapController.fitCamera(
+        CameraFit.bounds(bounds: bounds, padding: padding),
+      );
+    }
+  }
+
   void _fitBounds() {
     final appState = context.read<AppStateProvider>();
     final paths = appState.activePaths;
@@ -499,30 +1221,52 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
     final bounds = LatLngBounds.fromPoints(allPoints);
 
-    _mapController.fitCamera(
-      CameraFit.bounds(
-        bounds: bounds,
-        padding: const EdgeInsets.all(50.0),
-      ),
-    );
+    _animatedFitBounds(bounds, padding: const EdgeInsets.all(50.0));
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // SECTION: Pointer / drag interactions — hover, pointer down/move/up
   // ─────────────────────────────────────────────────────────────────────────
 
+  List<LocationPoint> _getActiveHoverPoints(
+      List<LocationPoint> dayPoints, double timeOffset) {
+    if (_selectedTimelineItemIndex != null) {
+      final items =
+          _timelineItemsWithPhotos ?? _clusterTimeline(dayPoints, timeOffset);
+      if (_selectedTimelineItemIndex! < items.length) {
+        final selectedItem = items[_selectedTimelineItemIndex!];
+
+        if (selectedItem is TimelinePath) {
+          return selectedItem.points;
+        } else if (selectedItem is TimelinePlace) {
+          final List<LocationPoint> activePoints = [];
+
+          // Incoming neighbor path
+          if (_selectedTimelineItemIndex! - 1 >= 0) {
+            final incoming = items[_selectedTimelineItemIndex! - 1];
+            if (incoming is TimelinePath) {
+              activePoints.addAll(incoming.points);
+            }
+          }
+          // Outgoing neighbor path
+          if (_selectedTimelineItemIndex! + 1 < items.length) {
+            final outgoing = items[_selectedTimelineItemIndex! + 1];
+            if (outgoing is TimelinePath) {
+              activePoints.addAll(outgoing.points);
+            }
+          }
+          return activePoints;
+        }
+      }
+    }
+
+    return dayPoints;
+  }
+
   void _handleHover(PointerHoverEvent event, LatLng point) {
     final appState = context.read<AppStateProvider>();
     if (!appState.isEditing) {
       // Non-edit mode: hover over existing tracks
-      final paths = appState.activePaths;
-      if (paths.isEmpty) return;
-
-      LocationPoint? closestPoint;
-      Color? closestColor;
-      double minDistance = double.infinity;
-      const double snapThreshold = 0.005;
-
       final currentDayInfo = appState.allDates.firstWhere(
         (d) =>
             _selectedDate != null &&
@@ -541,32 +1285,167 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         ),
       );
 
-      for (final entry in paths.entries) {
-        final isSelectedPath = entry.key == currentDayInfo.filePath;
-        final color = isSelectedPath ? Colors.purple : Colors.grey;
-        for (final p in entry.value) {
-          final dLat = p.latitude - point.latitude;
-          final dLon = p.longitude - point.longitude;
-          final dist = dLat * dLat + dLon * dLon;
+      final settings = context.read<SettingsProvider>();
+      final timeOffset = settings.geotagTimezone.toDouble();
+      final rawDayPoints = appState.activePaths[currentDayInfo.filePath] ?? [];
 
-          if (dist < minDistance) {
-            minDistance = dist;
-            closestPoint = p;
-            closestColor = color;
+      // Detect hover over any TimelineItem (Path or Place)
+      double currentZoom = 13.0;
+      try {
+        currentZoom = _mapController.camera.zoom;
+      } catch (_) {}
+
+      final double pathHoverDistThreshold = 0.035 / pow(2, currentZoom - 10);
+      final double pathHoverDistThresholdSq =
+          pathHoverDistThreshold * pathHoverDistThreshold;
+
+      // Larger buffer area for Places (~600m+)
+      final double placeHoverDistThreshold = 0.065 / pow(2, currentZoom - 10);
+      final double placeHoverDistThresholdSq =
+          placeHoverDistThreshold * placeHoverDistThreshold;
+
+      final timelineItems = _clusterTimeline(rawDayPoints, timeOffset);
+      int? foundHoverIdx;
+      double minHoverDistSq = double.infinity;
+
+      // 1. Check Places first with the larger Place buffer
+      for (int i = 0; i < timelineItems.length; i++) {
+        final item = timelineItems[i];
+        if (item is TimelinePlace) {
+          final dy = item.center.latitude - point.latitude;
+          final dx = item.center.longitude - point.longitude;
+          final distSq = dy * dy + dx * dx;
+          if (distSq < minHoverDistSq && distSq < placeHoverDistThresholdSq) {
+            minHoverDistSq = distSq;
+            foundHoverIdx = i;
           }
         }
       }
 
-      if (minDistance < snapThreshold * snapThreshold) {
-        if (_hoveredPoint != closestPoint) {
+      // 2. If no Place was hovered, check Paths with standard buffer
+      if (foundHoverIdx == null) {
+        for (int i = 0; i < timelineItems.length; i++) {
+          final item = timelineItems[i];
+          if (item is TimelinePath && item.points.isNotEmpty) {
+            final proj = _getNearestProjection(point, item.points);
+            if (proj != null &&
+                proj.distance < minHoverDistSq &&
+                proj.distance < pathHoverDistThresholdSq) {
+              minHoverDistSq = proj.distance;
+              foundHoverIdx = i;
+            }
+          }
+        }
+      }
+
+      if (_hoveredTimelineItemIndex != foundHoverIdx) {
+        setState(() {
+          _hoveredTimelineItemIndex = foundHoverIdx;
+        });
+      }
+
+      // If a Place is currently hovered, suppress Path hover points/dots so only the Place is targeted
+      final bool isPlaceHovered = (foundHoverIdx != null &&
+          foundHoverIdx < timelineItems.length &&
+          timelineItems[foundHoverIdx] is TimelinePlace);
+
+      if (isPlaceHovered) {
+        if (_hoveredLatLng != null) {
           setState(() {
-            _hoveredPoint = closestPoint;
-            _hoveredColor = closestColor;
-            _hoveredLatLng = closestPoint?.latLng;
+            _hoveredPoint = null;
+            _hoveredColor = null;
+            _hoveredLatLng = null;
+          });
+        }
+        return;
+      }
+
+      final points = _getActiveHoverPoints(rawDayPoints, timeOffset);
+      if (points.isEmpty) {
+        if (_hoveredLatLng != null) {
+          setState(() {
+            _hoveredPoint = null;
+            _hoveredColor = null;
+            _hoveredLatLng = null;
+          });
+        }
+        return;
+      }
+
+      if (points.length == 1) {
+        final p = points.first;
+        setState(() {
+          _hoveredPoint = p;
+          _hoveredColor = Colors.white;
+          _hoveredLatLng = p.latLng;
+        });
+        return;
+      }
+
+      final projection = _getNearestProjection(point, points);
+      if (projection == null) return;
+
+      // Hover radius threshold (~400m)
+      final double hoverThreshold = 0.035 / pow(2, currentZoom - 10);
+      final double hoverThresholdSq = hoverThreshold * hoverThreshold;
+
+      if (projection.distance < hoverThresholdSq) {
+        // Find segment points
+        final int startIdx = projection.insertIndex - 1;
+        final int endIdx = projection.insertIndex;
+        final startPt = points[startIdx];
+        final endPt = points[endIdx];
+
+        // Snapping check to actual coordinate points
+        final double snapThreshold = 0.015 / pow(2, currentZoom - 10);
+        final double snapThresholdSq = snapThreshold * snapThreshold;
+
+        final dLatStart = startPt.latitude - point.latitude;
+        final dLonStart = startPt.longitude - point.longitude;
+        final distStartSq = dLatStart * dLatStart + dLonStart * dLonStart;
+
+        final dLatEnd = endPt.latitude - point.latitude;
+        final dLonEnd = endPt.longitude - point.longitude;
+        final distEndSq = dLatEnd * dLatEnd + dLonEnd * dLonEnd;
+
+        LatLng finalPoint;
+        DateTime finalTime;
+        bool isSnapped = false;
+
+        if (distStartSq < snapThresholdSq || distEndSq < snapThresholdSq) {
+          // Snap to the closer coordinate point
+          isSnapped = true;
+          if (distStartSq <= distEndSq) {
+            finalPoint = startPt.latLng;
+            finalTime = startPt.timestamp;
+          } else {
+            finalPoint = endPt.latLng;
+            finalTime = endPt.timestamp;
+          }
+        } else {
+          // Move smoothly along the line segment path
+          finalPoint = projection.point;
+          final gap = endPt.timestamp.difference(startPt.timestamp);
+          finalTime = startPt.timestamp.add(gap * projection.t);
+        }
+
+        final newHovered = LocationPoint(
+          latitude: finalPoint.latitude,
+          longitude: finalPoint.longitude,
+          timestamp: finalTime,
+        );
+
+        if (_hoveredPoint?.latitude != finalPoint.latitude ||
+            _hoveredPoint?.longitude != finalPoint.longitude ||
+            _hoveredPoint?.timestamp != finalTime) {
+          setState(() {
+            _hoveredPoint = newHovered;
+            _hoveredColor = isSnapped ? Colors.white : Colors.purple;
+            _hoveredLatLng = finalPoint;
           });
         }
       } else {
-        if (_hoveredPoint != null) {
+        if (_hoveredLatLng != null) {
           setState(() {
             _hoveredPoint = null;
             _hoveredColor = null;
@@ -617,20 +1496,194 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
-  void _handlePointerDown(PointerDownEvent event) {
+  // ── Save-to-disk with sync indicator ────────────────────────────────────
+  void _saveWithIndicator(AppStateProvider appState, DateInfo dateInfo,
+      List<LocationPoint> points) {
+    _savingCount++;
+    if (mounted) setState(() => _isSaving = true);
+    appState.saveListPoints(dateInfo, points).whenComplete(() {
+      _savingCount = (_savingCount - 1).clamp(0, 999);
+      if (mounted && _savingCount == 0) setState(() => _isSaving = false);
+    });
+  }
+
+  void _handlePointerDown(PointerDownEvent event, LatLng tapLatLng) {
     final appState = context.read<AppStateProvider>();
-    if (!appState.isEditing) return;
 
     double currentZoom = 13.0;
     try {
       currentZoom = _mapController.camera.zoom;
     } catch (_) {}
+
+    // ── Left click on hovered timeline item shifts focus to it ────────────────
+    if (event.buttons != kSecondaryButton &&
+        _hoveredTimelineItemIndex != null) {
+      setState(() {
+        _selectedTimelineItemIndex = _hoveredTimelineItemIndex;
+      });
+    }
+
+    // ── Place marker dragging check ──────────────────────────────────────────
+    if (event.buttons != kSecondaryButton &&
+        _selectedTimelineItemIndex != null &&
+        !appState.isEditing) {
+      final currentDayInfo = appState.allDates.firstWhere(
+        (d) =>
+            _selectedDate != null &&
+            d.date.year == _selectedDate!.year &&
+            d.date.month == _selectedDate!.month &&
+            d.date.day == _selectedDate!.day,
+        orElse: () => DateInfo(
+          date: _selectedDate ?? DateTime.now(),
+          pointCount: 0,
+          filePath: '',
+          distance: 0.0,
+          state: 'original',
+          source: 'merge',
+          hasTimelineBackup: false,
+          hasGpxBackup: false,
+        ),
+      );
+      final rawDayPoints = appState.activePaths[currentDayInfo.filePath] ?? [];
+      final settings = context.read<SettingsProvider>();
+      final timeOffset = settings.geotagTimezone.toDouble();
+      final timelineItems = _clusterTimeline(rawDayPoints, timeOffset);
+
+      if (_selectedTimelineItemIndex! < timelineItems.length) {
+        final item = timelineItems[_selectedTimelineItemIndex!];
+        if (item is TimelinePlace) {
+          final double threshold = 0.065 / pow(2, currentZoom - 10);
+          final double thresholdSq = threshold * threshold;
+          final dy = item.center.latitude - tapLatLng.latitude;
+          final dx = item.center.longitude - tapLatLng.longitude;
+          if (dy * dy + dx * dx < thresholdSq) {
+            setState(() {
+              _isDraggingPlace = true;
+              _draggingPlaceIndex = _selectedTimelineItemIndex;
+              _draggingPlaceStartLatLng = tapLatLng;
+              _draggedPlaceCurrentLatLng = item.center;
+            });
+            return;
+          }
+        }
+      }
+    }
+
+    // ── Right click: Start multi-point selection drag box ────────────────────
+    if (event.buttons == kSecondaryButton) {
+      setState(() {
+        _isRightClickSelecting = true;
+        _rightClickStartLatLng = tapLatLng;
+        _rightClickCurrentLatLng = tapLatLng;
+      });
+      return;
+    }
+    final photoThreshold = 0.025 / pow(2, currentZoom - 10);
+    final photoThresholdSq = photoThreshold * photoThreshold;
+    PhotoEntry? hitPhoto;
+    double hitPhotoDistSq = double.infinity;
+    for (final photo in _photos) {
+      final loc = photo.assignedLatLng;
+      if (loc == null) continue;
+      final dLat = loc.latitude - tapLatLng.latitude;
+      final dLon = loc.longitude - tapLatLng.longitude;
+      final distSq = dLat * dLat + dLon * dLon;
+      if (distSq < hitPhotoDistSq && distSq < photoThresholdSq) {
+        hitPhotoDistSq = distSq;
+        hitPhoto = photo;
+      }
+    }
+    if (hitPhoto != null) {
+      setState(() {
+        _draggingPhoto = hitPhoto;
+        _isDraggingPhoto = true;
+        _selectedPhoto = hitPhoto;
+      });
+      return; // consume event — don't edit route
+    }
+
+    // Check if clicked near the hover dot
+    if (_hoveredLatLng != null && _hoveredPoint != null) {
+      final double hoverThreshold = 0.025 / pow(2, currentZoom - 10);
+      final double hoverThresholdSq = hoverThreshold * hoverThreshold;
+
+      final dLat = _hoveredLatLng!.latitude - tapLatLng.latitude;
+      final dLon = _hoveredLatLng!.longitude - tapLatLng.longitude;
+      final distSq = dLat * dLat + dLon * dLon;
+
+      if (distSq < hoverThresholdSq) {
+        final currentDayInfo = appState.allDates.firstWhere(
+          (d) =>
+              _selectedDate != null &&
+              d.date.year == _selectedDate!.year &&
+              d.date.month == _selectedDate!.month &&
+              d.date.day == _selectedDate!.day,
+          orElse: () => DateInfo(
+            date: _selectedDate ?? DateTime.now(),
+            pointCount: 0,
+            filePath: '',
+            distance: 0.0,
+            state: 'original',
+            source: 'merge',
+            hasTimelineBackup: false,
+            hasGpxBackup: false,
+          ),
+        );
+        final allPoints = appState.isEditing
+            ? appState.editingPoints
+            : (appState.activePaths[currentDayInfo.filePath] ?? []);
+
+        final settings = context.read<SettingsProvider>();
+        final timeOffset = settings.geotagTimezone.toDouble();
+        final points = appState.isEditing
+            ? allPoints
+            : _getActiveHoverPoints(allPoints, timeOffset);
+
+        final projection = _getNearestProjection(tapLatLng, points);
+        if (projection != null) {
+          int globalInsertIndex = projection.insertIndex;
+          if (!appState.isEditing &&
+              points.isNotEmpty &&
+              projection.insertIndex > 0) {
+            final prevPt = points[projection.insertIndex - 1];
+            final globalPrevIdx = allPoints.indexOf(prevPt);
+            if (globalPrevIdx >= 0) {
+              globalInsertIndex = globalPrevIdx + 1;
+            }
+          }
+
+          TimelinePath? targetSegment;
+          if (!appState.isEditing && _timelineItemsWithPhotos != null) {
+            final hoverTime = _hoveredPoint!.timestamp;
+            for (final item in _timelineItemsWithPhotos!) {
+              if (item is TimelinePath) {
+                if ((hoverTime.isAfter(item.startTime) ||
+                        hoverTime.isAtSameMomentAs(item.startTime)) &&
+                    (hoverTime.isBefore(item.endTime) ||
+                        hoverTime.isAtSameMomentAs(item.endTime))) {
+                  targetSegment = item;
+                  break;
+                }
+              }
+            }
+          }
+
+          setState(() {
+            _isDraggingHoverDot = true;
+            _draggedHoverDotTime = _hoveredPoint!.timestamp;
+            _draggedHoverDotInsertIndex = globalInsertIndex;
+            _draggedHoverDotCurrentLatLng = _hoveredLatLng;
+            _draggedHoverDotSegment = targetSegment;
+          });
+          return;
+        }
+      }
+    }
+
+    if (!appState.isEditing) return;
+
     final touchThreshold = 0.015 / pow(2, currentZoom - 10);
     final touchThresholdSq = touchThreshold * touchThreshold;
-
-    final RenderBox renderBox = context.findRenderObject() as RenderBox;
-    final localOffset = renderBox.globalToLocal(event.position);
-    final tapLatLng = _mapController.camera.screenOffsetToLatLng(localOffset);
 
     final editingPoints = appState.editingPoints;
 
@@ -671,20 +1724,431 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
-  void _handlePointerMove(PointerMoveEvent event) {
+  void _handlePointerMove(PointerMoveEvent event, LatLng moveLatLng) {
+    if (_isDraggingPlace &&
+        _draggingPlaceStartLatLng != null &&
+        _draggingPlaceIndex != null) {
+      final appState = context.read<AppStateProvider>();
+      final currentDayInfo = appState.allDates.firstWhere(
+        (d) =>
+            _selectedDate != null &&
+            d.date.year == _selectedDate!.year &&
+            d.date.month == _selectedDate!.month &&
+            d.date.day == _selectedDate!.day,
+        orElse: () => DateInfo(
+          date: _selectedDate ?? DateTime.now(),
+          pointCount: 0,
+          filePath: '',
+          distance: 0.0,
+          state: 'original',
+          source: 'merge',
+          hasTimelineBackup: false,
+          hasGpxBackup: false,
+        ),
+      );
+      final rawDayPoints = appState.activePaths[currentDayInfo.filePath] ?? [];
+      final settings = context.read<SettingsProvider>();
+      final timeOffset = settings.geotagTimezone.toDouble();
+      final timelineItems = _clusterTimeline(rawDayPoints, timeOffset);
+
+      if (_draggingPlaceIndex! < timelineItems.length) {
+        final item = timelineItems[_draggingPlaceIndex!];
+        if (item is TimelinePlace) {
+          final dLat =
+              moveLatLng.latitude - _draggingPlaceStartLatLng!.latitude;
+          final dLng =
+              moveLatLng.longitude - _draggingPlaceStartLatLng!.longitude;
+
+          setState(() {
+            _draggedPlaceCurrentLatLng = LatLng(
+                item.center.latitude + dLat, item.center.longitude + dLng);
+          });
+        }
+      }
+      return;
+    }
+
+    if (_isRightClickSelecting) {
+      setState(() {
+        _rightClickCurrentLatLng = moveLatLng;
+      });
+      return;
+    }
+
+    if (_isDraggingHoverDot) {
+      setState(() {
+        _draggedHoverDotCurrentLatLng = moveLatLng;
+        _hoveredLatLng = moveLatLng;
+        _hoveredPoint = LocationPoint(
+          latitude: moveLatLng.latitude,
+          longitude: moveLatLng.longitude,
+          timestamp: _draggedHoverDotTime!,
+        );
+      });
+      return;
+    }
+
+    if (_isDraggingPhoto && _draggingPhoto != null) {
+      final oldLoc = _draggingPhoto!.assignedLatLng;
+      if (oldLoc != null) {
+        final dLat = moveLatLng.latitude - oldLoc.latitude;
+        final dLng = moveLatLng.longitude - oldLoc.longitude;
+
+        setState(() {
+          // Update main dragging photo
+          if (_draggingPhoto!.gpsLatLng != null) {
+            _draggingPhoto!.gpsLatLng = moveLatLng;
+          } else {
+            _draggingPhoto!.interpolatedLatLng = moveLatLng;
+          }
+
+          // If multi-selected set contains the dragging photo, move all others too
+          if (_selectedPhotoSet.contains(_draggingPhoto)) {
+            for (final photo in _selectedPhotoSet) {
+              if (photo == _draggingPhoto) continue;
+              final curLoc = photo.assignedLatLng;
+              if (curLoc == null) continue;
+              final moved =
+                  LatLng(curLoc.latitude + dLat, curLoc.longitude + dLng);
+              if (photo.gpsLatLng != null) {
+                photo.gpsLatLng = moved;
+              } else {
+                photo.interpolatedLatLng = moved;
+              }
+            }
+          }
+        });
+      }
+      return;
+    }
+
     if (_isDraggingPoint && _selectedPointIndex != null) {
       final appState = context.read<AppStateProvider>();
-      final RenderBox renderBox = context.findRenderObject() as RenderBox;
-      final localOffset = renderBox.globalToLocal(event.position);
       try {
-        final newLatLng =
-            _mapController.camera.screenOffsetToLatLng(localOffset);
-        appState.updatePointCoordinate(_selectedPointIndex!, newLatLng);
+        appState.updatePointCoordinate(_selectedPointIndex!, moveLatLng);
       } catch (_) {}
     }
   }
 
-  void _handlePointerUp(PointerUpEvent event) {
+  void _handlePointerUp(PointerUpEvent event, LatLng upLatLng) {
+    if (_isDraggingPlace &&
+        _draggingPlaceStartLatLng != null &&
+        _draggingPlaceIndex != null) {
+      final appState = context.read<AppStateProvider>();
+      final currentDayInfo = appState.allDates.firstWhere(
+        (d) =>
+            _selectedDate != null &&
+            d.date.year == _selectedDate!.year &&
+            d.date.month == _selectedDate!.month &&
+            d.date.day == _selectedDate!.day,
+        orElse: () => DateInfo(
+          date: _selectedDate ?? DateTime.now(),
+          pointCount: 0,
+          filePath: '',
+          distance: 0.0,
+          state: 'original',
+          source: 'merge',
+          hasTimelineBackup: false,
+          hasGpxBackup: false,
+        ),
+      );
+      final dayPoints = appState.activePaths[currentDayInfo.filePath] ?? [];
+      final settings = context.read<SettingsProvider>();
+      final timeOffset = settings.geotagTimezone.toDouble();
+      final timelineItems = _clusterTimeline(dayPoints, timeOffset);
+
+      if (_draggingPlaceIndex! < timelineItems.length) {
+        final item = timelineItems[_draggingPlaceIndex!];
+        if (item is TimelinePlace && item.points.isNotEmpty) {
+          final dLat = upLatLng.latitude - _draggingPlaceStartLatLng!.latitude;
+          final dLng =
+              upLatLng.longitude - _draggingPlaceStartLatLng!.longitude;
+
+          // Back up adjacent roads for session Undo
+          if (_draggingPlaceIndex! - 1 >= 0 &&
+              timelineItems[_draggingPlaceIndex! - 1] is TimelinePath) {
+            final prevPath =
+                timelineItems[_draggingPlaceIndex! - 1] as TimelinePath;
+            final key = _getSegmentKey(prevPath.startTime, prevPath.endTime);
+            _unsnappedSegmentBackups[key] =
+                List<LocationPoint>.from(prevPath.points);
+          }
+          if (_draggingPlaceIndex! + 1 < timelineItems.length &&
+              timelineItems[_draggingPlaceIndex! + 1] is TimelinePath) {
+            final nextPath =
+                timelineItems[_draggingPlaceIndex! + 1] as TimelinePath;
+            final key = _getSegmentKey(nextPath.startTime, nextPath.endTime);
+            _unsnappedSegmentBackups[key] =
+                List<LocationPoint>.from(nextPath.points);
+          }
+
+          final updated = List<LocationPoint>.from(dayPoints);
+          final placeStart =
+              item.startTime.subtract(const Duration(seconds: 1));
+          final placeEnd = item.endTime.add(const Duration(seconds: 1));
+
+          DateTime? prevPathLastTime;
+          DateTime? nextPathFirstTime;
+
+          if (_draggingPlaceIndex! - 1 >= 0 &&
+              timelineItems[_draggingPlaceIndex! - 1] is TimelinePath) {
+            final prevPath =
+                timelineItems[_draggingPlaceIndex! - 1] as TimelinePath;
+            if (prevPath.points.isNotEmpty) {
+              prevPathLastTime = prevPath.points.last.timestamp;
+            }
+          }
+
+          if (_draggingPlaceIndex! + 1 < timelineItems.length &&
+              timelineItems[_draggingPlaceIndex! + 1] is TimelinePath) {
+            final nextPath =
+                timelineItems[_draggingPlaceIndex! + 1] as TimelinePath;
+            if (nextPath.points.isNotEmpty) {
+              nextPathFirstTime = nextPath.points.first.timestamp;
+            }
+          }
+
+          for (int i = 0; i < updated.length; i++) {
+            final p = updated[i];
+            final bool isPlacePt = !p.timestamp.isBefore(placeStart) &&
+                !p.timestamp.isAfter(placeEnd);
+            final bool isIncomingEndPt = (prevPathLastTime != null &&
+                p.timestamp.millisecondsSinceEpoch ==
+                    prevPathLastTime.millisecondsSinceEpoch);
+            final bool isOutgoingStartPt = (nextPathFirstTime != null &&
+                p.timestamp.millisecondsSinceEpoch ==
+                    nextPathFirstTime.millisecondsSinceEpoch);
+
+            if (isPlacePt || isIncomingEndPt || isOutgoingStartPt) {
+              updated[i] = LocationPoint(
+                latitude: p.latitude + dLat,
+                longitude: p.longitude + dLng,
+                timestamp: p.timestamp,
+              );
+            }
+          }
+
+          // Instant repaint with 0ms latency, then persist to disk async
+          appState.updateActivePathInMemory(currentDayInfo, updated);
+          _saveWithIndicator(appState, currentDayInfo, updated);
+        }
+      }
+
+      setState(() {
+        _isDraggingPlace = false;
+        _draggingPlaceIndex = null;
+        _draggingPlaceStartLatLng = null;
+        _draggedPlaceCurrentLatLng = null;
+      });
+      return;
+    }
+
+    if (_isRightClickSelecting) {
+      final appState = context.read<AppStateProvider>();
+      final currentDayInfo = appState.allDates.firstWhere(
+        (d) =>
+            _selectedDate != null &&
+            d.date.year == _selectedDate!.year &&
+            d.date.month == _selectedDate!.month &&
+            d.date.day == _selectedDate!.day,
+        orElse: () => DateInfo(
+          date: _selectedDate ?? DateTime.now(),
+          pointCount: 0,
+          filePath: '',
+          distance: 0.0,
+          state: 'original',
+          source: 'merge',
+          hasTimelineBackup: false,
+          hasGpxBackup: false,
+        ),
+      );
+
+      final allPoints = appState.isEditing
+          ? appState.editingPoints
+          : (appState.activePaths[currentDayInfo.filePath] ?? []);
+
+      final settings = context.read<SettingsProvider>();
+      final timeOffset = settings.geotagTimezone.toDouble();
+      final activePts = appState.isEditing
+          ? allPoints
+          : _getActiveHoverPoints(allPoints, timeOffset);
+
+      if (_rightClickStartLatLng != null && _rightClickCurrentLatLng != null) {
+        final start = _rightClickStartLatLng!;
+        final end = _rightClickCurrentLatLng!;
+
+        double currentZoom = 13.0;
+        try {
+          currentZoom = _mapController.camera.zoom;
+        } catch (_) {}
+
+        final double dLat = (start.latitude - end.latitude).abs();
+        final double dLng = (start.longitude - end.longitude).abs();
+
+        final List<LocationPoint> pointsToDelete = [];
+
+        if (dLat < 0.0001 && dLng < 0.0001) {
+          // Single right-click tap (~400m threshold)
+          final double deleteThreshold = 0.035 / pow(2, currentZoom - 10);
+          final double deleteThresholdSq = deleteThreshold * deleteThreshold;
+
+          LocationPoint? hitPt;
+          double minDistSq = double.infinity;
+          for (final p in activePts) {
+            final dy = p.latitude - end.latitude;
+            final dx = p.longitude - end.longitude;
+            final distSq = dy * dy + dx * dx;
+            if (distSq < minDistSq && distSq < deleteThresholdSq) {
+              minDistSq = distSq;
+              hitPt = p;
+            }
+          }
+          if (hitPt != null) {
+            pointsToDelete.add(hitPt);
+          }
+        } else {
+          // Drag selection box
+          final minLat = min(start.latitude, end.latitude);
+          final maxLat = max(start.latitude, end.latitude);
+          final minLng = min(start.longitude, end.longitude);
+          final maxLng = max(start.longitude, end.longitude);
+
+          for (final p in activePts) {
+            if (p.latitude >= minLat &&
+                p.latitude <= maxLat &&
+                p.longitude >= minLng &&
+                p.longitude <= maxLng) {
+              pointsToDelete.add(p);
+            }
+          }
+        }
+
+        if (pointsToDelete.isNotEmpty) {
+          if (appState.isEditing) {
+            appState.editingPoints
+                .removeWhere((p) => pointsToDelete.contains(p));
+          } else {
+            final timelineItems = _clusterTimeline(allPoints, timeOffset);
+            for (final item in timelineItems) {
+              if (item is TimelinePath &&
+                  item.points.any((p) => pointsToDelete.contains(p))) {
+                final key = _getSegmentKey(item.startTime, item.endTime);
+                _unsnappedSegmentBackups[key] =
+                    List<LocationPoint>.from(item.points);
+              }
+            }
+
+            final updated = List<LocationPoint>.from(allPoints);
+            updated.removeWhere((p) => pointsToDelete.any((del) =>
+                del == p ||
+                (del.latitude == p.latitude &&
+                    del.longitude == p.longitude &&
+                    del.timestamp == p.timestamp)));
+            appState.updateActivePathInMemory(currentDayInfo, updated);
+            _saveWithIndicator(appState, currentDayInfo, updated);
+          }
+
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                    '${pointsToDelete.length} point${pointsToDelete.length > 1 ? 's' : ''} deleted.'),
+                duration: const Duration(seconds: 1),
+              ),
+            );
+          }
+        }
+      }
+
+      setState(() {
+        _isRightClickSelecting = false;
+        _rightClickStartLatLng = null;
+        _rightClickCurrentLatLng = null;
+        _hoveredPoint = null;
+        _hoveredLatLng = null;
+      });
+      return;
+    }
+
+    if (_isDraggingHoverDot) {
+      final appState = context.read<AppStateProvider>();
+      final dateInfo = _currentDateInfo(appState);
+
+      if (_draggedHoverDotInsertIndex != null &&
+          _draggedHoverDotCurrentLatLng != null &&
+          _draggedHoverDotTime != null) {
+        final newPoint = LocationPoint(
+          latitude: _draggedHoverDotCurrentLatLng!.latitude,
+          longitude: _draggedHoverDotCurrentLatLng!.longitude,
+          timestamp: _draggedHoverDotTime!,
+        );
+
+        if (appState.isEditing) {
+          appState.insertPoint(_draggedHoverDotInsertIndex!,
+              _draggedHoverDotCurrentLatLng!, 0.0);
+        } else {
+          final dayPoints = appState.activePaths[dateInfo.filePath] ?? [];
+          final updated = List<LocationPoint>.from(dayPoints);
+
+          // Save backup for session Undo before manual edit
+          if (_draggedHoverDotSegment != null) {
+            final key = _getSegmentKey(_draggedHoverDotSegment!.startTime,
+                _draggedHoverDotSegment!.endTime);
+            _unsnappedSegmentBackups[key] =
+                List<LocationPoint>.from(_draggedHoverDotSegment!.points);
+          }
+
+          // Move existing point if dragging a vertex, or insert if dragging line segment
+          final existingIdx = updated.indexWhere((p) =>
+              p.timestamp.millisecondsSinceEpoch ==
+              _draggedHoverDotTime!.millisecondsSinceEpoch);
+
+          if (existingIdx != -1) {
+            updated[existingIdx] = newPoint;
+          } else {
+            updated.insert(_draggedHoverDotInsertIndex!, newPoint);
+          }
+
+          // Repaint immediately with 0ms latency, then save to disk async
+          appState.updateActivePathInMemory(dateInfo, updated);
+
+          if (_autoSnapOnDrag && _draggedHoverDotSegment != null && mounted) {
+            _snapSegmentToRoads(
+                context, appState, dateInfo, updated, _draggedHoverDotSegment!);
+          }
+
+          // Persist to disk asynchronously (does NOT block UI)
+          _saveWithIndicator(appState, dateInfo, updated);
+        }
+      }
+
+      setState(() {
+        _isDraggingHoverDot = false;
+        _draggedHoverDotTime = null;
+        _draggedHoverDotInsertIndex = null;
+        _draggedHoverDotCurrentLatLng = null;
+        _draggedHoverDotSegment = null;
+        _hoveredPoint = null;
+        _hoveredColor = null;
+        _hoveredLatLng = null;
+      });
+      return;
+    }
+
+    if (_isDraggingPhoto) {
+      setState(() {
+        _isDraggingPhoto = false;
+        _draggingPhoto = null;
+      });
+      // Re-assign photos to timeline items after drag completes
+      final appState = context.read<AppStateProvider>();
+      final settings = context.read<SettingsProvider>();
+      final dateInfo = _currentDateInfo(appState);
+      final points = appState.activePaths[dateInfo.filePath] ?? [];
+      _assignPhotosToTimelineItems(points, settings.geotagTimezone.toDouble());
+      return;
+    }
+
     if (_isDraggingPoint) {
       setState(() {
         _isDraggingPoint = false;
@@ -1490,12 +2954,67 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                           children: [
                             Text(
                               _viewAsPath
-                                  ? 'Timeline Path'
+                                  ? 'Timeline'
                                   : 'Track Details (${points.length} pts)',
                               style:
                                   const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             const Spacer(),
+                            Tooltip(
+                              message: _autoSnapOnDrag
+                                  ? 'Auto Snap on Drag: ON'
+                                  : 'Auto Snap on Drag: OFF',
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.alt_route,
+                                    size: 18,
+                                    color: _autoSnapOnDrag
+                                        ? Colors.green
+                                        : Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Auto Snap',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurface,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Transform.scale(
+                                    scale: 0.75,
+                                    child: Switch(
+                                      value: _autoSnapOnDrag,
+                                      activeThumbColor: Colors.green,
+                                      onChanged: (val) {
+                                        setState(() {
+                                          _autoSnapOnDrag = val;
+                                        });
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              _autoSnapOnDrag
+                                                  ? 'Auto-snap on drag enabled!'
+                                                  : 'Auto-snap on drag disabled.',
+                                            ),
+                                            duration:
+                                                const Duration(seconds: 1),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                             IconButton(
                               icon: Icon(
                                   _viewAsPath ? Icons.list : Icons.timeline),
@@ -1506,7 +3025,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                               },
                               tooltip: _viewAsPath
                                   ? 'Show Raw List'
-                                  : 'Show Timeline Path',
+                                  : 'Show Timeline',
                             ),
                             IconButton(
                               icon: const Icon(Icons.add_circle_outline,
@@ -1525,7 +3044,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                         child: _viewAsPath
                             ? () {
                                 final timelineItems =
-                                    _clusterTimeline(points, offset);
+                                    _timelineItemsWithPhotos ??
+                                        _clusterTimeline(points, offset);
                                 if (timelineItems.isEmpty) {
                                   return const Center(
                                     child: Text('No timeline points.'),
@@ -1758,16 +3278,31 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
     // Determine selection item details if viewAsPath is true
     final timelineItems = _clusterTimeline(pointsToShow, timeOffset);
-    LatLng? selectedStayPointCenter;
-    MoveSegmentItem? selectedMoveSegment;
+    LatLng? selectedStayPointIncomingStart;
+    LatLng? selectedStayPointOutgoingEnd;
+    TimelinePath? selectedMoveSegment;
 
     if (_viewAsPath &&
         _selectedTimelineItemIndex != null &&
         _selectedTimelineItemIndex! < timelineItems.length) {
       final selectedItem = timelineItems[_selectedTimelineItemIndex!];
-      if (selectedItem is StayPointItem) {
-        selectedStayPointCenter = selectedItem.center;
-      } else if (selectedItem is MoveSegmentItem) {
+      if (selectedItem is TimelinePlace) {
+        // Incoming segment start point
+        if (_selectedTimelineItemIndex! - 1 >= 0) {
+          final incoming = timelineItems[_selectedTimelineItemIndex! - 1];
+          if (incoming is TimelinePath && incoming.points.isNotEmpty) {
+            selectedStayPointIncomingStart = incoming.points.first.latLng;
+          }
+        }
+
+        // Outgoing segment end point
+        if (_selectedTimelineItemIndex! + 1 < timelineItems.length) {
+          final outgoing = timelineItems[_selectedTimelineItemIndex! + 1];
+          if (outgoing is TimelinePath && outgoing.points.isNotEmpty) {
+            selectedStayPointOutgoingEnd = outgoing.points.last.latLng;
+          }
+        }
+      } else if (selectedItem is TimelinePath) {
         selectedMoveSegment = selectedItem;
       }
     }
@@ -1783,10 +3318,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           ),
         );
       } else if (_viewAsPath && timelineItems.isNotEmpty) {
-        // Render each MoveSegmentItem as a separate polyline with conditional colors/thickness
+        // Render each TimelinePath as a separate polyline with conditional colors/thickness
         for (int idx = 0; idx < timelineItems.length; idx++) {
           final item = timelineItems[idx];
-          if (item is MoveSegmentItem && item.points.isNotEmpty) {
+          if (item is TimelinePath && item.points.isNotEmpty) {
             Color lineColor;
             double width;
 
@@ -1795,23 +3330,32 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             if (hasTimelineSelection) {
               final selectedItem = timelineItems[_selectedTimelineItemIndex!];
 
-              if (selectedItem is MoveSegmentItem) {
+              final isHovered = (_hoveredTimelineItemIndex == idx);
+              if (selectedItem is TimelinePath) {
                 // If a move segment is selected, only highlight that exact segment
                 if (_selectedTimelineItemIndex == idx) {
                   lineColor = TimelineConstants.activeRouteColor;
                   width = TimelineConstants.polylineStrokeWidthSelected;
+                } else if (isHovered) {
+                  lineColor = TimelineConstants.activeRouteColor
+                      .withValues(alpha: 0.65);
+                  width = 4.5;
                 } else {
                   lineColor = TimelineConstants.activeRouteColor
                       .withValues(alpha: 0.15);
                   width = TimelineConstants.polylineStrokeWidthUnselected;
                 }
-              } else if (selectedItem is StayPointItem) {
-                // If a stay point is selected, highlight only the 2 adjacent roads (idx == selected - 1 or idx == selected + 1)
+              } else if (selectedItem is TimelinePlace) {
+                // If a stay point is selected, highlight only the 2 adjacent roads
                 final isAdjacent = (idx == _selectedTimelineItemIndex! - 1) ||
                     (idx == _selectedTimelineItemIndex! + 1);
                 if (isAdjacent) {
                   lineColor = TimelineConstants.activeRouteColor;
                   width = TimelineConstants.polylineStrokeWidthSelected;
+                } else if (isHovered) {
+                  lineColor = TimelineConstants.activeRouteColor
+                      .withValues(alpha: 0.65);
+                  width = 4.5;
                 } else {
                   lineColor = TimelineConstants.activeRouteColor
                       .withValues(alpha: 0.15);
@@ -1822,13 +3366,28 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 width = TimelineConstants.polylineStrokeWidthDefault;
               }
             } else {
-              // No selection, draw everything bold/active
+              final isHovered = (_hoveredTimelineItemIndex == idx);
               lineColor = TimelineConstants.activeRouteColor;
-              width = TimelineConstants.polylineStrokeWidthDefault;
+              width = isHovered
+                  ? 5.5
+                  : TimelineConstants.polylineStrokeWidthDefault;
             }
 
             final List<LatLng> pathLatLngs =
                 item.points.map((p) => p.latLng).toList();
+
+            // Dynamically connect adjacent incoming/outgoing path endpoints to live dragged Place
+            if (_isDraggingPlace &&
+                _draggingPlaceIndex != null &&
+                _draggedPlaceCurrentLatLng != null) {
+              if (idx == _draggingPlaceIndex! - 1 && pathLatLngs.isNotEmpty) {
+                pathLatLngs[pathLatLngs.length - 1] =
+                    _draggedPlaceCurrentLatLng!;
+              } else if (idx == _draggingPlaceIndex! + 1 &&
+                  pathLatLngs.isNotEmpty) {
+                pathLatLngs[0] = _draggedPlaceCurrentLatLng!;
+              }
+            }
 
             polylines.add(
               Polyline(
@@ -1918,25 +3477,124 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       );
     }
 
-    // Selected Stay Point marker
-    if (!isEditing && selectedStayPointCenter != null) {
+    // Render Place markers for all TimelinePlace items on the map
+    if (!isEditing && _viewAsPath && timelineItems.isNotEmpty) {
+      final hasTimelineSelection = (_selectedTimelineItemIndex != null);
+
+      for (int idx = 0; idx < timelineItems.length; idx++) {
+        final item = timelineItems[idx];
+        if (item is TimelinePlace) {
+          final isSelected = (_selectedTimelineItemIndex == idx);
+          final isHovered = (_hoveredTimelineItemIndex == idx);
+          double opacity = 1.0;
+          double size = 32.0;
+
+          if (hasTimelineSelection) {
+            if (isSelected) {
+              opacity = 1.0;
+              size = 38.0;
+            } else if (isHovered) {
+              opacity = 0.65;
+              size = 34.0;
+            } else {
+              opacity = 0.25;
+              size = 28.0;
+            }
+          } else {
+            if (isHovered) {
+              opacity = 1.0;
+              size = 36.0;
+            }
+          }
+
+          LatLng placePoint = item.center;
+          if (_isDraggingPlace &&
+              _draggingPlaceIndex == idx &&
+              _draggedPlaceCurrentLatLng != null) {
+            placePoint = _draggedPlaceCurrentLatLng!;
+          }
+
+          markers.add(
+            Marker(
+              point: placePoint,
+              width: size,
+              height: size,
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _selectedTimelineItemIndex = idx;
+                  });
+                },
+                child: Opacity(
+                  opacity: opacity,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: TimelineConstants.stayPointIconColor,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white,
+                        width: isSelected ? 3 : 2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black38,
+                          blurRadius: isSelected ? 6 : 3,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      Icons.place,
+                      color: Colors.white,
+                      size: isSelected ? 22 : 16,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+      }
+    }
+
+    // Selected Stay Point incoming and outgoing endpoint markers
+    if (!isEditing && selectedStayPointIncomingStart != null) {
       markers.add(
         Marker(
-          point: selectedStayPointCenter,
-          width: 36,
-          height: 36,
+          point: selectedStayPointIncomingStart,
+          width: 22,
+          height: 22,
           child: Container(
             decoration: BoxDecoration(
-              color:
-                  TimelineConstants.stayPointIconColor, // Brown stay point icon
+              color: TimelineConstants.activeRouteColor.withValues(alpha: 0.5),
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 3),
               boxShadow: const [
                 BoxShadow(
-                    color: Colors.black38, blurRadius: 6, offset: Offset(0, 2)),
+                    color: Colors.black26, blurRadius: 4, offset: Offset(0, 1)),
               ],
             ),
-            child: const Icon(Icons.place, color: Colors.white, size: 18),
+          ),
+        ),
+      );
+    }
+
+    if (!isEditing && selectedStayPointOutgoingEnd != null) {
+      markers.add(
+        Marker(
+          point: selectedStayPointOutgoingEnd,
+          width: 22,
+          height: 22,
+          child: Container(
+            decoration: BoxDecoration(
+              color: TimelineConstants.activeRouteColor,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: const [
+                BoxShadow(
+                    color: Colors.black26, blurRadius: 4, offset: Offset(0, 1)),
+              ],
+            ),
           ),
         ),
       );
@@ -1988,6 +3646,31 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       );
     }
 
+    // Translucent white dots for all active points on the path when hovering
+    if (!isEditing && _hoveredLatLng != null) {
+      final activeHoverPts = _getActiveHoverPoints(pointsToShow, timeOffset);
+      for (final p in activeHoverPts) {
+        markers.add(
+          Marker(
+            point: p.latLng,
+            width: 10,
+            height: 10,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.75),
+                shape: BoxShape.circle,
+                border: Border.all(
+                    color: Colors.purple.withValues(alpha: 0.8), width: 1.5),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black26, blurRadius: 2),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
     // Hover point in non-edit mode
     if (!isEditing && _hoveredPoint != null && _hoveredLatLng != null) {
       final localHoverTime = _hoveredPoint!.timestamp
@@ -2006,9 +3689,16 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 width: 14,
                 height: 14,
                 decoration: BoxDecoration(
-                  color: _hoveredColor ?? const Color(0xFF7F92FF),
+                  color: _hoveredColor == Colors.white
+                      ? Colors.white
+                      : (_hoveredColor ?? const Color(0xFF7F92FF)),
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2.5),
+                  border: Border.all(
+                    color: _hoveredColor == Colors.white
+                        ? Colors.purple
+                        : Colors.white,
+                    width: 2.5,
+                  ),
                   boxShadow: const [
                     BoxShadow(color: Colors.black38, blurRadius: 6),
                   ],
@@ -2033,11 +3723,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        DateFormat('yyyy-MM-dd').format(localHoverTime),
-                        style:
-                            const TextStyle(color: Colors.grey, fontSize: 10),
-                      ),
-                      Text(
                         DateFormat('HH:mm:ss').format(localHoverTime),
                         style: const TextStyle(
                           color: Colors.white,
@@ -2057,33 +3742,55 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
 
     // ── Photo markers ────────────────────────────────────────────────────
+    // Two visual marker types:
+    //   • Geotagged (has EXIF GPS): white border
+    //   • Ungeotagged (interpolated location): light-blue border
     for (final photo in _photos) {
-      final loc = photo.gpsLatLng;
+      final loc = photo.assignedLatLng;
       if (loc == null) continue;
-      final isSelected = _selectedPhoto == photo;
+
+      final isCtrl = HardwareKeyboard.instance.isControlPressed;
+      final isSelected =
+          _selectedPhoto == photo || _selectedPhotoSet.contains(photo);
+      final isDragging = _draggingPhoto == photo;
+      final isGeotagged = photo.hasExifGps;
+
+      final Color borderColor = isDragging || isSelected
+          ? Colors.amber
+          : (isGeotagged ? Colors.white : Colors.lightBlue.shade300);
+
+      final double size = isDragging ? 64 : (isSelected ? 58 : 48);
+
       markers.add(Marker(
         point: loc,
-        width: isSelected ? 60 : 48,
-        height: isSelected ? 60 : 48,
+        width: size,
+        height: size,
         child: GestureDetector(
           onTap: () => setState(() {
-            _selectedPhoto = (_selectedPhoto == photo) ? null : photo;
-            _showPhotoGrid = false;
+            if (isCtrl) {
+              if (_selectedPhotoSet.contains(photo)) {
+                _selectedPhotoSet.remove(photo);
+              } else {
+                _selectedPhotoSet.add(photo);
+              }
+            } else {
+              _selectedPhotoSet.clear();
+              _selectedPhoto = (_selectedPhoto == photo) ? null : photo;
+              _showPhotoGrid = false;
+            }
           }),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
+            duration: const Duration(milliseconds: 150),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(
-                color: photo.addedToTimeline
-                    ? Colors.green
-                    : (isSelected ? Colors.amber : Colors.white),
-                width: isSelected ? 3 : 2,
-              ),
+              border: Border.all(color: borderColor, width: isSelected ? 3 : 2),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.4),
-                  blurRadius: 6,
+                  color: isGeotagged
+                      ? Colors.black.withValues(alpha: 0.4)
+                      : Colors.lightBlue.withValues(alpha: 0.35),
+                  blurRadius: isDragging ? 12 : 6,
+                  spreadRadius: isDragging ? 2 : 0,
                   offset: const Offset(0, 2),
                 ),
               ],
@@ -2103,12 +3810,68 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       ));
     }
 
+    final List<Polygon> polygons = [];
+    if (_isRightClickSelecting &&
+        _rightClickStartLatLng != null &&
+        _rightClickCurrentLatLng != null) {
+      final start = _rightClickStartLatLng!;
+      final end = _rightClickCurrentLatLng!;
+      final minLat = min(start.latitude, end.latitude);
+      final maxLat = max(start.latitude, end.latitude);
+      final minLng = min(start.longitude, end.longitude);
+      final maxLng = max(start.longitude, end.longitude);
+
+      polygons.add(
+        Polygon(
+          points: [
+            LatLng(minLat, minLng),
+            LatLng(minLat, maxLng),
+            LatLng(maxLat, maxLng),
+            LatLng(maxLat, minLng),
+          ],
+          color: Colors.red.withValues(alpha: 0.2),
+          borderColor: Colors.red,
+          borderStrokeWidth: 2,
+        ),
+      );
+
+      final activeHoverPts = _getActiveHoverPoints(pointsToShow, timeOffset);
+      for (final p in activeHoverPts) {
+        if (p.latitude >= minLat &&
+            p.latitude <= maxLat &&
+            p.longitude >= minLng &&
+            p.longitude <= maxLng) {
+          markers.add(
+            Marker(
+              point: p.latLng,
+              width: 14,
+              height: 14,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black38, blurRadius: 4),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+      }
+    }
+
     return MapWidget(
       mapController: _mapController,
       tileLayer: tileLayer,
       polylines: polylines,
+      polygons: polygons,
       markers: markers,
       isEditing: isEditing,
+      isRightClickSelecting: _isRightClickSelecting,
+      isDraggingHoverDot: _isDraggingHoverDot,
+      isDraggingPlace: _isDraggingPlace,
       onHover: _handleHover,
       onPointerDown: _handlePointerDown,
       onPointerMove: _handlePointerMove,
@@ -2279,6 +4042,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                               child: CustomCalendarInline(
                                 selectedDate: _selectedDate ?? DateTime.now(),
                                 allDates: appState.allDates,
+                                photos: _photos,
                                 onDateSelected: (date) {
                                   setState(() => _selectedDate = date);
                                   _loadPointsForSelectedDate();
@@ -2382,6 +4146,41 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               Positioned.fill(
                 child: _buildPhotoGrid(
                     context, appState, currentDateInfo, settings),
+              ),
+
+            // Saving-to-disk indicator (bottom-right, disappears when done)
+            if (_isSaving)
+              Positioned(
+                right: 16,
+                bottom: _photos.isNotEmpty ? 112 : 16,
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: _isSaving ? 0.55 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        shape: BoxShape.circle,
+                        boxShadow: const [
+                          BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 6,
+                              offset: Offset(0, 2))
+                        ],
+                      ),
+                      child: const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.grey),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
           ],
         ),
@@ -2591,6 +4390,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                     style:
                         const TextStyle(fontSize: 11, color: Colors.blueAccent),
                   )
+                else if (photo.interpolatedLatLng != null)
+                  Text(
+                    'Interpolated: ${photo.interpolatedLatLng!.latitude.toStringAsFixed(5)}, '
+                    '${photo.interpolatedLatLng!.longitude.toStringAsFixed(5)}',
+                    style: TextStyle(fontSize: 11, color: Colors.teal.shade400),
+                  )
                 else
                   const Text('No GPS in EXIF',
                       style: TextStyle(fontSize: 11, color: Colors.orange)),
@@ -2611,6 +4416,18 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 textStyle: const TextStyle(fontSize: 12),
               ),
             )
+          else if (photo.gpsLatLng == null && photo.interpolatedLatLng != null)
+            FilledButton.icon(
+              onPressed: () => _applyInterpolatedGeotag(photo),
+              icon: const Icon(Icons.pin_drop, size: 16),
+              label: const Text('Apply Geotag'),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.teal,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                textStyle: const TextStyle(fontSize: 12),
+              ),
+            )
           else if (photo.addedToTimeline)
             Chip(
               label: const Text('Added ✓',
@@ -2619,9 +4436,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               padding: const EdgeInsets.symmetric(horizontal: 4),
             ),
           const SizedBox(width: 8),
-          if (photo.gpsLatLng != null)
+          if (photo.assignedLatLng != null)
             OutlinedButton.icon(
-              onPressed: () => _animatedMapMove(photo.gpsLatLng!, 16),
+              onPressed: () => _animatedMapMove(photo.assignedLatLng!, 16),
               icon: const Icon(Icons.center_focus_strong, size: 16),
               label: const Text('Go to', style: TextStyle(fontSize: 12)),
             ),
@@ -2814,7 +4631,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     if (points.isEmpty) return [];
     if (points.length < 2) {
       return [
-        StayPointItem(
+        TimelinePlace(
           points: points,
           startTime: points.first.timestamp,
           endTime: points.first.timestamp,
@@ -2855,7 +4672,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         final center =
             LatLng(latSum / stayPoints.length, lngSum / stayPoints.length);
 
-        items.add(StayPointItem(
+        items.add(TimelinePlace(
           points: stayPoints,
           startTime: points[i].timestamp,
           endTime: points[j - 1].timestamp,
@@ -2906,7 +4723,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             ? points[nextStayStart].timestamp
             : points[nextStayStart - 1].timestamp;
 
-        items.add(MoveSegmentItem(
+        items.add(TimelinePath(
           points: pathPoints,
           startTime: startTime,
           endTime: endTime,
@@ -2951,7 +4768,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             ),
           ];
 
-          final initialStay = StayPointItem(
+          final initialStay = TimelinePlace(
             points: stayPoints,
             startTime: currentDayMidnight,
             endTime: firstItem.startTime,
@@ -2976,7 +4793,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           ),
         ];
 
-        final initialStay = StayPointItem(
+        final initialStay = TimelinePlace(
           points: stayPoints,
           startTime: currentDayMidnight,
           endTime: currentDayEnd,
@@ -3015,20 +4832,24 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     // Col 2: continuous blue line (with dot at stay points)
     const lineColWidth = TimelineConstants.lineColumnWidth;
 
-    if (item is StayPointItem) {
+    if (item is TimelinePlace) {
       final startTime = _formatPointTime(item.startTime, timezoneOffset);
       final endTime = _formatPointTime(item.endTime, timezoneOffset);
       final durationStr = _formatDuration(item.duration);
       final coordStr =
           '${item.center.latitude.toStringAsFixed(5)}, ${item.center.longitude.toStringAsFixed(5)}';
 
-      return _TimelineTileWrapper(
+      Widget tileWidget = _TimelineTileWrapper(
         isSelected: isSelected,
         onTap: () {
           setState(() {
-            _selectedTimelineItemIndex = index;
+            if (_selectedTimelineItemIndex == index) {
+              _selectedTimelineItemIndex = null;
+            } else {
+              _selectedTimelineItemIndex = index;
+              _animatedMapMove(item.center, 16.5);
+            }
           });
-          _animatedMapMove(item.center, 16.5);
         },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -3102,121 +4923,155 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Row(
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Place name box
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        'Stay Point (${item.points.length} pts)',
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 13),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    const Icon(Icons.arrow_drop_down, size: 18),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              // Coordinates
-                              Text(
-                                coordStr,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                  fontFamily: 'monospace',
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              // Time range + duration
-                              Text(
-                                '$startTime – $endTime  ($durationStr)',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        // Time + more menu
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              startTime,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Place name box
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .surfaceContainerHighest,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            'Place (${item.points.length} pts)',
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 13),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        const Icon(Icons.arrow_drop_down,
+                                            size: 18),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  // Coordinates
+                                  Text(
+                                    coordStr,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                      fontFamily: 'monospace',
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  // Time range + duration (clickable to edit)
+                                  InkWell(
+                                    onTap: () {
+                                      final appState =
+                                          context.read<AppStateProvider>();
+                                      final dateInfo =
+                                          _currentDateInfo(appState);
+                                      _showEditPlaceTimeDialog(
+                                          context, item, appState, dateInfo);
+                                    },
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          '$startTime – $endTime  ($durationStr)',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Icon(
+                                          Icons.edit_calendar,
+                                          size: 13,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: 2),
-                            PopupMenuButton<String>(
-                              icon: Icon(Icons.more_vert,
-                                  size: 18,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant),
-                              padding: EdgeInsets.zero,
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(
-                                  value: 'copy_json',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.copy, size: 18),
-                                      SizedBox(width: 8),
-                                      Text('Copy Segment JSON'),
-                                    ],
+                            const SizedBox(width: 8),
+                            // Time + more menu
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  startTime,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
                                   ),
                                 ),
-                                const PopupMenuItem(
-                                  value: 'copy_json_neighbors',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.copy_all, size: 18),
-                                      SizedBox(width: 8),
-                                      Text('Copy JSON with Neighbors'),
-                                    ],
-                                  ),
+                                const SizedBox(height: 2),
+                                PopupMenuButton<String>(
+                                  icon: Icon(Icons.more_vert,
+                                      size: 18,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant),
+                                  padding: EdgeInsets.zero,
+                                  itemBuilder: (context) => [
+                                    const PopupMenuItem(
+                                      value: 'copy_json',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.copy, size: 18),
+                                          SizedBox(width: 8),
+                                          Text('Copy Segment JSON'),
+                                        ],
+                                      ),
+                                    ),
+                                    const PopupMenuItem(
+                                      value: 'copy_json_neighbors',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.copy_all, size: 18),
+                                          SizedBox(width: 8),
+                                          Text('Copy JSON with Neighbors'),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                  onSelected: (val) {
+                                    if (val == 'copy_json') {
+                                      _copySegmentJson(context, item);
+                                    } else if (val == 'copy_json_neighbors') {
+                                      _copyJsonWithNeighbors(
+                                          context, allItems, index);
+                                    }
+                                  },
                                 ),
                               ],
-                              onSelected: (val) {
-                                if (val == 'copy_json') {
-                                  _copySegmentJson(context, item);
-                                } else if (val == 'copy_json_neighbors') {
-                                  _copyJsonWithNeighbors(
-                                      context, allItems, index);
-                                }
-                              },
                             ),
                           ],
                         ),
+                        if (item.geotaggedPhotos.isNotEmpty ||
+                            item.ungeotaggedPhotos.isNotEmpty)
+                          _buildTimelinePhotoRows(context, item, index),
                       ],
                     ),
                   ),
@@ -3226,26 +5081,28 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           ),
         ),
       );
-    } else if (item is MoveSegmentItem) {
+      return tileWidget;
+    } else if (item is TimelinePath) {
       final durationStr = _formatDuration(item.duration);
       final distStr = item.distance < 1000
           ? '${item.distance.toStringAsFixed(0)} m'
           : '${(item.distance / 1000).toStringAsFixed(2)} km';
 
-      return _TimelineTileWrapper(
+      Widget tileWidget = _TimelineTileWrapper(
         isSelected: isSelected,
         onTap: () {
           setState(() {
-            _selectedTimelineItemIndex = index;
+            if (_selectedTimelineItemIndex == index) {
+              _selectedTimelineItemIndex = null;
+            } else {
+              _selectedTimelineItemIndex = index;
+            }
           });
-          if (item.points.isNotEmpty) {
+          if (_selectedTimelineItemIndex == index && item.points.isNotEmpty) {
             final bounds = LatLngBounds.fromPoints(
               item.points.map((p) => p.latLng).toList(),
             );
-            _mapController.fitCamera(
-              CameraFit.bounds(
-                  bounds: bounds, padding: const EdgeInsets.all(40)),
-            );
+            _animatedFitBounds(bounds);
           }
         },
         child: Padding(
@@ -3294,97 +5151,193 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Expanded(
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: _buildTransitIcons(item.points),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '$durationStr  ·  $distStr',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        PopupMenuButton<String>(
-                          icon: Icon(Icons.more_vert,
-                              size: 18,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant),
-                          padding: EdgeInsets.zero,
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(
-                              value: 'snap_osrm',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.alt_route, size: 18),
-                                  SizedBox(width: 8),
-                                  Text('Snap Segment to Roads'),
-                                ],
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: _buildTransitIcons(item.points),
+                                ),
                               ),
                             ),
-                            const PopupMenuItem(
-                              value: 'copy_json',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.copy, size: 18),
-                                  SizedBox(width: 8),
-                                  Text('Copy Segment JSON'),
-                                ],
+                            const SizedBox(width: 8),
+                            Text(
+                              '$durationStr  ·  $distStr',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                               ),
                             ),
-                            const PopupMenuItem(
-                              value: 'copy_json_neighbors',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.copy_all, size: 18),
-                                  SizedBox(width: 8),
-                                  Text('Copy JSON with Neighbors'),
-                                ],
+                            if (_unsnappedSegmentBackups.containsKey(
+                                _getSegmentKey(
+                                    item.startTime, item.endTime))) ...[
+                              const SizedBox(width: 4),
+                              IconButton(
+                                icon: const Icon(Icons.undo,
+                                    size: 16, color: Colors.blue),
+                                tooltip: 'Undo Edit (Session)',
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                onPressed: () {
+                                  final appState =
+                                      context.read<AppStateProvider>();
+                                  final dateInfo = _currentDateInfo(appState);
+                                  _undoSnapSegment(item, appState, dateInfo);
+                                },
                               ),
+                            ],
+                            const SizedBox(width: 4),
+                            PopupMenuButton<String>(
+                              icon: Icon(Icons.more_vert,
+                                  size: 18,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant),
+                              padding: EdgeInsets.zero,
+                              itemBuilder: (context) {
+                                final hasBackup = _unsnappedSegmentBackups
+                                    .containsKey(_getSegmentKey(
+                                        item.startTime, item.endTime));
+                                return [
+                                  if (hasBackup)
+                                    const PopupMenuItem(
+                                      value: 'undo_snap',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.undo,
+                                              size: 18, color: Colors.blue),
+                                          SizedBox(width: 8),
+                                          Text('Undo Edit (Session)'),
+                                        ],
+                                      ),
+                                    ),
+                                  const PopupMenuItem(
+                                    value: 'snap_osrm',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.alt_route, size: 18),
+                                        SizedBox(width: 8),
+                                        Text('Snap Segment to Roads'),
+                                      ],
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'restore_original',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.restore,
+                                            size: 18, color: Colors.orange),
+                                        SizedBox(width: 8),
+                                        Text('Restore to Original State'),
+                                      ],
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'copy_json',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.copy, size: 18),
+                                        SizedBox(width: 8),
+                                        Text('Copy Segment JSON'),
+                                      ],
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'copy_json_neighbors',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.copy_all, size: 18),
+                                        SizedBox(width: 8),
+                                        Text('Copy JSON with Neighbors'),
+                                      ],
+                                    ),
+                                  ),
+                                ];
+                              },
+                              onSelected: (val) async {
+                                if (val == 'undo_snap') {
+                                  final appState =
+                                      context.read<AppStateProvider>();
+                                  final dateInfo = _currentDateInfo(appState);
+                                  _undoSnapSegment(item, appState, dateInfo);
+                                } else if (val == 'restore_original') {
+                                  final appState =
+                                      context.read<AppStateProvider>();
+                                  final dateInfo = _currentDateInfo(appState);
+                                  final confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      title: const Text(
+                                          'Restore Segment to Original'),
+                                      content: const Text(
+                                        'Restore ONLY this road segment to its original raw backup state? All other roads for this day will remain untouched.',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(ctx, false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        ElevatedButton(
+                                          onPressed: () =>
+                                              Navigator.pop(ctx, true),
+                                          child: const Text('Restore Segment'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+
+                                  if (confirm == true && context.mounted) {
+                                    _restoreSegmentToOriginal(
+                                        item, appState, dateInfo);
+                                  }
+                                } else if (val == 'snap_osrm') {
+                                  final appState =
+                                      context.read<AppStateProvider>();
+                                  final dateInfo = appState.allDates.firstWhere(
+                                    (d) =>
+                                        _selectedDate != null &&
+                                        d.date.year == _selectedDate!.year &&
+                                        d.date.month == _selectedDate!.month &&
+                                        d.date.day == _selectedDate!.day,
+                                    orElse: () => DateInfo(
+                                      date: _selectedDate ?? DateTime.now(),
+                                      pointCount: 0,
+                                      filePath: '',
+                                      distance: 0.0,
+                                      state: 'original',
+                                      source: 'merge',
+                                      hasTimelineBackup: false,
+                                      hasGpxBackup: false,
+                                    ),
+                                  );
+                                  final dayPoints =
+                                      appState.activePaths[dateInfo.filePath] ??
+                                          [];
+                                  _snapSegmentToRoads(context, appState,
+                                      dateInfo, dayPoints, item);
+                                } else if (val == 'copy_json') {
+                                  _copySegmentJson(context, item);
+                                } else if (val == 'copy_json_neighbors') {
+                                  _copyJsonWithNeighbors(
+                                      context, allItems, index);
+                                }
+                              },
                             ),
                           ],
-                          onSelected: (val) {
-                            if (val == 'snap_osrm') {
-                              final appState = context.read<AppStateProvider>();
-                              final dateInfo = appState.allDates.firstWhere(
-                                (d) =>
-                                    _selectedDate != null &&
-                                    d.date.year == _selectedDate!.year &&
-                                    d.date.month == _selectedDate!.month &&
-                                    d.date.day == _selectedDate!.day,
-                                orElse: () => DateInfo(
-                                  date: _selectedDate ?? DateTime.now(),
-                                  pointCount: 0,
-                                  filePath: '',
-                                  distance: 0.0,
-                                  state: 'original',
-                                  source: 'merge',
-                                  hasTimelineBackup: false,
-                                  hasGpxBackup: false,
-                                ),
-                              );
-                              final dayPoints =
-                                  appState.activePaths[dateInfo.filePath] ?? [];
-                              _snapSegmentToRoads(
-                                  context, appState, dateInfo, dayPoints, item);
-                            } else if (val == 'copy_json') {
-                              _copySegmentJson(context, item);
-                            } else if (val == 'copy_json_neighbors') {
-                              _copyJsonWithNeighbors(context, allItems, index);
-                            }
-                          },
                         ),
+                        if (item.geotaggedPhotos.isNotEmpty ||
+                            item.ungeotaggedPhotos.isNotEmpty)
+                          _buildTimelinePhotoRows(context, item, index),
                       ],
                     ),
                   ),
@@ -3394,6 +5347,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           ),
         ),
       );
+      return tileWidget;
     }
     return const SizedBox.shrink();
   }
@@ -3413,7 +5367,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
 
     if (modes.isEmpty) {
-      modes.add('IN_PASSENGER_VEHICLE');
+      modes.add('MOTORCYCLING');
     }
 
     return modes;
@@ -3447,7 +5401,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         norm.contains('SHIP')) {
       return Icons.directions_boat;
     }
-    return Icons.directions_car;
+    if (norm.contains('CAR') ||
+        norm.contains('DRIVE') ||
+        norm.contains('VEHICLE')) {
+      return Icons.directions_car;
+    }
+    return Icons.motorcycle;
   }
 
   List<Widget> _buildTransitIcons(List<LocationPoint> points) {
@@ -3471,13 +5430,20 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     return widgets;
   }
 
+  String _getSegmentKey(DateTime start, DateTime end) =>
+      '${start.millisecondsSinceEpoch}_${end.millisecondsSinceEpoch}';
+
   Future<void> _snapSegmentToRoads(
       BuildContext context,
       AppStateProvider appState,
       DateInfo dateInfo,
       List<LocationPoint> dayPoints,
-      MoveSegmentItem segment) async {
+      TimelinePath segment) async {
     if (segment.points.isEmpty) return;
+
+    final segmentKey = _getSegmentKey(segment.startTime, segment.endTime);
+    _unsnappedSegmentBackups[segmentKey] =
+        List<LocationPoint>.from(segment.points);
 
     final settings = context.read<SettingsProvider>();
     final useGoogle = settings.routingProvider == 'google';
@@ -3633,7 +5599,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             timestamp: timestamp,
             activityType: segment.points.isNotEmpty
                 ? segment.points.first.activityType
-                : 'IN_PASSENGER_VEHICLE',
+                : 'MOTORCYCLING',
           ));
         }
       }
@@ -3692,7 +5658,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             timestamp: timestamp,
             activityType: segment.points.isNotEmpty
                 ? segment.points.first.activityType
-                : 'IN_PASSENGER_VEHICLE',
+                : 'MOTORCYCLING',
           ));
         }
       }
@@ -3726,11 +5692,367 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
 
     await appState.saveListPoints(dateInfo, updatedPoints);
-    _loadPointsForSelectedDate();
+    _loadPointsForSelectedDate(fitBounds: false, keepSelection: true);
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Segment successfully snapped to roads!')),
+      );
+    }
+  }
+
+  Future<void> _undoSnapSegment(TimelinePath segment, AppStateProvider appState,
+      DateInfo dateInfo) async {
+    final segmentKey = _getSegmentKey(segment.startTime, segment.endTime);
+    final originalBackup = _unsnappedSegmentBackups[segmentKey];
+    if (originalBackup == null) return;
+
+    final dayPoints = appState.activePaths[dateInfo.filePath] ?? [];
+    final updated = List<LocationPoint>.from(dayPoints);
+
+    // Remove points within segment time bounds
+    updated.removeWhere((p) =>
+        p.timestamp
+            .isAfter(segment.startTime.subtract(const Duration(seconds: 1))) &&
+        p.timestamp.isBefore(segment.endTime.add(const Duration(seconds: 1))));
+
+    // Find insertion index
+    int insertIdx =
+        updated.indexWhere((p) => p.timestamp.isAfter(segment.startTime));
+    if (insertIdx == -1) {
+      insertIdx = updated.length;
+    }
+    updated.insertAll(insertIdx, originalBackup);
+
+    // Save & reload
+    await appState.saveListPoints(dateInfo, updated);
+
+    setState(() {
+      _unsnappedSegmentBackups.remove(segmentKey);
+    });
+
+    _loadPointsForSelectedDate(fitBounds: false, keepSelection: true);
+  }
+
+  Future<void> _restoreSegmentToOriginal(TimelinePath segment,
+      AppStateProvider appState, DateInfo dateInfo) async {
+    final originalDir =
+        await appState.getAppTimelinesDirectoryPath(active: false);
+    final dateStr = DateFormat('yyyy-MM-dd').format(dateInfo.date);
+
+    File? origFile = File(path.join(originalDir, '${dateStr}_timeline.json'));
+    if (!await origFile.exists()) {
+      origFile = File(path.join(originalDir, '${dateStr}_gpx.json'));
+    }
+    if (!await origFile.exists()) {
+      origFile = File(path.join(originalDir, '$dateStr.json'));
+    }
+
+    if (!await origFile.exists()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('No original backup file found for this date.')),
+        );
+      }
+      return;
+    }
+
+    try {
+      final content = await origFile.readAsString();
+      final rawOriginalPoints = LocationPoint.parseAnyJson(jsonDecode(content));
+
+      final startTimeBoundary =
+          segment.startTime.subtract(const Duration(seconds: 1));
+      final endTimeBoundary = segment.endTime.add(const Duration(seconds: 1));
+
+      final origSegmentPoints = rawOriginalPoints
+          .where((p) =>
+              !p.timestamp.isBefore(startTimeBoundary) &&
+              !p.timestamp.isAfter(endTimeBoundary))
+          .toList();
+
+      if (origSegmentPoints.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('No original points found for this segment.')),
+          );
+        }
+        return;
+      }
+
+      final dayPoints = appState.activePaths[dateInfo.filePath] ?? [];
+      final updated = List<LocationPoint>.from(dayPoints);
+
+      updated.removeWhere((p) =>
+          !p.timestamp.isBefore(startTimeBoundary) &&
+          !p.timestamp.isAfter(endTimeBoundary));
+
+      int insertIdx =
+          updated.indexWhere((p) => p.timestamp.isAfter(segment.startTime));
+      if (insertIdx == -1) {
+        insertIdx = updated.length;
+      }
+      updated.insertAll(insertIdx, origSegmentPoints);
+
+      final segmentKey = _getSegmentKey(segment.startTime, segment.endTime);
+      _unsnappedSegmentBackups.remove(segmentKey);
+
+      await appState.saveListPoints(dateInfo, updated);
+      _loadPointsForSelectedDate(fitBounds: false, keepSelection: true);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Road segment restored to original raw state.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to restore segment: $e')),
+        );
+      }
+    }
+  }
+
+  void _showEditPlaceTimeDialog(BuildContext context, TimelinePlace item,
+      AppStateProvider appState, DateInfo dateInfo) async {
+    DateTime startTime = item.startTime;
+    DateTime endTime = item.endTime;
+
+    await showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final startStr = DateFormat('HH:mm:ss').format(startTime.toLocal());
+            final endStr = DateFormat('HH:mm:ss').format(endTime.toLocal());
+
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.edit_calendar),
+                  SizedBox(width: 8),
+                  Text('Edit Place Stay Time'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Select new start and end stay duration for this Place:',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Start Time Button
+                      InkWell(
+                        onTap: () async {
+                          final tod = await showTimePicker(
+                            context: context,
+                            initialTime:
+                                TimeOfDay.fromDateTime(startTime.toLocal()),
+                          );
+                          if (tod != null) {
+                            setDialogState(() {
+                              startTime = DateTime(
+                                startTime.year,
+                                startTime.month,
+                                startTime.day,
+                                tod.hour,
+                                tod.minute,
+                                startTime.second,
+                              );
+                            });
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .outlineVariant),
+                            borderRadius: BorderRadius.circular(8),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
+                          ),
+                          child: Column(
+                            children: [
+                              const Text('Start Time',
+                                  style: TextStyle(
+                                      fontSize: 11, color: Colors.grey)),
+                              const SizedBox(height: 4),
+                              Text(
+                                startStr,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(
+                          '–',
+                          style: TextStyle(
+                              fontSize: 22, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      // End Time Button
+                      InkWell(
+                        onTap: () async {
+                          final tod = await showTimePicker(
+                            context: context,
+                            initialTime:
+                                TimeOfDay.fromDateTime(endTime.toLocal()),
+                          );
+                          if (tod != null) {
+                            setDialogState(() {
+                              endTime = DateTime(
+                                endTime.year,
+                                endTime.month,
+                                endTime.day,
+                                tod.hour,
+                                tod.minute,
+                                endTime.second,
+                              );
+                            });
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .outlineVariant),
+                            borderRadius: BorderRadius.circular(8),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
+                          ),
+                          child: Column(
+                            children: [
+                              const Text('End Time',
+                                  style: TextStyle(
+                                      fontSize: 11, color: Colors.grey)),
+                              const SizedBox(height: 4),
+                              Text(
+                                endStr,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (endTime.isBefore(startTime)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text(
+                                'End time cannot be earlier than start time.')),
+                      );
+                      return;
+                    }
+
+                    Navigator.pop(dialogCtx);
+                    _updatePlaceTimeBounds(
+                        item, startTime, endTime, appState, dateInfo);
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _updatePlaceTimeBounds(TimelinePlace place, DateTime newStart,
+      DateTime newEnd, AppStateProvider appState, DateInfo dateInfo) async {
+    final dayPoints = appState.activePaths[dateInfo.filePath] ?? [];
+    if (dayPoints.isEmpty || place.points.isEmpty) return;
+
+    final updated = List<LocationPoint>.from(dayPoints);
+    final placePts = place.points;
+    final origStart = place.startTime;
+    final origEnd = place.endTime;
+
+    // Save adjacent path segments for session Undo
+    final settings = context.read<SettingsProvider>();
+    final timelineItems =
+        _clusterTimeline(dayPoints, settings.geotagTimezone.toDouble());
+    final placeIdx =
+        timelineItems.indexWhere((t) => t is TimelinePlace && t == place);
+    if (placeIdx != -1) {
+      if (placeIdx - 1 >= 0 && timelineItems[placeIdx - 1] is TimelinePath) {
+        final seg = timelineItems[placeIdx - 1] as TimelinePath;
+        final key = _getSegmentKey(seg.startTime, seg.endTime);
+        _unsnappedSegmentBackups.putIfAbsent(
+            key, () => List<LocationPoint>.from(seg.points));
+      }
+      if (placeIdx + 1 < timelineItems.length &&
+          timelineItems[placeIdx + 1] is TimelinePath) {
+        final seg = timelineItems[placeIdx + 1] as TimelinePath;
+        final key = _getSegmentKey(seg.startTime, seg.endTime);
+        _unsnappedSegmentBackups.putIfAbsent(
+            key, () => List<LocationPoint>.from(seg.points));
+      }
+    }
+
+    final totalOldDuration = origEnd.difference(origStart).inMilliseconds;
+    final totalNewDuration = newEnd.difference(newStart).inMilliseconds;
+
+    for (int i = 0; i < updated.length; i++) {
+      final p = updated[i];
+      if (placePts.contains(p)) {
+        final elapsed = p.timestamp.difference(origStart).inMilliseconds;
+        final ratio = totalOldDuration > 0
+            ? (elapsed / totalOldDuration).clamp(0.0, 1.0)
+            : 0.0;
+        final newTimestamp = newStart
+            .add(Duration(milliseconds: (totalNewDuration * ratio).round()));
+        updated[i] = LocationPoint(
+          latitude: p.latitude,
+          longitude: p.longitude,
+          timestamp: newTimestamp,
+        );
+      }
+    }
+
+    updated.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    await appState.saveListPoints(dateInfo, updated);
+    _loadPointsForSelectedDate(fitBounds: false, keepSelection: true);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Place time range updated to ${DateFormat('HH:mm:ss').format(newStart.toLocal())} – ${DateFormat('HH:mm:ss').format(newEnd.toLocal())}'),
+        ),
       );
     }
   }
@@ -3751,9 +6073,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   }
 
   void _copySegmentJson(BuildContext context, TimelineItem item) {
-    final pointsJson = item is StayPointItem
+    final pointsJson = item is TimelinePlace
         ? item.points.map(_pointToTimelineJson).toList()
-        : (item as MoveSegmentItem).points.map(_pointToTimelineJson).toList();
+        : (item as TimelinePath).points.map(_pointToTimelineJson).toList();
     final jsonStr = const JsonEncoder.withIndent('  ').convert(pointsJson);
     _copyToClipboard(context, jsonStr, 'Segment JSON copied to clipboard!');
   }
@@ -3803,10 +6125,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 final isCurrent = i == currentIndex;
 
                 final String type =
-                    item is StayPointItem ? 'stay_point' : 'move_segment';
-                final List<LocationPoint> pts = item is StayPointItem
+                    item is TimelinePlace ? 'stay_point' : 'move_segment';
+                final List<LocationPoint> pts = item is TimelinePlace
                     ? item.points
-                    : (item as MoveSegmentItem).points;
+                    : (item as TimelinePath).points;
 
                 output.add({
                   'segmentIndex': i,
@@ -3883,12 +6205,16 @@ class MapWidget extends StatelessWidget {
   final MapController mapController;
   final TileLayer tileLayer;
   final List<Polyline> polylines;
+  final List<Polygon>? polygons;
   final List<Marker> markers;
   final bool isEditing;
+  final bool isRightClickSelecting;
+  final bool isDraggingHoverDot;
+  final bool isDraggingPlace;
   final Function(PointerHoverEvent, LatLng) onHover;
-  final Function(PointerDownEvent) onPointerDown;
-  final Function(PointerMoveEvent) onPointerMove;
-  final Function(PointerUpEvent) onPointerUp;
+  final Function(PointerDownEvent, LatLng) onPointerDown;
+  final Function(PointerMoveEvent, LatLng) onPointerMove;
+  final Function(PointerUpEvent, LatLng) onPointerUp;
   final ProjectionResult? hoveredProjection;
   final List<LocationPoint> pointsToShow;
   final double timezoneOffset;
@@ -3899,8 +6225,12 @@ class MapWidget extends StatelessWidget {
     required this.mapController,
     required this.tileLayer,
     required this.polylines,
+    this.polygons,
     required this.markers,
     required this.isEditing,
+    this.isRightClickSelecting = false,
+    this.isDraggingHoverDot = false,
+    this.isDraggingPlace = false,
     required this.onHover,
     required this.onPointerDown,
     required this.onPointerMove,
@@ -3914,9 +6244,30 @@ class MapWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Listener(
-      onPointerDown: onPointerDown,
-      onPointerMove: onPointerMove,
-      onPointerUp: onPointerUp,
+      onPointerDown: (event) {
+        final RenderBox renderBox = context.findRenderObject() as RenderBox;
+        final localOffset = renderBox.globalToLocal(event.position);
+        try {
+          final latLng = mapController.camera.screenOffsetToLatLng(localOffset);
+          onPointerDown(event, latLng);
+        } catch (_) {}
+      },
+      onPointerMove: (event) {
+        final RenderBox renderBox = context.findRenderObject() as RenderBox;
+        final localOffset = renderBox.globalToLocal(event.position);
+        try {
+          final latLng = mapController.camera.screenOffsetToLatLng(localOffset);
+          onPointerMove(event, latLng);
+        } catch (_) {}
+      },
+      onPointerUp: (event) {
+        final RenderBox renderBox = context.findRenderObject() as RenderBox;
+        final localOffset = renderBox.globalToLocal(event.position);
+        try {
+          final latLng = mapController.camera.screenOffsetToLatLng(localOffset);
+          onPointerUp(event, latLng);
+        } catch (_) {}
+      },
       child: MouseRegion(
         onHover: (event) {
           final RenderBox renderBox = context.findRenderObject() as RenderBox;
@@ -3935,13 +6286,18 @@ class MapWidget extends StatelessWidget {
                 initialCenter: const LatLng(10.7790301, 106.6837685),
                 initialZoom: 13.0,
                 interactionOptions: InteractionOptions(
-                  flags: isEditing
+                  flags: (isEditing ||
+                          isRightClickSelecting ||
+                          isDraggingHoverDot ||
+                          isDraggingPlace)
                       ? InteractiveFlag.all & ~InteractiveFlag.drag
                       : InteractiveFlag.all,
                 ),
               ),
               children: [
                 tileLayer,
+                if (polygons != null && polygons!.isNotEmpty)
+                  PolygonLayer(polygons: polygons!),
                 PolylineLayer(polylines: polylines),
                 MarkerLayer(markers: markers),
               ],
@@ -3988,11 +6344,13 @@ class MapWidget extends StatelessWidget {
 class CustomCalendarDialog extends StatefulWidget {
   final DateTime initialDate;
   final List<DateInfo> allDates;
+  final List<PhotoEntry>? photos;
 
   const CustomCalendarDialog({
     super.key,
     required this.initialDate,
     required this.allDates,
+    this.photos,
   });
 
   @override
@@ -4116,8 +6474,26 @@ class _CustomCalendarDialogState extends State<CustomCalendarDialog> {
                     cellColor = Colors.blue.shade100;
                     textColor = Colors.blue.shade900;
                   } else {
-                    cellColor = Colors.grey.shade200;
-                    textColor = Colors.grey.shade800;
+                    // Unedited date -> White instead of grey
+                    cellColor = Colors.white;
+                    textColor = Colors.grey.shade900;
+                  }
+                }
+
+                Color? dotColor;
+                if (widget.photos != null && widget.photos!.isNotEmpty) {
+                  final photosOnDate = widget.photos!
+                      .where((p) =>
+                          p.dateTaken != null &&
+                          p.dateTaken!.year == date.year &&
+                          p.dateTaken!.month == date.month &&
+                          p.dateTaken!.day == date.day)
+                      .toList();
+
+                  if (photosOnDate.isNotEmpty) {
+                    final allGeotagged =
+                        photosOnDate.every((p) => p.gpsLatLng != null);
+                    dotColor = allGeotagged ? Colors.purple : Colors.blue;
                   }
                 }
 
@@ -4141,13 +6517,31 @@ class _CustomCalendarDialogState extends State<CustomCalendarDialog> {
                               width: 2)
                           : null,
                     ),
-                    child: Text(
-                      day.toString(),
-                      style: TextStyle(
-                        fontWeight:
-                            isSelected ? FontWeight.bold : FontWeight.normal,
-                        color: textColor,
-                      ),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Text(
+                          day.toString(),
+                          style: TextStyle(
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: textColor,
+                          ),
+                        ),
+                        if (dotColor != null)
+                          Positioned(
+                            bottom: 3,
+                            child: Container(
+                              width: 5,
+                              height: 5,
+                              decoration: BoxDecoration(
+                                color: dotColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 );
@@ -4636,15 +7030,17 @@ abstract class TimelineItem {
   DateTime get endTime;
 }
 
-class StayPointItem extends TimelineItem {
+class TimelinePlace extends TimelineItem {
   final List<LocationPoint> points;
   @override
   final DateTime startTime;
   @override
   final DateTime endTime;
   final LatLng center;
+  List<PhotoEntry> geotaggedPhotos = [];
+  List<PhotoEntry> ungeotaggedPhotos = [];
 
-  StayPointItem({
+  TimelinePlace({
     required this.points,
     required this.startTime,
     required this.endTime,
@@ -4654,15 +7050,17 @@ class StayPointItem extends TimelineItem {
   Duration get duration => endTime.difference(startTime);
 }
 
-class MoveSegmentItem extends TimelineItem {
+class TimelinePath extends TimelineItem {
   final List<LocationPoint> points;
   @override
   final DateTime startTime;
   @override
   final DateTime endTime;
   final double distance;
+  List<PhotoEntry> geotaggedPhotos = [];
+  List<PhotoEntry> ungeotaggedPhotos = [];
 
-  MoveSegmentItem({
+  TimelinePath({
     required this.points,
     required this.startTime,
     required this.endTime,
@@ -4675,6 +7073,7 @@ class MoveSegmentItem extends TimelineItem {
 class CustomCalendarInline extends StatefulWidget {
   final DateTime selectedDate;
   final List<DateInfo> allDates;
+  final List<PhotoEntry>? photos;
   final Function(DateTime) onDateSelected;
   final VoidCallback onClose;
 
@@ -4682,6 +7081,7 @@ class CustomCalendarInline extends StatefulWidget {
     super.key,
     required this.selectedDate,
     required this.allDates,
+    this.photos,
     required this.onDateSelected,
     required this.onClose,
   });
@@ -4841,8 +7241,26 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
                   cellColor = Colors.blue.shade100;
                   textColor = Colors.blue.shade900;
                 } else {
-                  cellColor = Colors.grey.shade200;
-                  textColor = Colors.grey.shade800;
+                  // Unedited date -> White instead of grey
+                  cellColor = Colors.white;
+                  textColor = Colors.grey.shade900;
+                }
+              }
+
+              Color? dotColor;
+              if (widget.photos != null && widget.photos!.isNotEmpty) {
+                final photosOnDate = widget.photos!
+                    .where((p) =>
+                        p.dateTaken != null &&
+                        p.dateTaken!.year == date.year &&
+                        p.dateTaken!.month == date.month &&
+                        p.dateTaken!.day == date.day)
+                    .toList();
+
+                if (photosOnDate.isNotEmpty) {
+                  final allGeotagged =
+                      photosOnDate.every((p) => p.gpsLatLng != null);
+                  dotColor = allGeotagged ? Colors.purple : Colors.blue;
                 }
               }
 
@@ -4872,16 +7290,33 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
                                 width: 1)
                             : null,
                   ),
-                  child: Text(
-                    day.toString(),
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight:
-                          isSelected ? FontWeight.bold : FontWeight.normal,
-                      color: isSelected
-                          ? Theme.of(context).colorScheme.onPrimary
-                          : textColor,
-                    ),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Text(
+                        day.toString(),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.normal,
+                          color: isSelected
+                              ? Theme.of(context).colorScheme.onPrimary
+                              : textColor,
+                        ),
+                      ),
+                      if (dotColor != null)
+                        Positioned(
+                          bottom: 3,
+                          child: Container(
+                            width: 5,
+                            height: 5,
+                            decoration: BoxDecoration(
+                              color: isSelected ? Colors.white : dotColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               );

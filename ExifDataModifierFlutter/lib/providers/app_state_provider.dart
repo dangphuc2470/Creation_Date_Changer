@@ -382,6 +382,17 @@ class AppStateProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Updates active path in memory and triggers a UI repaint immediately,
+  /// without any disk I/O. Use this for instant response after manual edits,
+  /// then call saveListPoints asynchronously in the background.
+  void updateActivePathInMemory(DateInfo dateInfo, List<LocationPoint> points) {
+    if (dateInfo.filePath.isEmpty) return;
+    points.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    _activePaths[dateInfo.filePath] = points;
+    LocationManager.updateCache(dateInfo.filePath, points);
+    notifyListeners();
+  }
+
   // ── Phase 2: Timeline Editing State ────────────────────────────────────────
   String? _editingPathKey;
   List<LocationPoint> _editingPoints = [];
