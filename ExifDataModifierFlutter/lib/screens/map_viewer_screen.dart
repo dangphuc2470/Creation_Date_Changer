@@ -182,6 +182,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   // ── Photo drag on map ─────────────────────────────────────────────────
   PhotoEntry? _draggingPhoto;
   bool _isDraggingPhoto = false;
+  LatLng? _photoDragStartLatLng;
+  final Map<PhotoEntry, LatLng> _initialPhotoLocations = {};
 
   // ── Multi-select (Ctrl+click) ─────────────────────────────────────────
   final Set<PhotoEntry> _selectedPhotoSet = {};
@@ -1945,10 +1947,25 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       }
     }
     if (canDragOrEdit && hitPhoto != null) {
+      final photoToHit = hitPhoto;
       setState(() {
-        _draggingPhoto = hitPhoto;
+        _draggingPhoto = photoToHit;
         _isDraggingPhoto = true;
-        _selectedPhoto = hitPhoto;
+        _selectedPhoto = photoToHit;
+        _photoDragStartLatLng = tapLatLng;
+        _initialPhotoLocations.clear();
+
+        final photosToDrag = (_selectedPhotoSet.contains(photoToHit) &&
+                _selectedPhotoSet.isNotEmpty)
+            ? _selectedPhotoSet
+            : {photoToHit};
+
+        for (final photo in photosToDrag) {
+          final loc = photo.assignedLatLng;
+          if (loc != null) {
+            _initialPhotoLocations[photo] = loc;
+          }
+        }
       });
       return; // consume event — don't edit route
     }
@@ -2138,37 +2155,20 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       return;
     }
 
-    if (_isDraggingPhoto && _draggingPhoto != null) {
-      final oldLoc = _draggingPhoto!.assignedLatLng;
-      if (oldLoc != null) {
-        final dLat = moveLatLng.latitude - oldLoc.latitude;
-        final dLng = moveLatLng.longitude - oldLoc.longitude;
+    if (_isDraggingPhoto &&
+        _draggingPhoto != null &&
+        _photoDragStartLatLng != null) {
+      final dLat = moveLatLng.latitude - _photoDragStartLatLng!.latitude;
+      final dLng = moveLatLng.longitude - _photoDragStartLatLng!.longitude;
 
-        setState(() {
-          // Update main dragging photo
-          if (_draggingPhoto!.gpsLatLng != null) {
-            _draggingPhoto!.gpsLatLng = moveLatLng;
-          } else {
-            _draggingPhoto!.interpolatedLatLng = moveLatLng;
-          }
-
-          // If multi-selected set contains the dragging photo, move all others too
-          if (_selectedPhotoSet.contains(_draggingPhoto)) {
-            for (final photo in _selectedPhotoSet) {
-              if (photo == _draggingPhoto) continue;
-              final curLoc = photo.assignedLatLng;
-              if (curLoc == null) continue;
-              final moved =
-                  LatLng(curLoc.latitude + dLat, curLoc.longitude + dLng);
-              if (photo.gpsLatLng != null) {
-                photo.gpsLatLng = moved;
-              } else {
-                photo.interpolatedLatLng = moved;
-              }
-            }
-          }
+      setState(() {
+        _initialPhotoLocations.forEach((photo, startLoc) {
+          final moved =
+              LatLng(startLoc.latitude + dLat, startLoc.longitude + dLng);
+          photo.gpsLatLng = moved;
+          photo.interpolatedLatLng = moved;
         });
-      }
+      });
       return;
     }
 
@@ -2486,16 +2486,33 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
 
     if (_isDraggingPhoto) {
+      final draggedCount = _initialPhotoLocations.length;
+      final targetLoc = _draggingPhoto?.assignedLatLng;
+
       setState(() {
         _isDraggingPhoto = false;
         _draggingPhoto = null;
+        _initialPhotoLocations.clear();
+        _photoDragStartLatLng = null;
       });
+
       // Re-assign photos to timeline items after drag completes
       final appState = context.read<AppStateProvider>();
       final settings = context.read<SettingsProvider>();
       final dateInfo = _currentDateInfo(appState);
       final points = appState.activePaths[dateInfo.filePath] ?? [];
       _assignPhotosToTimelineItems(points, settings.geotagTimezone.toDouble());
+
+      if (targetLoc != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Updated geotag for $draggedCount photo${draggedCount > 1 ? 's' : ''} to ${targetLoc.latitude.toStringAsFixed(5)}, ${targetLoc.longitude.toStringAsFixed(5)}',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
       return;
     }
 
@@ -3523,18 +3540,32 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                                       ],
                                                     ),
                                                   );
-                                                   if (confirm == true) {
-                                                     final targetPt = points[idx];
-                                                     final allDayPoints = List<LocationPoint>.from(
-                                                         appState.activePaths[dateInfo.filePath] ?? []);
-                                                     allDayPoints.removeWhere((p) =>
-                                                         p == targetPt ||
-                                                         (p.latitude == targetPt.latitude &&
-                                                             p.longitude == targetPt.longitude &&
-                                                             p.timestamp == targetPt.timestamp));
-                                                     await appState.saveListPoints(dateInfo, allDayPoints);
-                                                     _loadPointsForSelectedDate();
-                                                   }
+                                                  if (confirm == true) {
+                                                    final targetPt =
+                                                        points[idx];
+                                                    final allDayPoints = List<
+                                                            LocationPoint>.from(
+                                                        appState.activePaths[
+                                                                dateInfo
+                                                                    .filePath] ??
+                                                            []);
+                                                    allDayPoints.removeWhere((p) =>
+                                                        p == targetPt ||
+                                                        (p.latitude ==
+                                                                targetPt
+                                                                    .latitude &&
+                                                            p.longitude ==
+                                                                targetPt
+                                                                    .longitude &&
+                                                            p.timestamp ==
+                                                                targetPt
+                                                                    .timestamp));
+                                                    await appState
+                                                        .saveListPoints(
+                                                            dateInfo,
+                                                            allDayPoints);
+                                                    _loadPointsForSelectedDate();
+                                                  }
                                                 },
                                           tooltip: 'Delete Point',
                                         ),
@@ -6442,8 +6473,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             final routeReq = await client.getUrl(Uri.parse(routeUrl));
             final routeRes = await routeReq.close();
             if (routeRes.statusCode == 200) {
-              final routeBody =
-                  await routeRes.transform(utf8.decoder).join();
+              final routeBody = await routeRes.transform(utf8.decoder).join();
               final routeData = jsonDecode(routeBody);
               if (routeData['routes'] != null &&
                   (routeData['routes'] as List).isNotEmpty) {
