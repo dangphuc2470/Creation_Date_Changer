@@ -442,11 +442,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         ext.endsWith('.jpeg') ||
         ext.endsWith('.png') ||
         ext.endsWith('.heic') ||
-        ext.endsWith('.arw') ||
-        ext.endsWith('.cr2') ||
-        ext.endsWith('.nef') ||
-        ext.endsWith('.dng') ||
-        ext.endsWith('.raw');
+        ext.endsWith('.webp');
   }
 
   Future<List<File>> _collectAllImageFilesRecursively(
