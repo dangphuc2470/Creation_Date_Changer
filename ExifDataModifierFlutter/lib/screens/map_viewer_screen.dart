@@ -486,42 +486,56 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       debugPrint('EXIF read error for ${entry.filename}: $e');
     }
   }
+  Future<String> _getExifToolExecutable() async {
+    try {
+      final result = await Process.run('exiftool', ['-ver']);
+      if (result.exitCode == 0) return 'exiftool';
+    } catch (_) {}
+
+    if (Platform.isWindows) {
+      const cPath = r'C:\exiftool\exiftool.exe';
+      if (await File(cPath).exists()) return cPath;
+    }
+
+    try {
+      final appDir = await getApplicationSupportDirectory();
+      final exeFile = File(path.join(appDir.path, 'exiftool.exe'));
+      if (!await exeFile.exists()) {
+        final data = await rootBundle.load('assets/bin/exiftool.exe');
+        final bytes = data.buffer.asUint8List();
+        await exeFile.writeAsBytes(bytes);
+      }
+      return exeFile.path;
+    } catch (_) {
+      return 'exiftool';
+    }
+  }
+
   /// Write updated GPS coordinates directly into file EXIF using ExifTool
   Future<void> _writePhotoGpsToExif(List<PhotoEntry> photos) async {
     try {
-      String exe = 'exiftool';
-      const cPath = r'C:\exiftool\exiftool.exe';
-      if (await File(cPath).exists()) {
-        exe = cPath;
-      } else {
-        try {
-          final appDir = await getApplicationSupportDirectory();
-          final localExe = File(path.join(appDir.path, 'exiftool.exe'));
-          if (await localExe.exists()) {
-            exe = localExe.path;
-          }
-        } catch (_) {}
-      }
+      final exe = await _getExifToolExecutable();
 
       for (final photo in photos) {
         final loc = photo.assignedLatLng;
         if (loc == null) continue;
-        final lat = loc.latitude.abs();
         final latRef = loc.latitude >= 0 ? 'N' : 'S';
-        final lng = loc.longitude.abs();
         final lngRef = loc.longitude >= 0 ? 'E' : 'W';
 
-        await Process.run(exe, [
+        final result = await Process.run(exe, [
           '-overwrite_original',
-          '-GPSLatitude=$lat',
+          '-GPSLatitude#=${loc.latitude}',
+          '-GPSLongitude#=${loc.longitude}',
           '-GPSLatitudeRef=$latRef',
-          '-GPSLongitude=$lng',
           '-GPSLongitudeRef=$lngRef',
           photo.file.path,
         ]);
+
+        debugPrint(
+            '[ExifTool Write] ${photo.filename} exitCode=${result.exitCode} out=${result.stdout} err=${result.stderr}');
       }
     } catch (e) {
-      debugPrint('ExifTool write error: $e');
+      debugPrint('[ExifTool Write Error] $e');
     }
   }
 
@@ -1554,7 +1568,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
   /// Promotes the interpolated position of [photo] to its GPS coordinate
   /// (in memory), moving it from ungeotagged → geotagged.
-  void _applyInterpolatedGeotag(PhotoEntry photo) {
+  Future<void> _applyInterpolatedGeotag(PhotoEntry photo) async {
     final loc = photo.interpolatedLatLng;
     if (loc == null) return;
     setState(() {
@@ -1562,14 +1576,22 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       photo.interpolatedLatLng = null;
       photo.addedToTimeline = true;
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Geotag applied: "${photo.filename}" '
-          '(${loc.latitude.toStringAsFixed(5)}, '
-          '${loc.longitude.toStringAsFixed(5)})'),
-      backgroundColor: Colors.teal,
-      duration: const Duration(seconds: 2),
-    ));
+
+    // Write new EXIF GPS tag directly into the image file on disk
+    await _writePhotoGpsToExif([photo]);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Geotag applied & saved to file EXIF: "${photo.filename}" '
+            '(${loc.latitude.toStringAsFixed(5)}, '
+            '${loc.longitude.toStringAsFixed(5)})'),
+        backgroundColor: Colors.teal,
+        duration: const Duration(seconds: 2),
+      ));
+    }
+
     // Rebuild so photo moves from ungeotagged row → geotagged row
+    if (!mounted) return;
     final appState = context.read<AppStateProvider>();
     final settings = context.read<SettingsProvider>();
     final pts = appState.activePaths[_currentDateInfo(appState).filePath] ?? [];
@@ -5260,12 +5282,38 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               padding: const EdgeInsets.symmetric(horizontal: 4),
             ),
           const SizedBox(width: 8),
-          if (photo.assignedLatLng != null)
+          if (photo.assignedLatLng != null) ...[
+            ElevatedButton.icon(
+              onPressed: () async {
+                await _writePhotoGpsToExif([photo]);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                          'EXIF GPS saved to file for "${photo.filename}"'),
+                      backgroundColor: Colors.deepPurple,
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.save_as, size: 16),
+              label: const Text('Save EXIF to File'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                textStyle: const TextStyle(fontSize: 12),
+              ),
+            ),
+            const SizedBox(width: 8),
             OutlinedButton.icon(
               onPressed: () => _animatedMapMove(photo.assignedLatLng!, 16),
               icon: const Icon(Icons.center_focus_strong, size: 16),
               label: const Text('Go to', style: TextStyle(fontSize: 12)),
             ),
+          ],
           const SizedBox(width: 4),
           IconButton(
             icon: const Icon(Icons.close, size: 18),
