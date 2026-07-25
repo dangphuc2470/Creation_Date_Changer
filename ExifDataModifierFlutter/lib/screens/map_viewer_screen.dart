@@ -4034,81 +4034,236 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                     children: [
                       _buildMap(context, appState, settings, pointsToShow),
 
-                      // Map mode / Add Photos toolbar
+                      // Map mode / Map Layer & Action Menu toolbar
                       Positioned(
                         top: 16,
                         left: _showCalendar ? 350 : 16,
                         child: Row(
                           children: [
-                            if (!isEditing &&
-                                currentDateInfo.filePath.isNotEmpty)
-                              FloatingActionButton.extended(
-                                heroTag: 'edit_route',
-                                onPressed: () => appState
-                                    .startEditing(currentDateInfo.filePath),
-                                icon: const Icon(Icons.edit_road),
-                                label: const Text('Edit Path'),
-                                backgroundColor: Theme.of(context)
-                                    .colorScheme
-                                    .primaryContainer,
-                                foregroundColor: Theme.of(context)
-                                    .colorScheme
-                                    .onPrimaryContainer,
-                              ),
-                            const SizedBox(width: 8),
-                            FloatingActionButton.extended(
-                              heroTag: 'add_photos',
-                              onPressed: () async {
-                                final result = await FilePicker.platform
-                                    .pickFiles(
-                                        allowMultiple: true,
-                                        type: FileType.image);
-                                if (result != null && mounted) {
-                                  await _loadPhotosFromFiles(result.paths
-                                      .whereType<String>()
-                                      .map(File.new)
-                                      .toList());
-                                }
+                            // Quick Map Layer Switcher (Satellite, Roadmap, OSM)
+                            PopupMenuButton<String>(
+                              tooltip: 'Change Map Layer',
+                              onSelected: (provider) {
+                                settings.updateMapProvider(provider);
                               },
-                              icon: const Icon(Icons.add_photo_alternate),
-                              label: Text(_photos.isEmpty
-                                  ? 'Add Photos'
-                                  : '${_photos.length} Photos'),
-                              backgroundColor: Colors.deepPurple.shade400,
-                              foregroundColor: Colors.white,
+                              itemBuilder: (context) => [
+                                PopupMenuItem(
+                                  value: 'google_satellite',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.satellite_alt, size: 18),
+                                      const SizedBox(width: 8),
+                                      const Text('Google Satellite'),
+                                      if (settings.mapProvider == 'google_satellite') ...[
+                                        const Spacer(),
+                                        const Icon(Icons.check,
+                                            size: 16, color: Colors.teal),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'bing_satellite',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.satellite, size: 18),
+                                      const SizedBox(width: 8),
+                                      const Text('Bing Satellite'),
+                                      if (settings.mapProvider == 'bing_satellite') ...[
+                                        const Spacer(),
+                                        const Icon(Icons.check,
+                                            size: 16, color: Colors.teal),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'google_roadmap',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.map, size: 18),
+                                      const SizedBox(width: 8),
+                                      const Text('Google Roadmap'),
+                                      if (settings.mapProvider == 'google_roadmap') ...[
+                                        const Spacer(),
+                                        const Icon(Icons.check,
+                                            size: 16, color: Colors.teal),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'osm',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.public, size: 18),
+                                      const SizedBox(width: 8),
+                                      const Text('OpenStreetMap'),
+                                      if (settings.mapProvider == 'osm') ...[
+                                        const Spacer(),
+                                        const Icon(Icons.check,
+                                            size: 16, color: Colors.teal),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              child: Material(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(20),
+                                elevation: 2,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        settings.mapProvider.contains('satellite')
+                                            ? Icons.satellite_alt
+                                            : Icons.map,
+                                        size: 16,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        settings.mapProvider == 'google_satellite'
+                                            ? 'Satellite'
+                                            : (settings.mapProvider == 'bing_satellite'
+                                                ? 'Bing Sat'
+                                                : (settings.mapProvider ==
+                                                        'google_roadmap'
+                                                    ? 'Roadmap'
+                                                    : 'OSM')),
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                      const Icon(Icons.arrow_drop_down,
+                                          size: 18),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ),
                             const SizedBox(width: 8),
-                            FloatingActionButton.extended(
-                              heroTag: 'add_folder',
-                              onPressed: () async {
-                                final folderPath = await FilePicker.platform
-                                    .getDirectoryPath();
-                                if (folderPath != null && mounted) {
-                                  await _loadPhotosFromFiles(
-                                      [File(folderPath)]);
+
+                            // Single Unified Action Menu Button
+                            PopupMenuButton<String>(
+                              tooltip: 'Menu',
+                              onSelected: (value) async {
+                                if (value == 'edit_path') {
+                                  appState
+                                      .startEditing(currentDateInfo.filePath);
+                                } else if (value == 'add_photos') {
+                                  final result = await FilePicker.platform
+                                      .pickFiles(
+                                          allowMultiple: true,
+                                          type: FileType.image);
+                                  if (result != null && mounted) {
+                                    await _loadPhotosFromFiles(result.paths
+                                        .whereType<String>()
+                                        .map(File.new)
+                                        .toList());
+                                  }
+                                } else if (value == 'add_folder') {
+                                  final folderPath = await FilePicker.platform
+                                      .getDirectoryPath();
+                                  if (folderPath != null && mounted) {
+                                    await _loadPhotosFromFiles(
+                                        [File(folderPath)]);
+                                  }
+                                } else if (value == 'clear_photos') {
+                                  setState(() {
+                                    _photos.clear();
+                                    _selectedPhoto = null;
+                                    _showPhotoGrid = false;
+                                  });
                                 }
                               },
-                              icon: const Icon(Icons.create_new_folder),
-                              label: const Text('Add Folder'),
-                              backgroundColor: Colors.deepPurple.shade600,
-                              foregroundColor: Colors.white,
-                            ),
-                            if (_photos.isNotEmpty) ...[
-                              const SizedBox(width: 8),
-                              FloatingActionButton(
-                                heroTag: 'clear_photos',
-                                mini: true,
-                                onPressed: () => setState(() {
-                                  _photos.clear();
-                                  _selectedPhoto = null;
-                                  _showPhotoGrid = false;
-                                }),
-                                backgroundColor: Colors.red.shade400,
-                                foregroundColor: Colors.white,
-                                tooltip: 'Clear all photos',
-                                child: const Icon(Icons.clear_all),
+                              itemBuilder: (context) => [
+                                if (!isEditing &&
+                                    currentDateInfo.filePath.isNotEmpty)
+                                  const PopupMenuItem(
+                                    value: 'edit_path',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.edit_road,
+                                            size: 18, color: Colors.blue),
+                                        SizedBox(width: 8),
+                                        Text('Edit Path'),
+                                      ],
+                                    ),
+                                  ),
+                                const PopupMenuItem(
+                                  value: 'add_photos',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.add_photo_alternate,
+                                          size: 18, color: Colors.purple),
+                                      SizedBox(width: 8),
+                                      Text('Add Photos'),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'add_folder',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.create_new_folder,
+                                          size: 18, color: Colors.deepPurple),
+                                      SizedBox(width: 8),
+                                      Text('Add Folder (Recursive)'),
+                                    ],
+                                  ),
+                                ),
+                                if (_photos.isNotEmpty) ...[
+                                  const PopupMenuDivider(),
+                                  const PopupMenuItem(
+                                    value: 'clear_photos',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.clear_all,
+                                            size: 18, color: Colors.red),
+                                        SizedBox(width: 8),
+                                        Text('Clear All Photos'),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ],
+                              child: Material(
+                                color: Theme.of(context).colorScheme.primary,
+                                borderRadius: BorderRadius.circular(20),
+                                elevation: 2,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 8),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.menu,
+                                          size: 16, color: Colors.white),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        _photos.isEmpty
+                                            ? 'Menu'
+                                            : 'Menu (${_photos.length} photos)',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
-                            ],
+                            ),
                           ],
                         ),
                       ),
