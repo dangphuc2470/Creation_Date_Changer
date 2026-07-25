@@ -491,21 +491,120 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       _photos.addAll(newEntries);
     });
 
-    // Auto-select date to first photo's date if nothing selected
-    if (_selectedDate == null && newEntries.isNotEmpty) {
-      final firstDate = newEntries
-          .firstWhere((e) => e.dateTaken != null,
-              orElse: () => newEntries.first)
-          .dateTaken;
-      if (firstDate != null && mounted) {
-        setState(() => _selectedDate = firstDate);
-        _loadPointsForSelectedDate();
-        return; // _loadPointsForSelectedDate triggers _assignPhotosToTimelineItems
+    // Auto-insert geotagged photos into timeline + rebuild assignments
+    await _autoInsertGeotaggedPhotoPoints(newEntries);
+
+    // Analyze unique dates in imported photos
+    final Map<DateTime, int> importedDatesCount = {};
+    for (final entry in newEntries) {
+      if (entry.dateTaken != null) {
+        final dayKey = DateTime(
+            entry.dateTaken!.year, entry.dateTaken!.month, entry.dateTaken!.day);
+        importedDatesCount[dayKey] = (importedDatesCount[dayKey] ?? 0) + 1;
       }
     }
 
-    // Auto-insert geotagged photos into timeline + rebuild assignments
-    await _autoInsertGeotaggedPhotoPoints(newEntries);
+    if (importedDatesCount.length == 1) {
+      // Case 1: Photos belong to ONLY 1 unique date -> Silent + Auto open that date!
+      final singleDate = importedDatesCount.keys.first;
+      if (mounted) {
+        setState(() => _selectedDate = singleDate);
+        _loadPointsForSelectedDate();
+      }
+    } else if (importedDatesCount.length > 1 && mounted) {
+      // Case 2: Photos belong to MULTIPLE dates -> Show dialog with dates & Go to Date buttons
+      _showImportedDatesDialog(importedDatesCount, newEntries.length);
+    }
+  }
+
+  void _showImportedDatesDialog(
+      Map<DateTime, int> datesCount, int totalPhotos) {
+    final sortedDates = datesCount.keys.toList()..sort();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.photo_library, color: Colors.deepPurple),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Imported $totalPhotos Photos (${datesCount.length} Dates)',
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Photos imported across ${datesCount.length} dates:',
+                style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 300),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: sortedDates.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final date = sortedDates[index];
+                    final count = datesCount[date]!;
+                    final dateStr =
+                        DateFormat('yyyy-MM-dd (EEEE)').format(date);
+                    final isCurrent = _selectedDate != null &&
+                        _selectedDate!.year == date.year &&
+                        _selectedDate!.month == date.month &&
+                        _selectedDate!.day == date.day;
+
+                    return ListTile(
+                      dense: true,
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 4),
+                      title: Text(
+                        dateStr,
+                        style: TextStyle(
+                          fontWeight:
+                              isCurrent ? FontWeight.bold : FontWeight.normal,
+                          color: isCurrent ? Colors.deepPurple : null,
+                        ),
+                      ),
+                      subtitle: Text('$count photo${count > 1 ? 's' : ''}'),
+                      trailing: FilledButton.tonal(
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          setState(() => _selectedDate = date);
+                          _loadPointsForSelectedDate();
+                        },
+                        child: Text(isCurrent ? 'Viewing' : 'Go to Date'),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Insert photo GPS as a LocationPoint into timeline ───────────────────
@@ -916,9 +1015,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           borderRadius: BorderRadius.circular(6.5),
           child: Image.file(
             photo.file,
+            width: 38,
+            height: 38,
             fit: BoxFit.cover,
             cacheWidth: 80,
-            cacheHeight: 80,
             errorBuilder: (_, __, ___) => Container(
               color: Colors.grey.shade800,
               child: const Icon(Icons.broken_image,
@@ -3867,7 +3967,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 photo.file,
                 fit: BoxFit.cover,
                 cacheWidth: 120,
-                cacheHeight: 120,
                 errorBuilder: (_, __, ___) => Container(
                   color: Colors.grey.shade300,
                   child: const Icon(Icons.broken_image, size: 20),
@@ -4054,7 +4153,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                       const Icon(Icons.satellite_alt, size: 18),
                                       const SizedBox(width: 8),
                                       const Text('Google Satellite'),
-                                      if (settings.mapProvider == 'google_satellite') ...[
+                                      if (settings.mapProvider ==
+                                          'google_satellite') ...[
                                         const Spacer(),
                                         const Icon(Icons.check,
                                             size: 16, color: Colors.teal),
@@ -4069,7 +4169,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                       const Icon(Icons.satellite, size: 18),
                                       const SizedBox(width: 8),
                                       const Text('Bing Satellite'),
-                                      if (settings.mapProvider == 'bing_satellite') ...[
+                                      if (settings.mapProvider ==
+                                          'bing_satellite') ...[
                                         const Spacer(),
                                         const Icon(Icons.check,
                                             size: 16, color: Colors.teal),
@@ -4084,7 +4185,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                       const Icon(Icons.map, size: 18),
                                       const SizedBox(width: 8),
                                       const Text('Google Roadmap'),
-                                      if (settings.mapProvider == 'google_roadmap') ...[
+                                      if (settings.mapProvider ==
+                                          'google_roadmap') ...[
                                         const Spacer(),
                                         const Icon(Icons.check,
                                             size: 16, color: Colors.teal),
@@ -4121,7 +4223,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Icon(
-                                        settings.mapProvider.contains('satellite')
+                                        settings.mapProvider
+                                                .contains('satellite')
                                             ? Icons.satellite_alt
                                             : Icons.map,
                                         size: 16,
@@ -4131,9 +4234,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                       ),
                                       const SizedBox(width: 6),
                                       Text(
-                                        settings.mapProvider == 'google_satellite'
+                                        settings.mapProvider ==
+                                                'google_satellite'
                                             ? 'Satellite'
-                                            : (settings.mapProvider == 'bing_satellite'
+                                            : (settings.mapProvider ==
+                                                    'bing_satellite'
                                                 ? 'Bing Sat'
                                                 : (settings.mapProvider ==
                                                         'google_roadmap'
@@ -4509,6 +4614,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   }),
                   child: Container(
                     width: 80,
+                    height: 80,
                     margin: const EdgeInsets.only(right: 8),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(8),
@@ -4528,10 +4634,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                           child: Image.file(
                             photo.file,
                             width: 80,
-                            height: double.infinity,
+                            height: 80,
                             fit: BoxFit.cover,
                             cacheWidth: 150,
-                            cacheHeight: 150,
                           ),
                         ),
                         // GPS badge
@@ -4613,7 +4718,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               height: 48,
               fit: BoxFit.cover,
               cacheWidth: 100,
-              cacheHeight: 100,
             ),
           ),
           const SizedBox(width: 12),
