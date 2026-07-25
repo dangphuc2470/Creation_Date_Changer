@@ -5572,39 +5572,188 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                     ),
                                   ),
                                   const SizedBox(height: 2),
-                                  // Time range + duration (clickable to edit)
-                                  InkWell(
-                                    onTap: () {
-                                      final appState =
-                                          context.read<AppStateProvider>();
-                                      final dateInfo =
-                                          _currentDateInfo(appState);
-                                      _showEditPlaceTimeDialog(
-                                          context, item, appState, dateInfo);
-                                    },
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          '$startTime – $endTime  ($durationStr)',
-                                          style: TextStyle(
+                                  // 2 Separate Time Boxes (Clicking directly opens TimePicker, NO middle popup dialog!)
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      // 1. Start Time Box
+                                      InkWell(
+                                        borderRadius: BorderRadius.circular(6),
+                                        onTap: () async {
+                                          final appState =
+                                              context.read<AppStateProvider>();
+                                          final dateInfo =
+                                              _currentDateInfo(appState);
+                                          final tod = await showTimePicker(
+                                            context: context,
+                                            initialTime: TimeOfDay.fromDateTime(
+                                                item.startTime.toLocal()),
+                                          );
+                                          if (tod != null) {
+                                            final startLocal =
+                                                item.startTime.toLocal();
+                                            final newStartLocal = DateTime(
+                                              startLocal.year,
+                                              startLocal.month,
+                                              startLocal.day,
+                                              tod.hour,
+                                              tod.minute,
+                                              startLocal.second,
+                                            );
+                                            _updatePlaceTimeBounds(
+                                              item,
+                                              newStartLocal,
+                                              item.endTime.toLocal(),
+                                              appState,
+                                              dateInfo,
+                                            );
+                                          }
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primaryContainer
+                                                .withValues(alpha: 0.45),
+                                            borderRadius:
+                                                BorderRadius.circular(5),
+                                            border: Border.all(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary
+                                                  .withValues(alpha: 0.35),
+                                              width: 1,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.access_time,
+                                                  size: 11,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary),
+                                              const SizedBox(width: 3),
+                                              Text(
+                                                startTime,
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(
+                                            horizontal: 4),
+                                        child: Text('–',
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold)),
+                                      ),
+                                      // 2. End Time Box
+                                      InkWell(
+                                        borderRadius: BorderRadius.circular(6),
+                                        onTap: () async {
+                                          final appState =
+                                              context.read<AppStateProvider>();
+                                          final dateInfo =
+                                              _currentDateInfo(appState);
+                                          final tod = await showTimePicker(
+                                            context: context,
+                                            initialTime: TimeOfDay.fromDateTime(
+                                                item.endTime.toLocal()),
+                                          );
+                                          if (tod != null) {
+                                            final endLocal =
+                                                item.endTime.toLocal();
+                                            final newEndLocal = DateTime(
+                                              endLocal.year,
+                                              endLocal.month,
+                                              endLocal.day,
+                                              tod.hour,
+                                              tod.minute,
+                                              endLocal.second,
+                                            );
+                                            if (newEndLocal.isBefore(
+                                                item.startTime.toLocal())) {
+                                              if (context.mounted) {
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
+                                                  const SnackBar(
+                                                      content: Text(
+                                                          'End time cannot be earlier than start time.')),
+                                                );
+                                              }
+                                              return;
+                                            }
+                                            _updatePlaceTimeBounds(
+                                              item,
+                                              item.startTime.toLocal(),
+                                              newEndLocal,
+                                              appState,
+                                              dateInfo,
+                                            );
+                                          }
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primaryContainer
+                                                .withValues(alpha: 0.45),
+                                            borderRadius:
+                                                BorderRadius.circular(5),
+                                            border: Border.all(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primary
+                                                  .withValues(alpha: 0.35),
+                                              width: 1,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.access_time,
+                                                  size: 11,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary),
+                                              const SizedBox(width: 3),
+                                              Text(
+                                                endTime,
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .primary,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        '($durationStr)',
+                                        style: TextStyle(
                                             fontSize: 11,
                                             color: Theme.of(context)
                                                 .colorScheme
-                                                .primary,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Icon(
-                                          Icons.edit_calendar,
-                                          size: 13,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary,
-                                        ),
-                                      ],
-                                    ),
+                                                .onSurfaceVariant),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -6433,178 +6582,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
-  void _showEditPlaceTimeDialog(BuildContext context, TimelinePlace item,
-      AppStateProvider appState, DateInfo dateInfo) async {
-    DateTime startTime = item.startTime;
-    DateTime endTime = item.endTime;
 
-    await showDialog(
-      context: context,
-      builder: (dialogCtx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final startStr = DateFormat('HH:mm:ss').format(startTime.toLocal());
-            final endStr = DateFormat('HH:mm:ss').format(endTime.toLocal());
-
-            return AlertDialog(
-              title: const Row(
-                children: [
-                  Icon(Icons.edit_calendar),
-                  SizedBox(width: 8),
-                  Text('Edit Place Stay Time'),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Select new start and end stay duration for this Place:',
-                    style: TextStyle(fontSize: 13),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Start Time Button
-                      InkWell(
-                        onTap: () async {
-                          final tod = await showTimePicker(
-                            context: context,
-                            initialTime:
-                                TimeOfDay.fromDateTime(startTime.toLocal()),
-                          );
-                          if (tod != null) {
-                            setDialogState(() {
-                              startTime = DateTime(
-                                startTime.year,
-                                startTime.month,
-                                startTime.day,
-                                tod.hour,
-                                tod.minute,
-                                startTime.second,
-                              );
-                            });
-                          }
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .outlineVariant),
-                            borderRadius: BorderRadius.circular(8),
-                            color: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
-                          ),
-                          child: Column(
-                            children: [
-                              const Text('Start Time',
-                                  style: TextStyle(
-                                      fontSize: 11, color: Colors.grey)),
-                              const SizedBox(height: 4),
-                              Text(
-                                startStr,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(
-                          '–',
-                          style: TextStyle(
-                              fontSize: 22, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      // End Time Button
-                      InkWell(
-                        onTap: () async {
-                          final tod = await showTimePicker(
-                            context: context,
-                            initialTime:
-                                TimeOfDay.fromDateTime(endTime.toLocal()),
-                          );
-                          if (tod != null) {
-                            setDialogState(() {
-                              endTime = DateTime(
-                                endTime.year,
-                                endTime.month,
-                                endTime.day,
-                                tod.hour,
-                                tod.minute,
-                                endTime.second,
-                              );
-                            });
-                          }
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .outlineVariant),
-                            borderRadius: BorderRadius.circular(8),
-                            color: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
-                          ),
-                          child: Column(
-                            children: [
-                              const Text('End Time',
-                                  style: TextStyle(
-                                      fontSize: 11, color: Colors.grey)),
-                              const SizedBox(height: 4),
-                              Text(
-                                endStr,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogCtx),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    if (endTime.isBefore(startTime)) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text(
-                                'End time cannot be earlier than start time.')),
-                      );
-                      return;
-                    }
-
-                    Navigator.pop(dialogCtx);
-                    _updatePlaceTimeBounds(
-                        item, startTime, endTime, appState, dateInfo);
-                  },
-                  child: const Text('Save'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
 
   Future<void> _updatePlaceTimeBounds(TimelinePlace place, DateTime newStart,
       DateTime newEnd, AppStateProvider appState, DateInfo dateInfo) async {
