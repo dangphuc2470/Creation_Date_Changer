@@ -670,8 +670,20 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     return points.last.latLng;
   }
 
+  /// Returns photos taken on the currently selected date (or all photos if no date selected).
+  List<PhotoEntry> get _currentDatePhotos {
+    if (_selectedDate == null) return _photos;
+    final sel = _selectedDate!;
+    return _photos.where((p) {
+      if (p.dateTaken == null) return true;
+      return p.dateTaken!.year == sel.year &&
+          p.dateTaken!.month == sel.month &&
+          p.dateTaken!.day == sel.day;
+    }).toList();
+  }
+
   /// Clusters [points] into [TimelineItem]s, then assigns each [PhotoEntry]
-  /// in [_photos] to the item whose time range contains [dateTaken].
+  /// in [_currentDatePhotos] to the item whose time range contains [dateTaken].
   /// For photos without GPS, also computes [PhotoEntry.interpolatedLatLng].
   /// Stores result in [_timelineItemsWithPhotos] and calls [setState].
   void _assignPhotosToTimelineItems(List<LocationPoint> points, double tz) {
@@ -688,7 +700,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       }
     }
 
-    for (final photo in _photos) {
+    final datePhotos = _currentDatePhotos;
+    for (final photo in datePhotos) {
       // Compute interpolated position for ungeotagged photos
       if (photo.gpsLatLng == null &&
           photo.dateTaken != null &&
@@ -3810,7 +3823,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     // Two visual marker types:
     //   • Geotagged (has EXIF GPS): white border
     //   • Ungeotagged (interpolated location): light-blue border
-    for (final photo in _photos) {
+    for (final photo in _currentDatePhotos) {
       final loc = photo.assignedLatLng;
       if (loc == null) continue;
 
@@ -4301,13 +4314,14 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 Icon(Icons.photo_library,
                     size: 16, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 6),
-                Text('${_photos.length} photo${_photos.length > 1 ? 's' : ''}',
+                Text(
+                    '${_currentDatePhotos.length} photo${_currentDatePhotos.length > 1 ? 's' : ''}',
                     style: const TextStyle(
                         fontWeight: FontWeight.bold, fontSize: 13)),
                 const SizedBox(width: 4),
                 Text(
-                  '· ${_photos.where((p) => p.gpsLatLng != null).length} with GPS'
-                  ' · ${_photos.where((p) => p.addedToTimeline).length} added',
+                  '· ${_currentDatePhotos.where((p) => p.gpsLatLng != null).length} with GPS'
+                  ' · ${_currentDatePhotos.where((p) => p.addedToTimeline).length} added',
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                 ),
                 const Spacer(),
@@ -4336,9 +4350,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              itemCount: _photos.length,
+              itemCount: _currentDatePhotos.length,
               itemBuilder: (context, idx) {
-                final photo = _photos[idx];
+                final photo = _currentDatePhotos[idx];
                 final isSelected = _selectedPhoto == photo;
                 return GestureDetector(
                   onTap: () => setState(() {
@@ -6609,30 +6623,32 @@ class _CustomCalendarDialogState extends State<CustomCalendarDialog> {
                               width: 2)
                           : null,
                     ),
-                    child: Stack(
-                      alignment: Alignment.center,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
                           day.toString(),
                           style: TextStyle(
+                            fontSize: 11,
+                            height: 1.0,
                             fontWeight: isSelected
                                 ? FontWeight.bold
                                 : FontWeight.normal,
                             color: textColor,
                           ),
                         ),
+                        SizedBox(height: dotColor != null ? 3 : 0),
                         if (dotColor != null)
-                          Positioned(
-                            bottom: 3,
-                            child: Container(
-                              width: 5,
-                              height: 5,
-                              decoration: BoxDecoration(
-                                color: dotColor,
-                                shape: BoxShape.circle,
-                              ),
+                          Container(
+                            width: 4.5,
+                            height: 4.5,
+                            decoration: BoxDecoration(
+                              color: isSelected ? Colors.white : dotColor,
+                              shape: BoxShape.circle,
                             ),
-                          ),
+                          )
+                        else
+                          const SizedBox(height: 4.5),
                       ],
                     ),
                   ),
@@ -7382,13 +7398,14 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
                                 width: 1)
                             : null,
                   ),
-                  child: Stack(
-                    alignment: Alignment.center,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
                         day.toString(),
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 11,
+                          height: 1.0,
                           fontWeight:
                               isSelected ? FontWeight.bold : FontWeight.normal,
                           color: isSelected
@@ -7396,18 +7413,18 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
                               : textColor,
                         ),
                       ),
+                      SizedBox(height: dotColor != null ? 3 : 0),
                       if (dotColor != null)
-                        Positioned(
-                          bottom: 3,
-                          child: Container(
-                            width: 5,
-                            height: 5,
-                            decoration: BoxDecoration(
-                              color: isSelected ? Colors.white : dotColor,
-                              shape: BoxShape.circle,
-                            ),
+                        Container(
+                          width: 4.5,
+                          height: 4.5,
+                          decoration: BoxDecoration(
+                            color: isSelected ? Colors.white : dotColor,
+                            shape: BoxShape.circle,
                           ),
-                        ),
+                        )
+                      else
+                        const SizedBox(height: 4.5),
                     ],
                   ),
                 ),
