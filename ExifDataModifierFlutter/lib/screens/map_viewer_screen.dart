@@ -5914,7 +5914,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                 scrollDirection: Axis.horizontal,
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
-                                  children: _buildTransitIcons(item.points),
+                                  children: _buildTransitIcons(item),
                                 ),
                               ),
                             ),
@@ -6103,11 +6103,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     return const SizedBox.shrink();
   }
 
-  List<String> _getTransitModes(List<LocationPoint> points) {
+  List<String> _getTransitModes(TimelinePath path) {
     final List<String> modes = [];
     String? lastMode;
 
-    for (final p in points) {
+    for (final p in path.points) {
       final mode = p.activityType;
       if (mode != null && mode.isNotEmpty) {
         if (mode != lastMode) {
@@ -6118,7 +6118,22 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
 
     if (modes.isEmpty) {
-      modes.add('MOTORCYCLING');
+      final durationSec = path.duration.inSeconds;
+      final distKm = path.distance / 1000.0;
+      if (durationSec > 0 && distKm > 0) {
+        final speedKmH = (distKm / durationSec) * 3600.0;
+        if (speedKmH <= 7.0) {
+          modes.add('WALKING');
+        } else if (speedKmH <= 15.0) {
+          modes.add('CYCLING');
+        } else if (speedKmH <= 75.0) {
+          modes.add('MOTORCYCLING');
+        } else {
+          modes.add('IN_VEHICLE');
+        }
+      } else {
+        modes.add('WALKING');
+      }
     }
 
     return modes;
@@ -6160,8 +6175,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     return Icons.motorcycle;
   }
 
-  List<Widget> _buildTransitIcons(List<LocationPoint> points) {
-    final modes = _getTransitModes(points);
+  List<Widget> _buildTransitIcons(TimelinePath path) {
+    final modes = _getTransitModes(path);
     final List<Widget> widgets = [];
 
     for (int i = 0; i < modes.length; i++) {
@@ -6686,6 +6701,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
   void _copyJsonWithNeighbors(
       BuildContext context, List<TimelineItem> allItems, int currentIndex) {
+    final messenger = ScaffoldMessenger.of(context);
     final ctrl = TextEditingController(text: '2');
     showDialog(
       context: context,
@@ -6700,6 +6716,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             const SizedBox(height: 12),
             TextField(
               controller: ctrl,
+              autofocus: true,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
@@ -6728,11 +6745,22 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 final item = allItems[i];
                 final isCurrent = i == currentIndex;
 
-                final String type =
-                    item is TimelinePlace ? 'stay_point' : 'move_segment';
-                final List<LocationPoint> pts = item is TimelinePlace
-                    ? item.points
-                    : (item as TimelinePath).points;
+                final bool isPlace = item is TimelinePlace;
+                final String type = isPlace ? 'stay_point' : 'move_segment';
+                final List<LocationPoint> pts =
+                    isPlace ? item.points : (item as TimelinePath).points;
+
+                final List<Map<String, dynamic>> ptsJson = pts.isNotEmpty
+                    ? pts.map(_pointToTimelineJson).toList()
+                    : (isPlace
+                        ? [
+                            {
+                              'point':
+                                  '${item.center.latitude}°, ${item.center.longitude}°',
+                              'time': item.startTime.toUtc().toIso8601String(),
+                            }
+                          ]
+                        : []);
 
                 output.add({
                   'segmentIndex': i,
@@ -6740,14 +6768,17 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   'type': type,
                   'startTime': item.startTime.toUtc().toIso8601String(),
                   'endTime': item.endTime.toUtc().toIso8601String(),
-                  'points': pts.map(_pointToTimelineJson).toList(),
+                  'points': ptsJson,
                 });
               }
 
               final jsonStr =
                   const JsonEncoder.withIndent('  ').convert(output);
-              _copyToClipboard(
-                  context, jsonStr, 'JSON with neighbors copied to clipboard!');
+              Clipboard.setData(ClipboardData(text: jsonStr));
+              messenger.showSnackBar(
+                const SnackBar(
+                    content: Text('JSON with neighbors copied to clipboard!')),
+              );
             },
             child: const Text('Copy'),
           ),
