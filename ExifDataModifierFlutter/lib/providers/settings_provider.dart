@@ -18,6 +18,7 @@ class SettingsProvider extends ChangeNotifier {
   String routingProvider = 'osrm';
   String osrmProfile = 'bike'; // 'bike' (motorcycle/alleys), 'driving' (car), 'foot' (walk)
   String googleMapsApiKey = '';
+  bool requireCtrlToDrag = false;
 
   bool get isLoaded => _isLoaded;
 
@@ -36,6 +37,7 @@ class SettingsProvider extends ChangeNotifier {
     routingProvider = _prefs.getString('routingProvider') ?? 'osrm';
     osrmProfile = _prefs.getString('osrmProfile') ?? 'bike';
     googleMapsApiKey = _prefs.getString('googleMapsApiKey') ?? '';
+    requireCtrlToDrag = _prefs.getBool('requireCtrlToDrag') ?? false;
 
     final lensesJson = _prefs.getStringList('lensTemplates');
     if (lensesJson != null) {
@@ -166,6 +168,12 @@ class SettingsProvider extends ChangeNotifier {
   Future<void> updateGoogleMapsApiKey(String val) async {
     googleMapsApiKey = val;
     await _prefs.setString('googleMapsApiKey', val);
+    notifyListeners();
+  }
+
+  Future<void> updateRequireCtrlToDrag(bool val) async {
+    requireCtrlToDrag = val;
+    await _prefs.setBool('requireCtrlToDrag', val);
     notifyListeners();
   }
 }

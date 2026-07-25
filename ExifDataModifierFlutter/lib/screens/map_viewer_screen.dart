@@ -1883,10 +1883,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       );
       final rawDayPoints = appState.activePaths[currentDayInfo.filePath] ?? [];
       final settings = context.read<SettingsProvider>();
+      final isCtrlPressed = HardwareKeyboard.instance.isControlPressed;
+      final canDragOrEdit = !settings.requireCtrlToDrag || isCtrlPressed;
       final timeOffset = settings.geotagTimezone.toDouble();
       final timelineItems = _clusterTimeline(rawDayPoints, timeOffset);
 
-      if (_selectedTimelineItemIndex! < timelineItems.length) {
+      if (canDragOrEdit && _selectedTimelineItemIndex! < timelineItems.length) {
         final item = timelineItems[_selectedTimelineItemIndex!];
         if (item is TimelinePlace) {
           final double threshold = 0.065 / pow(2, currentZoom - 10);
@@ -1905,6 +1907,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         }
       }
     }
+
+    final settings = context.read<SettingsProvider>();
+    final isCtrlPressed = HardwareKeyboard.instance.isControlPressed;
+    final canDragOrEdit = !settings.requireCtrlToDrag || isCtrlPressed;
 
     // ── Right click: Start multi-point selection drag box ────────────────────
     if (event.buttons == kSecondaryButton) {
@@ -1930,7 +1936,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         hitPhoto = photo;
       }
     }
-    if (hitPhoto != null) {
+    if (canDragOrEdit && hitPhoto != null) {
       setState(() {
         _draggingPhoto = hitPhoto;
         _isDraggingPhoto = true;
@@ -1940,7 +1946,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
 
     // Check if clicked near the hover dot
-    if (_hoveredLatLng != null && _hoveredPoint != null) {
+    if (canDragOrEdit && _hoveredLatLng != null && _hoveredPoint != null) {
       final double hoverThreshold = 0.025 / pow(2, currentZoom - 10);
       final double hoverThresholdSq = hoverThreshold * hoverThreshold;
 
@@ -1970,7 +1976,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             ? appState.editingPoints
             : (appState.activePaths[currentDayInfo.filePath] ?? []);
 
-        final settings = context.read<SettingsProvider>();
         final timeOffset = settings.geotagTimezone.toDouble();
         final points = appState.isEditing
             ? allPoints
@@ -2017,7 +2022,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       }
     }
 
-    if (!appState.isEditing) return;
+    if (!appState.isEditing || !canDragOrEdit) return;
 
     final touchThreshold = 0.015 / pow(2, currentZoom - 10);
     final touchThresholdSq = touchThreshold * touchThreshold;
@@ -4425,6 +4430,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                 if (value == 'edit_path') {
                                   appState
                                       .startEditing(currentDateInfo.filePath);
+                                } else if (value == 'toggle_ctrl_edit') {
+                                  settings.updateRequireCtrlToDrag(
+                                      !settings.requireCtrlToDrag);
                                 } else if (value == 'add_photos') {
                                   final result = await FilePicker.platform
                                       .pickFiles(
@@ -4465,6 +4473,22 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                       ],
                                     ),
                                   ),
+                                PopupMenuItem(
+                                  value: 'toggle_ctrl_edit',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.keyboard_command_key,
+                                          size: 18, color: Colors.indigo),
+                                      const SizedBox(width: 8),
+                                      const Text('Require Ctrl to Edit/Drag'),
+                                      if (settings.requireCtrlToDrag) ...[
+                                        const Spacer(),
+                                        const Icon(Icons.check,
+                                            size: 16, color: Colors.teal),
+                                      ],
+                                    ],
+                                  ),
+                                ),
                                 const PopupMenuItem(
                                   value: 'add_photos',
                                   child: Row(
