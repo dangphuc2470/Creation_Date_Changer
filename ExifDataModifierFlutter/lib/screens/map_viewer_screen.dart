@@ -411,9 +411,18 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             if (tag.values is IfdRatios) {
               final vals = tag.values as IfdRatios;
               if (vals.ratios.length >= 3) {
-                final d = vals.ratios[0].numerator / (vals.ratios[0].denominator == 0 ? 1 : vals.ratios[0].denominator);
-                final m = vals.ratios[1].numerator / (vals.ratios[1].denominator == 0 ? 1 : vals.ratios[1].denominator);
-                final s = vals.ratios[2].numerator / (vals.ratios[2].denominator == 0 ? 1 : vals.ratios[2].denominator);
+                final d = vals.ratios[0].numerator /
+                    (vals.ratios[0].denominator == 0
+                        ? 1
+                        : vals.ratios[0].denominator);
+                final m = vals.ratios[1].numerator /
+                    (vals.ratios[1].denominator == 0
+                        ? 1
+                        : vals.ratios[1].denominator);
+                final s = vals.ratios[2].numerator /
+                    (vals.ratios[2].denominator == 0
+                        ? 1
+                        : vals.ratios[2].denominator);
                 return d + m / 60 + s / 3600;
               }
             }
@@ -701,13 +710,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                             Text(
                               'Importing Photos...',
                               style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold),
+                                  fontSize: 16, fontWeight: FontWeight.bold),
                             ),
                             Text(
                               'Processing EXIF headers & GPS tags',
-                              style: TextStyle(
-                                  fontSize: 11, color: Colors.grey),
+                              style:
+                                  TextStyle(fontSize: 11, color: Colors.grey),
                             ),
                           ],
                         ),
@@ -4722,8 +4730,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               ),
 
             // Import progress overlay
-            if (_isImportingPhotos)
-              _buildImportProgressOverlay(context),
+            if (_isImportingPhotos) _buildImportProgressOverlay(context),
 
             // Saving-to-disk indicator (bottom-right, disappears when done)
             if (_isSaving)
@@ -5573,8 +5580,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                   ),
                                   const SizedBox(height: 2),
                                   // 2 Separate Time Boxes (Clicking directly opens TimePicker, NO middle popup dialog!)
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
+                                  Wrap(
+                                    spacing: 4,
+                                    runSpacing: 4,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
                                     children: [
                                       // 1. Start Time Box
                                       InkWell(
@@ -5650,14 +5660,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                           ),
                                         ),
                                       ),
-                                      const Padding(
-                                        padding: EdgeInsets.symmetric(
-                                            horizontal: 4),
-                                        child: Text('–',
-                                            style: TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold)),
-                                      ),
+                                      const Text('–',
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold)),
                                       // 2. End Time Box
                                       InkWell(
                                         borderRadius: BorderRadius.circular(6),
@@ -5744,7 +5750,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(width: 5),
                                       Text(
                                         '($durationStr)',
                                         style: TextStyle(
@@ -6581,8 +6586,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       }
     }
   }
-
-
 
   Future<void> _updatePlaceTimeBounds(TimelinePlace place, DateTime newStart,
       DateTime newEnd, AppStateProvider appState, DateInfo dateInfo) async {
