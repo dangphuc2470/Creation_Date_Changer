@@ -363,15 +363,18 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
   Future<void> _readExifFromPhoto(PhotoEntry entry) async {
     try {
-      Map<String, IfdTag> tags;
+      Map<String, IfdTag> tags = {};
       try {
         final headerBytes = await _readFileHeaderBytes(entry.file);
         tags = await readExifFromBytes(headerBytes);
       } catch (_) {
-        // Fallback to full file if header parse fails
-        final bytes = await entry.file.readAsBytes();
-        tags = await readExifFromBytes(bytes);
+        try {
+          // Fallback to full file if header parse fails
+          final bytes = await entry.file.readAsBytes();
+          tags = await readExifFromBytes(bytes);
+        } catch (_) {}
       }
+      if (tags.isEmpty) return;
 
       // Date
       final dateTag = tags['EXIF DateTimeOriginal'] ?? tags['Image DateTime'];
