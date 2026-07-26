@@ -411,9 +411,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         tags = await readExifFromBytes(headerBytes);
       } catch (_) {
         try {
-          // Fallback to full file if header parse fails
-          final bytes = await entry.file.readAsBytes();
-          tags = await readExifFromBytes(bytes);
+          // Fallback to larger 256KB header if 128KB header parse fails (NEVER read full file into memory)
+          final headerBytes2 = await _readFileHeaderBytes(entry.file, maxHeaderBytes: 262144);
+          tags = await readExifFromBytes(headerBytes2);
         } catch (_) {}
       }
       if (tags.isEmpty) return;
@@ -5430,6 +5430,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                           borderRadius: BorderRadius.circular(8),
                           child: Image.file(photo.file,
                               fit: BoxFit.cover,
+                              cacheWidth: 180,
                               errorBuilder: (_, __, ___) => Container(
                                     color: Colors.grey.shade800,
                                     child: const Icon(Icons.broken_image,
