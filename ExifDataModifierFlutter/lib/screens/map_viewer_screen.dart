@@ -1240,33 +1240,39 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       }
 
       for (final photo in datePhotos) {
+        if (photo.dateTaken == null) continue;
+        final photoLocal = photo.dateTaken!;
+
         // Compute interpolated position for ungeotagged photos
-        if (photo.gpsLatLng == null &&
-            photo.dateTaken != null &&
-            points.isNotEmpty) {
+        if (photo.gpsLatLng == null && points.isNotEmpty) {
           photo.interpolatedLatLng =
-              _interpolatePositionAtTime(photo.dateTaken!, points, tz);
+              _interpolatePositionAtTime(photoLocal, points, tz);
         }
 
         if (items.isNotEmpty) {
-          final utc = photo.dateTaken != null
-              ? photo.dateTaken!.subtract(Duration(minutes: (tz * 60).toInt()))
-              : DateTime.now().toUtc();
-
-          TimelineItem best = items.first;
+          TimelineItem? best;
           int minDiffMs = 999999999;
+
           for (int i = 0; i < items.length; i++) {
             final item = items[i];
-            if (utc.compareTo(item.startTime) >= 0 &&
-                utc.compareTo(item.endTime) <= 0) {
+            final localStart =
+                item.startTime.add(Duration(minutes: (tz * 60).toInt()));
+            final localEnd =
+                item.endTime.add(Duration(minutes: (tz * 60).toInt()));
+
+            // 1. Direct match: photo timestamp falls inside item time window
+            if (photoLocal.compareTo(localStart) >= 0 &&
+                photoLocal.compareTo(localEnd) <= 0) {
               best = item;
               break;
             }
-            final diffStart = (utc.millisecondsSinceEpoch -
-                    item.startTime.millisecondsSinceEpoch)
+
+            // 2. Nearest boundary match
+            final diffStart = (photoLocal.millisecondsSinceEpoch -
+                    localStart.millisecondsSinceEpoch)
                 .abs();
-            final diffEnd = (utc.millisecondsSinceEpoch -
-                    item.endTime.millisecondsSinceEpoch)
+            final diffEnd = (photoLocal.millisecondsSinceEpoch -
+                    localEnd.millisecondsSinceEpoch)
                 .abs();
             final diff = min(diffStart, diffEnd);
             if (diff < minDiffMs) {
@@ -1275,12 +1281,26 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             }
           }
 
-          if (photo.gpsLatLng != null) {
-            if (best is TimelinePlace) best.geotaggedPhotos.add(photo);
-            if (best is TimelinePath) best.geotaggedPhotos.add(photo);
-          } else {
-            if (best is TimelinePlace) best.ungeotaggedPhotos.add(photo);
-            if (best is TimelinePath) best.ungeotaggedPhotos.add(photo);
+          // 3. Boundary bounds checks
+          final firstLocalStart = items.first.startTime
+              .add(Duration(minutes: (tz * 60).toInt()));
+          final lastLocalEnd =
+              items.last.endTime.add(Duration(minutes: (tz * 60).toInt()));
+
+          if (photoLocal.isAfter(lastLocalEnd)) {
+            best = items.last;
+          } else if (photoLocal.isBefore(firstLocalStart)) {
+            best = items.first;
+          }
+
+          if (best != null) {
+            if (photo.gpsLatLng != null) {
+              if (best is TimelinePlace) best.geotaggedPhotos.add(photo);
+              if (best is TimelinePath) best.geotaggedPhotos.add(photo);
+            } else {
+              if (best is TimelinePlace) best.ungeotaggedPhotos.add(photo);
+              if (best is TimelinePath) best.ungeotaggedPhotos.add(photo);
+            }
           }
         }
       }
