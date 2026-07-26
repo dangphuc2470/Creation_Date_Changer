@@ -4198,18 +4198,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                   const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             const Spacer(),
-                            // Snap Roads IconButton (to the left of Auto Snap)
-                            IconButton(
-                              icon: Icon(
-                                Icons.alt_route,
-                                size: 20,
-                                color: dateInfo.state == 'snapped'
-                                    ? Colors.green
-                                    : Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                              ),
-                              tooltip: 'Snap Roads',
+                            // Snap Roads Secondary Button (to the left of Auto Snap)
+                            FilledButton.tonalIcon(
                               onPressed: isEditing || dateInfo.filePath.isEmpty
                                   ? null
                                   : () async {
@@ -4225,7 +4215,40 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                         );
                                       }
                                     },
+                              icon: Icon(
+                                Icons.alt_route,
+                                size: 16,
+                                color: dateInfo.state == 'snapped'
+                                    ? Colors.green.shade800
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .onSecondaryContainer,
+                              ),
+                              label: Text(
+                                'Snap',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: dateInfo.state == 'snapped'
+                                      ? Colors.green.shade800
+                                      : Theme.of(context)
+                                          .colorScheme
+                                          .onSecondaryContainer,
+                                ),
+                              ),
+                              style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 6),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                backgroundColor: dateInfo.state == 'snapped'
+                                    ? Colors.green.shade100
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .secondaryContainer,
+                              ),
                             ),
+                            const SizedBox(width: 8),
                             Tooltip(
                               message: _autoSnapOnDrag
                                   ? 'Auto Snap on Drag: ON'
