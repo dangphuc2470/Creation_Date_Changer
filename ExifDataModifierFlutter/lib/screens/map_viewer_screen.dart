@@ -417,15 +417,22 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       }
 
       if (tags.isNotEmpty) {
-        // Date
-        final dateTag = tags['EXIF DateTimeOriginal'] ?? tags['Image DateTime'];
+        // Date: Check all standard EXIF date/time tags from photo metadata
+        final dateTag = tags['EXIF DateTimeOriginal'] ??
+            tags['Image DateTime'] ??
+            tags['EXIF DateTimeDigitized'] ??
+            tags['Image DateTimeOriginal'] ??
+            tags['EXIF CreateDate'] ??
+            tags['EXIF ModifyDate'];
+
         if (dateTag != null) {
-          final raw = dateTag.printable; // e.g. "2024:05:10 13:45:22"
-          final parts = raw.split(' ');
-          if (parts.length == 2) {
-            final dateParts = parts[0].split(':');
-            final timeParts = parts[1].split(':');
-            if (dateParts.length == 3 && timeParts.length == 3) {
+          final raw = dateTag.printable.trim(); // e.g. "2026:05:24 19:05:45"
+          final cleanRaw = raw.replaceAll(':', '-');
+          final parts = cleanRaw.split(' ');
+          if (parts.length >= 2) {
+            final dateParts = parts[0].split('-');
+            final timeParts = parts[1].split('-');
+            if (dateParts.length == 3 && timeParts.length >= 3) {
               try {
                 entry.dateTaken = DateTime.utc(
                   int.parse(dateParts[0]),
@@ -433,7 +440,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   int.parse(dateParts[2]),
                   int.parse(timeParts[0]),
                   int.parse(timeParts[1]),
-                  int.parse(timeParts[2]),
+                  int.parse(timeParts[2].split('.')[0]),
                 );
               } catch (_) {}
             }
