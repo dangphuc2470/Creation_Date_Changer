@@ -3588,6 +3588,80 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
+  Future<void> _handleImportedLocationFiles(
+      BuildContext context,
+      AppStateProvider appState,
+      SettingsProvider settings,
+      List<File> files) async {
+    final double tz = settings.geotagTimezone.toDouble();
+    List<LocationPoint> allImportedPoints = [];
+
+    for (final file in files) {
+      try {
+        final pts = await LocationManager.loadLocationFile(file.path);
+        if (pts.isNotEmpty) {
+          allImportedPoints.addAll(pts);
+        }
+      } catch (e) {
+        debugPrint('Failed to load dropped timeline file ${file.path}: $e');
+      }
+    }
+
+    if (allImportedPoints.isNotEmpty) {
+      // Save points to app storage active & original directories
+      await appState.saveImportedPoints(allImportedPoints, 'timeline');
+
+      // Select newly imported date
+      final importedDate = DateTime.utc(
+        allImportedPoints.first.timestamp.year,
+        allImportedPoints.first.timestamp.month,
+        allImportedPoints.first.timestamp.day,
+      );
+
+      final dateInfo = appState.allDates.firstWhere(
+        (d) =>
+            d.date.year == importedDate.year &&
+            d.date.month == importedDate.month &&
+            d.date.day == importedDate.day,
+        orElse: () => DateInfo(
+          date: importedDate,
+          pointCount: allImportedPoints.length,
+          filePath: '',
+          distance: 0.0,
+          state: 'original',
+          source: 'timeline',
+          hasTimelineBackup: true,
+          hasGpxBackup: false,
+        ),
+      );
+
+      final newPts = appState.activePaths[dateInfo.filePath] ??
+          await LocationManager.loadLocationFile(dateInfo.filePath);
+      appState.activePaths[dateInfo.filePath] = newPts;
+
+      setState(() {
+        _selectedDate = dateInfo.date;
+      });
+
+      _assignPhotosToTimelineItems(newPts, tz);
+
+      if (newPts.isNotEmpty) {
+        _animatedMapMove(newPts.first.latLng, 14.5);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Imported ${files.length} timeline file(s) with ${allImportedPoints.length} points!',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
   String _formatPointTime(DateTime utcTime, double timezoneOffset) {
     final localTime =
         utcTime.add(Duration(minutes: (timezoneOffset * 60).toInt()));
@@ -5165,9 +5239,36 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     return DropTarget(
       onDragEntered: (_) => setState(() => _isDraggingPhotoOver = true),
       onDragExited: (_) => setState(() => _isDraggingPhotoOver = false),
-      onDragDone: (detail) {
+      onDragDone: (detail) async {
         setState(() => _isDraggingPhotoOver = false);
-        _loadPhotosFromFiles(detail.files.map((f) => File(f.path)).toList());
+        final droppedFiles = detail.files.map((f) => File(f.path)).toList();
+
+        const locationExtensions = [
+          '.json',
+          '.gpx',
+          '.kml',
+          '.fit',
+          '.geojson',
+          '.csv'
+        ];
+        final locationFiles = droppedFiles.where((f) {
+          final ext = path.extension(f.path).toLowerCase();
+          return locationExtensions.contains(ext);
+        }).toList();
+
+        final photoFiles = droppedFiles.where((f) {
+          final ext = path.extension(f.path).toLowerCase();
+          return !locationExtensions.contains(ext);
+        }).toList();
+
+        if (locationFiles.isNotEmpty) {
+          await _handleImportedLocationFiles(
+              context, appState, settings, locationFiles);
+        }
+
+        if (photoFiles.isNotEmpty) {
+          _loadPhotosFromFiles(photoFiles);
+        }
       },
       child: Scaffold(
         body: Stack(

@@ -152,6 +152,9 @@ class AppStateProvider extends ChangeNotifier {
       final activeFile = File(path.join(activeDir, '$dateStr.json'));
       final geojsonActive = LocationPoint.toGeoJson(activePoints, null, 'original', activeSource);
       await activeFile.writeAsString(const JsonEncoder.withIndent('  ').convert(geojsonActive), flush: true);
+
+      // Cache active points in memory so UI screens instantly receive updated track data
+      _activePaths[activeFile.path] = activePoints;
     }
 
     await initializeAndScanAppStorage();
