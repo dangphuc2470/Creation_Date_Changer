@@ -6477,10 +6477,184 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     return rawItems;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // SECTION: Timeline item renderer — stay-point card, move-segment card,
-  //          transit icons, road-snap, clipboard copy helpers
-  // ─────────────────────────────────────────────────────────────────────────
+  Future<void> _showTimelineItemContextMenu(
+      BuildContext context,
+      Offset globalPosition,
+      TimelineItem item,
+      int index,
+      List<TimelineItem> allItems) async {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final relativeRect = RelativeRect.fromRect(
+      Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
+      Offset.zero & overlay.size,
+    );
+
+    final appState = context.read<AppStateProvider>();
+    final dateInfo = _currentDateInfo(appState);
+
+    List<PopupMenuEntry<String>> menuItems = [];
+
+    if (item is TimelinePlace) {
+      menuItems = const [
+        PopupMenuItem(
+          value: 'copy_json',
+          child: Row(
+            children: [
+              Icon(Icons.copy, size: 18),
+              SizedBox(width: 8),
+              Text('Copy Segment JSON'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'copy_json_neighbors',
+          child: Row(
+            children: [
+              Icon(Icons.copy_all, size: 18),
+              SizedBox(width: 8),
+              Text('Copy JSON with Neighbors'),
+            ],
+          ),
+        ),
+      ];
+    } else if (item is TimelinePath) {
+      final hasBackup = _unsnappedSegmentBackups.containsKey(
+          _getSegmentKey(item.startTime, item.endTime));
+
+      menuItems = [
+        if (hasBackup)
+          const PopupMenuItem(
+            value: 'undo_snap',
+            child: Row(
+              children: [
+                Icon(Icons.undo, size: 18, color: Colors.blue),
+                SizedBox(width: 8),
+                Text('Undo Edit (Session)'),
+              ],
+            ),
+          ),
+        const PopupMenuItem(
+          value: 'snap_osrm',
+          child: Row(
+            children: [
+              Icon(Icons.alt_route, size: 18),
+              SizedBox(width: 8),
+              Text('Snap Segment to Roads'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'add_favorite',
+          child: Row(
+            children: [
+              Icon(Icons.star_border, size: 18, color: Colors.amber),
+              SizedBox(width: 8),
+              Text('Add to Favorite Roads'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'snap_favorite',
+          child: Row(
+            children: [
+              Icon(Icons.star, size: 18, color: Colors.amber),
+              SizedBox(width: 8),
+              Text('Snap to Favorite Road...'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'restore_original',
+          child: Row(
+            children: [
+              Icon(Icons.restore, size: 18, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('Restore to Original State'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'copy_json',
+          child: Row(
+            children: [
+              Icon(Icons.copy, size: 18),
+              SizedBox(width: 8),
+              Text('Copy Segment JSON'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'copy_json_neighbors',
+          child: Row(
+            children: [
+              Icon(Icons.copy_all, size: 18),
+              SizedBox(width: 8),
+              Text('Copy JSON with Neighbors'),
+            ],
+          ),
+        ),
+      ];
+    }
+
+    final selected = await showMenu<String>(
+      context: context,
+      position: relativeRect,
+      items: menuItems,
+    );
+
+    if (selected != null && context.mounted) {
+      _handleTimelineMenuSelection(
+          context, selected, item, index, allItems, appState, dateInfo);
+    }
+  }
+
+  void _handleTimelineMenuSelection(
+      BuildContext context,
+      String value,
+      TimelineItem item,
+      int index,
+      List<TimelineItem> allItems,
+      AppStateProvider appState,
+      DateInfo dateInfo) async {
+    if (value == 'undo_snap' && item is TimelinePath) {
+      _undoSnapSegment(item, appState, dateInfo);
+    } else if (value == 'snap_osrm' && item is TimelinePath) {
+      final dayPoints = appState.activePaths[dateInfo.filePath] ?? [];
+      _snapSegmentToRoads(context, appState, dateInfo, dayPoints, item);
+    } else if (value == 'add_favorite' && item is TimelinePath) {
+      _addSegmentToFavorites(context, item);
+    } else if (value == 'snap_favorite' && item is TimelinePath) {
+      _showSnapToFavoriteDialog(context, item);
+    } else if (value == 'restore_original' && item is TimelinePath) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Restore Segment to Original'),
+          content: const Text(
+            'Restore ONLY this road segment to its original raw backup state? All other roads for this day will remain untouched.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Restore Segment'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirm == true && context.mounted) {
+        _restoreSegmentToOriginal(item, appState, dateInfo);
+      }
+    } else if (value == 'copy_json') {
+      _copySegmentJson(context, item);
+    } else if (value == 'copy_json_neighbors') {
+      _copyJsonWithNeighbors(context, allItems, index);
+    }
+  }
 
   Widget _buildTimelineItem(
       BuildContext context,
@@ -6519,6 +6693,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               _animatedMapMove(item.center, 16.5);
             }
           });
+        },
+        onSecondaryTapDown: (details) {
+          _showTimelineItemContextMenu(
+              context, details.globalPosition, item, index, allItems);
         },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -6921,6 +7099,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             _animatedFitBounds(bounds);
           }
         },
+        onSecondaryTapDown: (details) {
+          _showTimelineItemContextMenu(
+              context, details.globalPosition, item, index, allItems);
+        },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: IntrinsicHeight(
@@ -7101,78 +7283,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                   ),
                                 ];
                               },
-                              onSelected: (val) async {
-                                if (val == 'undo_snap') {
-                                  final appState =
-                                      context.read<AppStateProvider>();
-                                  final dateInfo = _currentDateInfo(appState);
-                                  _undoSnapSegment(item, appState, dateInfo);
-                                } else if (val == 'add_favorite') {
-                                  _addSegmentToFavorites(context, item);
-                                } else if (val == 'snap_favorite') {
-                                  _showSnapToFavoriteDialog(context, item);
-                                } else if (val == 'restore_original') {
-                                  final appState =
-                                      context.read<AppStateProvider>();
-                                  final dateInfo = _currentDateInfo(appState);
-                                  final confirm = await showDialog<bool>(
-                                    context: context,
-                                    builder: (ctx) => AlertDialog(
-                                      title: const Text(
-                                          'Restore Segment to Original'),
-                                      content: const Text(
-                                        'Restore ONLY this road segment to its original raw backup state? All other roads for this day will remain untouched.',
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(ctx, false),
-                                          child: const Text('Cancel'),
-                                        ),
-                                        ElevatedButton(
-                                          onPressed: () =>
-                                              Navigator.pop(ctx, true),
-                                          child: const Text('Restore Segment'),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-
-                                  if (confirm == true && context.mounted) {
-                                    _restoreSegmentToOriginal(
-                                        item, appState, dateInfo);
-                                  }
-                                } else if (val == 'snap_osrm') {
-                                  final appState =
-                                      context.read<AppStateProvider>();
-                                  final dateInfo = appState.allDates.firstWhere(
-                                    (d) =>
-                                        _selectedDate != null &&
-                                        d.date.year == _selectedDate!.year &&
-                                        d.date.month == _selectedDate!.month &&
-                                        d.date.day == _selectedDate!.day,
-                                    orElse: () => DateInfo(
-                                      date: _selectedDate ?? DateTime.now(),
-                                      pointCount: 0,
-                                      filePath: '',
-                                      distance: 0.0,
-                                      state: 'original',
-                                      source: 'merge',
-                                      hasTimelineBackup: false,
-                                      hasGpxBackup: false,
-                                    ),
-                                  );
-                                  final dayPoints =
-                                      appState.activePaths[dateInfo.filePath] ??
-                                          [];
-                                  _snapSegmentToRoads(context, appState,
-                                      dateInfo, dayPoints, item);
-                                } else if (val == 'copy_json') {
-                                  _copySegmentJson(context, item);
-                                } else if (val == 'copy_json_neighbors') {
-                                  _copyJsonWithNeighbors(
-                                      context, allItems, index);
-                                }
+                              onSelected: (val) {
+                                final appState =
+                                    context.read<AppStateProvider>();
+                                final dateInfo = _currentDateInfo(appState);
+                                _handleTimelineMenuSelection(context, val, item,
+                                    index, allItems, appState, dateInfo);
                               },
                             ),
                           ],
@@ -7934,11 +8050,13 @@ class _TimelineTileWrapper extends StatefulWidget {
   final Widget child;
   final bool isSelected;
   final VoidCallback onTap;
+  final GestureTapDownCallback? onSecondaryTapDown;
 
   const _TimelineTileWrapper({
     required this.child,
     required this.isSelected,
     required this.onTap,
+    this.onSecondaryTapDown,
   });
 
   @override
@@ -7968,6 +8086,7 @@ class _TimelineTileWrapperState extends State<_TimelineTileWrapper> {
       onExit: (_) => setState(() => _isHovered = false),
       child: GestureDetector(
         onTap: widget.onTap,
+        onSecondaryTapDown: widget.onSecondaryTapDown,
         behavior: HitTestBehavior.opaque,
         child: Container(
           color: backgroundColor,
