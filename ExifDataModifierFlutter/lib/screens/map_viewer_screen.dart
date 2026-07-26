@@ -486,6 +486,130 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       debugPrint('EXIF read error for ${entry.filename}: $e');
     }
   }
+  List<String> _parseCsvLine(String line) {
+    List<String> result = [];
+    bool insideQuotes = false;
+    StringBuffer sb = StringBuffer();
+
+    for (int i = 0; i < line.length; i++) {
+      final char = line[i];
+      if (char == '"') {
+        insideQuotes = !insideQuotes;
+      } else if (char == ',' && !insideQuotes) {
+        result.add(sb.toString().trim());
+        sb.clear();
+      } else {
+        sb.write(char);
+      }
+    }
+    result.add(sb.toString().trim());
+    return result;
+  }
+
+  /// Fast batch EXIF scanner using ExifTool CSV with -fast flag (avoids reading full image files from disk)
+  Future<void> _batchReadExifWithExifTool(List<PhotoEntry> entries) async {
+    if (entries.isEmpty) return;
+    try {
+      final exe = await _getExifToolExecutable();
+      const int maxChunkSize = 100;
+
+      for (int i = 0; i < entries.length; i += maxChunkSize) {
+        final chunk = entries.sublist(
+          i,
+          i + maxChunkSize > entries.length ? entries.length : i + maxChunkSize,
+        );
+
+        final args = [
+          '-c',
+          '%.6f',
+          '-GPSLatitude#',
+          '-GPSLongitude#',
+          '-DateTimeOriginal',
+          '-d',
+          '%Y-%m-%d %H:%M:%S',
+          '-fast',
+          '-csv',
+          ...chunk.map((e) => e.file.path),
+        ];
+
+        final result = await Process.run(exe, args);
+        if (result.exitCode <= 1 && result.stdout.toString().isNotEmpty) {
+          final lines = LineSplitter.split(result.stdout.toString()).toList();
+          if (lines.length > 1) {
+            final header = _parseCsvLine(lines.first);
+            final fileIdx = header.indexWhere((h) => h.contains('SourceFile'));
+            final latIdx = header.indexWhere((h) => h.contains('GPSLatitude'));
+            final lngIdx = header.indexWhere((h) => h.contains('GPSLongitude'));
+            final dateIdx =
+                header.indexWhere((h) => h.contains('DateTimeOriginal'));
+
+            final mapByPath = <String, PhotoEntry>{
+              for (final e in chunk) path.normalize(e.file.path): e,
+            };
+
+            for (int j = 1; j < lines.length; j++) {
+              final row = _parseCsvLine(lines[j]);
+              if (row.isEmpty || fileIdx < 0 || fileIdx >= row.length) continue;
+              final filePath = path.normalize(row[fileIdx]);
+              final entry = mapByPath[filePath];
+              if (entry == null) continue;
+
+              // Date
+              if (dateIdx >= 0 &&
+                  dateIdx < row.length &&
+                  row[dateIdx].isNotEmpty &&
+                  row[dateIdx] != '-') {
+                try {
+                  final dtParts = row[dateIdx].split(' ');
+                  if (dtParts.length == 2) {
+                    final dParts = dtParts[0].split('-');
+                    final tParts = dtParts[1].split(':');
+                    if (dParts.length == 3 && tParts.length == 3) {
+                      entry.dateTaken = DateTime.utc(
+                        int.parse(dParts[0]),
+                        int.parse(dParts[1]),
+                        int.parse(dParts[2]),
+                        int.parse(tParts[0]),
+                        int.parse(tParts[1]),
+                        int.parse(tParts[2]),
+                      );
+                    }
+                  }
+                } catch (_) {}
+              }
+
+              // GPS
+              if (latIdx >= 0 &&
+                  latIdx < row.length &&
+                  lngIdx >= 0 &&
+                  lngIdx < row.length) {
+                final lat = double.tryParse(row[latIdx]);
+                final lng = double.tryParse(row[lngIdx]);
+                if (lat != null && lng != null) {
+                  entry.gpsLatLng = LatLng(lat, lng);
+                }
+              }
+            }
+          }
+        } else {
+          // Fallback to Dart read if ExifTool CSV fails
+          await Future.wait(chunk.map(_readExifFromPhoto));
+        }
+
+        if (mounted) {
+          final processed = min(i + maxChunkSize, entries.length);
+          setState(() {
+            _importProcessedPhotos = processed;
+            _importCurrentStatus =
+                'Reading EXIF metadata ($processed / $_importTotalPhotos)...';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('ExifTool batch read error: $e');
+      await Future.wait(entries.map(_readExifFromPhoto));
+    }
+  }
 
   Future<String> _getExifToolExecutable() async {
     try {
@@ -631,24 +755,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       });
     }
 
-    // Read EXIF in chunks of 50 to maintain low RAM & 60FPS UI responsiveness
-    const int batchSize = 50;
-    for (int i = 0; i < newEntries.length; i += batchSize) {
-      final batch = newEntries.sublist(
-          i,
-          i + batchSize > newEntries.length
-              ? newEntries.length
-              : i + batchSize);
-      await Future.wait(batch.map(_readExifFromPhoto));
-      if (mounted) {
-        final processed = min(i + batchSize, newEntries.length);
-        setState(() {
-          _importProcessedPhotos = processed;
-          _importCurrentStatus =
-              'Reading EXIF metadata ($processed / $_importTotalPhotos)...';
-        });
-      }
-    }
+    // Read EXIF in batch chunks using ExifTool CSV with -fast flag (ultra-fast disk I/O)
+    await _batchReadExifWithExifTool(newEntries);
     if (!mounted) return;
 
     setState(() {
