@@ -1203,6 +1203,13 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   void _assignPhotosToTimelineItems(List<LocationPoint> points, double tz) {
     final items = _clusterTimeline(points, tz);
     final datePhotos = _currentDatePhotos;
+    debugPrint(
+        '[TimelineAssign] tz=$tz points=${points.length} datePhotos=${datePhotos.length} totalItems=${items.length}');
+    for (int idx = 0; idx < items.length; idx++) {
+      final it = items[idx];
+      debugPrint(
+          '[TimelineAssign Item #$idx] type=${it.runtimeType} start=${it.startTime} end=${it.endTime}');
+    }
 
     if (items.isEmpty && datePhotos.isNotEmpty) {
       final geotagged = datePhotos.where((p) => p.gpsLatLng != null).toList();
@@ -1240,10 +1247,14 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       }
 
       for (final photo in datePhotos) {
-        if (photo.dateTaken == null) continue;
+        if (photo.dateTaken == null) {
+          debugPrint('[TimelineAssign Photo SKIP] ${photo.filename} dateTaken is null');
+          continue;
+        }
 
         // Compute interpolated position for ungeotagged photos using UTC time
-        final photoUtc = photo.dateTaken!.subtract(Duration(minutes: (tz * 60).toInt()));
+        final photoUtc =
+            photo.dateTaken!.subtract(Duration(minutes: (tz * 60).toInt()));
 
         if (photo.gpsLatLng == null && points.isNotEmpty) {
           photo.interpolatedLatLng =
@@ -1252,6 +1263,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
         if (items.isNotEmpty) {
           TimelineItem? best;
+          String matchReason = '';
 
           // 1. Direct match: photo falls inside item time window [startTime, endTime] (both in UTC)
           for (int i = 0; i < items.length; i++) {
@@ -1259,6 +1271,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             if (photoUtc.compareTo(item.startTime) >= 0 &&
                 photoUtc.compareTo(item.endTime) <= 0) {
               best = item;
+              matchReason = 'Direct window match inside item #$i';
               break;
             }
           }
@@ -1267,8 +1280,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           if (best == null) {
             if (photoUtc.isBefore(items.first.startTime)) {
               best = items.first;
+              matchReason = 'Before first item start (${items.first.startTime}) -> assigned item #0';
             } else if (photoUtc.isAfter(items.last.endTime)) {
               best = items.last;
+              matchReason = 'After last item end (${items.last.endTime}) -> assigned last item #${items.length - 1}';
             }
           }
 
@@ -1287,11 +1302,15 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               if (diff < minDiffMs) {
                 minDiffMs = diff;
                 best = item;
+                matchReason = 'Gap nearest boundary match item #$i (diff=$diff)';
               }
             }
           }
 
           if (best != null) {
+            final targetIdx = items.indexOf(best);
+            debugPrint(
+                '[TimelineAssign Photo MATCH] ${photo.filename} dateTaken=${photo.dateTaken} photoUtc=$photoUtc -> assignedToItem #$targetIdx ($matchReason)');
             if (photo.gpsLatLng != null) {
               if (best is TimelinePlace) best.geotaggedPhotos.add(photo);
               if (best is TimelinePath) best.geotaggedPhotos.add(photo);
