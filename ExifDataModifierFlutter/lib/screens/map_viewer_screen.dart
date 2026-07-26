@@ -3908,10 +3908,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     final double offset = settings.geotagTimezone.toDouble();
     final isEditing = appState.isEditing;
 
-    final dateStr = _selectedDate == null
-        ? 'Select Date'
-        : DateFormat('MMMM dd, yyyy').format(_selectedDate!);
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -4096,101 +4092,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             ],
           ),
         ),
-
-        // Controls action row
-        if (dateInfo.filePath.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Row(
-              children: [
-                // Snap to Roads
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: isEditing
-                        ? null
-                        : () async {
-                            await appState.snapToRoads(dateInfo);
-                            _loadPointsForSelectedDate();
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text(
-                                        'Snapped timeline to roads! (Simulated)')),
-                              );
-                            }
-                          },
-                    icon: const Icon(Icons.alt_route),
-                    label: const Text('Snap Roads'),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: dateInfo.state == 'snapped'
-                          ? Colors.green.shade50
-                          : null,
-                      foregroundColor: dateInfo.state == 'snapped'
-                          ? Colors.green.shade800
-                          : null,
-                      side: dateInfo.state == 'snapped'
-                          ? BorderSide(color: Colors.green.shade200)
-                          : null,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Restore Original
-                IconButton(
-                  icon: const Icon(Icons.restore),
-                  tooltip: 'Restore Original Backup',
-                  onPressed: isEditing
-                      ? null
-                      : () async {
-                          await appState.restoreDateToOriginal(dateInfo);
-                          _loadPointsForSelectedDate();
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text(
-                                      'Restored timeline to original backup.')),
-                            );
-                          }
-                        },
-                ),
-                // Delete Day
-                IconButton(
-                  icon: const Icon(Icons.delete_forever, color: Colors.red),
-                  tooltip: 'Delete Timeline',
-                  onPressed: isEditing
-                      ? null
-                      : () async {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              title: const Text('Delete Timeline'),
-                              content: Text(
-                                  'Are you sure you want to delete all timeline records for $dateStr?'),
-                              actions: [
-                                TextButton(
-                                    onPressed: () => Navigator.pop(ctx, false),
-                                    child: const Text('Cancel')),
-                                ElevatedButton(
-                                  onPressed: () => Navigator.pop(ctx, true),
-                                  style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                      foregroundColor: Colors.white),
-                                  child: const Text('Delete'),
-                                ),
-                              ],
-                            ),
-                          );
-                          if (confirm == true) {
-                            await appState.deleteDate(dateInfo);
-                            setState(() {
-                              _selectedDate = null;
-                            });
-                          }
-                        },
-                ),
-              ],
-            ),
-          ),
 
         // Source dropdown
         if (dateInfo.hasTimelineBackup && dateInfo.hasGpxBackup)
@@ -4506,6 +4407,43 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   ),
           ),
         ),
+        // Snap Roads Button at bottom of sidebar
+        if (dateInfo.filePath.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: isEditing
+                    ? null
+                    : () async {
+                        await appState.snapToRoads(dateInfo);
+                        _loadPointsForSelectedDate();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Snapped timeline to roads!'),
+                            ),
+                          );
+                        }
+                      },
+                icon: const Icon(Icons.alt_route),
+                label: const Text('Snap Roads'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  backgroundColor: dateInfo.state == 'snapped'
+                      ? Colors.green.shade50
+                      : null,
+                  foregroundColor: dateInfo.state == 'snapped'
+                      ? Colors.green.shade800
+                      : null,
+                  side: dateInfo.state == 'snapped'
+                      ? BorderSide(color: Colors.green.shade200)
+                      : null,
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -8682,10 +8620,21 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
             const SizedBox(height: 12),
             SizedBox(
               height: 80,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: itemCount,
-                itemBuilder: (context, index) {
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context).copyWith(
+                  dragDevices: {
+                    PointerDeviceKind.touch,
+                    PointerDeviceKind.mouse,
+                    PointerDeviceKind.trackpad,
+                    PointerDeviceKind.stylus,
+                  },
+                ),
+                child: ListView.builder(
+                  physics: const BouncingScrollPhysics(
+                      parent: AlwaysScrollableScrollPhysics()),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: itemCount,
+                  itemBuilder: (context, index) {
                   final double val = distances[index];
                   final String label = labels[index];
 
@@ -8796,6 +8745,7 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                 },
               ),
             ),
+          ),
           ],
         ),
       ),
