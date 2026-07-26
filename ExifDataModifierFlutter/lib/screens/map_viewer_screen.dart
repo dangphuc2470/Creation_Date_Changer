@@ -407,83 +407,101 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     try {
       Map<String, IfdTag> tags = {};
       try {
-        final headerBytes = await _readFileHeaderBytes(entry.file);
+        final headerBytes = await _readFileHeaderBytes(entry.file, maxHeaderBytes: 524288);
         tags = await readExifFromBytes(headerBytes);
       } catch (_) {
         try {
-          // Fallback to larger 256KB header if 128KB header parse fails (NEVER read full file into memory)
-          final headerBytes2 = await _readFileHeaderBytes(entry.file, maxHeaderBytes: 262144);
+          final headerBytes2 = await _readFileHeaderBytes(entry.file, maxHeaderBytes: 1048576);
           tags = await readExifFromBytes(headerBytes2);
         } catch (_) {}
       }
-      if (tags.isEmpty) return;
 
-      // Date
-      final dateTag = tags['EXIF DateTimeOriginal'] ?? tags['Image DateTime'];
-      if (dateTag != null) {
-        final raw = dateTag.printable; // e.g. "2024:05:10 13:45:22"
-        final parts = raw.split(' ');
-        if (parts.length == 2) {
-          final dateParts = parts[0].split(':');
-          final timeParts = parts[1].split(':');
-          if (dateParts.length == 3 && timeParts.length == 3) {
-            try {
-              entry.dateTaken = DateTime.utc(
-                int.parse(dateParts[0]),
-                int.parse(dateParts[1]),
-                int.parse(dateParts[2]),
-                int.parse(timeParts[0]),
-                int.parse(timeParts[1]),
-                int.parse(timeParts[2]),
-              );
-            } catch (_) {}
+      if (tags.isNotEmpty) {
+        // Date
+        final dateTag = tags['EXIF DateTimeOriginal'] ?? tags['Image DateTime'];
+        if (dateTag != null) {
+          final raw = dateTag.printable; // e.g. "2024:05:10 13:45:22"
+          final parts = raw.split(' ');
+          if (parts.length == 2) {
+            final dateParts = parts[0].split(':');
+            final timeParts = parts[1].split(':');
+            if (dateParts.length == 3 && timeParts.length == 3) {
+              try {
+                entry.dateTaken = DateTime.utc(
+                  int.parse(dateParts[0]),
+                  int.parse(dateParts[1]),
+                  int.parse(dateParts[2]),
+                  int.parse(timeParts[0]),
+                  int.parse(timeParts[1]),
+                  int.parse(timeParts[2]),
+                );
+              } catch (_) {}
+            }
           }
         }
-      }
 
-      // GPS
-      final latTag = tags['GPS GPSLatitude'];
-      final latRef = tags['GPS GPSLatitudeRef'];
-      final lngTag = tags['GPS GPSLongitude'];
-      final lngRef = tags['GPS GPSLongitudeRef'];
+        // GPS
+        final latTag = tags['GPS GPSLatitude'];
+        final latRef = tags['GPS GPSLatitudeRef'];
+        final lngTag = tags['GPS GPSLongitude'];
+        final lngRef = tags['GPS GPSLongitudeRef'];
 
-      if (latTag != null && lngTag != null) {
-        double? parseDms(IfdTag tag) {
-          try {
-            if (tag.values is IfdRatios) {
-              final vals = tag.values as IfdRatios;
-              if (vals.ratios.length >= 3) {
-                final d = vals.ratios[0].numerator /
-                    (vals.ratios[0].denominator == 0
-                        ? 1
-                        : vals.ratios[0].denominator);
-                final m = vals.ratios[1].numerator /
-                    (vals.ratios[1].denominator == 0
-                        ? 1
-                        : vals.ratios[1].denominator);
-                final s = vals.ratios[2].numerator /
-                    (vals.ratios[2].denominator == 0
-                        ? 1
-                        : vals.ratios[2].denominator);
-                return d + m / 60 + s / 3600;
+        if (latTag != null && lngTag != null) {
+          double? parseDms(IfdTag tag) {
+            try {
+              if (tag.values is IfdRatios) {
+                final vals = tag.values as IfdRatios;
+                if (vals.ratios.length >= 3) {
+                  final d = vals.ratios[0].numerator /
+                      (vals.ratios[0].denominator == 0
+                          ? 1
+                          : vals.ratios[0].denominator);
+                  final m = vals.ratios[1].numerator /
+                      (vals.ratios[1].denominator == 0
+                          ? 1
+                          : vals.ratios[1].denominator);
+                  final s = vals.ratios[2].numerator /
+                      (vals.ratios[2].denominator == 0
+                          ? 1
+                          : vals.ratios[2].denominator);
+                  return d + m / 60 + s / 3600;
+                }
               }
-            }
-          } catch (_) {}
-          return null;
-        }
+            } catch (_) {}
+            return null;
+          }
 
-        final lat = parseDms(latTag);
-        final lng = parseDms(lngTag);
-        if (lat != null && lng != null) {
-          double finalLat = lat;
-          double finalLng = lng;
-          if (latRef?.printable == 'S') finalLat = -finalLat;
-          if (lngRef?.printable == 'W') finalLng = -finalLng;
-          entry.gpsLatLng = LatLng(finalLat, finalLng);
+          final lat = parseDms(latTag);
+          final lng = parseDms(lngTag);
+          if (lat != null && lng != null) {
+            double finalLat = lat;
+            double finalLng = lng;
+            if (latRef?.printable == 'S') finalLat = -finalLat;
+            if (lngRef?.printable == 'W') finalLng = -finalLng;
+            entry.gpsLatLng = LatLng(finalLat, finalLng);
+          }
         }
       }
     } catch (e) {
       debugPrint('EXIF read error for ${entry.filename}: $e');
+    }
+
+    // Fallback: extract date from filename pattern (e.g. 5D2_20260524_172117_21889.JPG or IMG_20260316_085005.JPG)
+    if (entry.dateTaken == null) {
+      try {
+        final match = RegExp(r'(\d{4})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})')
+            .firstMatch(entry.filename);
+        if (match != null) {
+          entry.dateTaken = DateTime.utc(
+            int.parse(match.group(1)!),
+            int.parse(match.group(2)!),
+            int.parse(match.group(3)!),
+            int.parse(match.group(4)!),
+            int.parse(match.group(5)!),
+            int.parse(match.group(6)!),
+          );
+        }
+      } catch (_) {}
     }
   }
   List<String> _parseCsvLine(String line) {
