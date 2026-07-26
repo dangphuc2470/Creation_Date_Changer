@@ -4145,6 +4145,21 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               });
               _loadPointsForSelectedDate();
             },
+            onSnapToRoads: dateInfo.filePath.isEmpty
+                ? null
+                : () async {
+                    await appState.snapToRoads(dateInfo);
+                    _loadPointsForSelectedDate();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Snapped timeline to roads!'),
+                        ),
+                      );
+                    }
+                  },
+            isSnapped: dateInfo.state == 'snapped',
+            isEditing: isEditing,
           ),
 
         // Points Details List
@@ -4407,43 +4422,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   ),
           ),
         ),
-        // Snap Roads Button at bottom of sidebar
-        if (dateInfo.filePath.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-            child: SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: isEditing
-                    ? null
-                    : () async {
-                        await appState.snapToRoads(dateInfo);
-                        _loadPointsForSelectedDate();
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Snapped timeline to roads!'),
-                            ),
-                          );
-                        }
-                      },
-                icon: const Icon(Icons.alt_route),
-                label: const Text('Snap Roads'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  backgroundColor: dateInfo.state == 'snapped'
-                      ? Colors.green.shade50
-                      : null,
-                  foregroundColor: dateInfo.state == 'snapped'
-                      ? Colors.green.shade800
-                      : null,
-                  side: dateInfo.state == 'snapped'
-                      ? BorderSide(color: Colors.green.shade200)
-                      : null,
-                ),
-              ),
-            ),
-          ),
       ],
     );
   }
@@ -8329,6 +8307,9 @@ class MonthlyDistanceChart extends StatefulWidget {
   final List<LocationPoint> points;
   final double timezoneOffset;
   final Function(DateTime) onDateSelected;
+  final VoidCallback? onSnapToRoads;
+  final bool isSnapped;
+  final bool isEditing;
 
   const MonthlyDistanceChart({
     super.key,
@@ -8337,6 +8318,9 @@ class MonthlyDistanceChart extends StatefulWidget {
     required this.points,
     required this.timezoneOffset,
     required this.onDateSelected,
+    this.onSnapToRoads,
+    this.isSnapped = false,
+    this.isEditing = false,
   });
 
   @override
@@ -8591,7 +8575,23 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                     ),
                   ],
                 ),
-                const SizedBox(width: 12),
+                if (widget.onSnapToRoads != null) ...[
+                  const SizedBox(width: 4),
+                  OutlinedButton.icon(
+                    onPressed: widget.isEditing ? null : widget.onSnapToRoads,
+                    icon: const Icon(Icons.alt_route, size: 14),
+                    label: const Text('Snap', style: TextStyle(fontSize: 11)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      backgroundColor: widget.isSnapped ? Colors.green.shade50 : null,
+                      foregroundColor: widget.isSnapped ? Colors.green.shade800 : null,
+                      side: widget.isSnapped ? BorderSide(color: Colors.green.shade200) : null,
+                    ),
+                  ),
+                ],
+                const SizedBox(width: 8),
                 DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: _mode,
