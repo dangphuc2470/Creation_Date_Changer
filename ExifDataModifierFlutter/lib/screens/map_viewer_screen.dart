@@ -6518,8 +6518,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         ),
       ];
     } else if (item is TimelinePath) {
-      final hasBackup = _unsnappedSegmentBackups.containsKey(
-          _getSegmentKey(item.startTime, item.endTime));
+      final hasBackup = _unsnappedSegmentBackups
+          .containsKey(_getSegmentKey(item.startTime, item.endTime));
 
       menuItems = [
         if (hasBackup)
@@ -8540,7 +8540,13 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
       }
       distances =
           List.generate(daysInMonth, (i) => monthData[i + 1]?.distance ?? 0.0);
-      labels = List.generate(daysInMonth, (i) => (i + 1).toString());
+      labels = List.generate(daysInMonth, (i) {
+        final dt = DateTime(
+            widget.selectedDate.year, widget.selectedDate.month, i + 1);
+        final weekday = DateFormat('E').format(dt);
+        final dayNum = (i + 1).toString().padLeft(2, '0');
+        return '$weekday\n$dayNum';
+      });
     } else if (_mode == 'monthly') {
       // Show months Jan..Dec of the selected year
       itemCount = 12;
@@ -8589,13 +8595,13 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
     );
 
     // Header title and active hover description
-    String titleText = 'Day Distance';
+    String titleText = 'Daily Distance';
     String currentModeTotal = _formatDistance(selectedDateInfo.distance);
     if (_mode == 'monthly') {
-      titleText = 'Month Distance';
+      titleText = 'Monthly Distance';
       currentModeTotal = _formatDistance(totalYearDistance);
     } else if (_mode == 'yearly') {
-      titleText = 'Year Distance';
+      titleText = 'Yearly Distance';
       currentModeTotal = _formatDistance(totalYearDistance);
     }
 
@@ -8752,9 +8758,10 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                           color: Theme.of(context).colorScheme.primary,
                         ),
                     items: const [
-                      DropdownMenuItem(value: 'daily', child: Text('Day')),
-                      DropdownMenuItem(value: 'monthly', child: Text('Month')),
-                      DropdownMenuItem(value: 'yearly', child: Text('Year')),
+                      DropdownMenuItem(value: 'daily', child: Text('Daily')),
+                      DropdownMenuItem(
+                          value: 'monthly', child: Text('Monthly')),
+                      DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
                     ],
                     onChanged: (val) {
                       if (val != null) {
@@ -8856,7 +8863,7 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                       },
                       child: Container(
                         width: _mode == 'daily'
-                            ? 24
+                            ? 30
                             : (_mode == 'monthly' ? 35 : 45),
                         margin: const EdgeInsets.symmetric(horizontal: 4),
                         child: Column(
@@ -8877,8 +8884,10 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                             const SizedBox(height: 4),
                             Text(
                               label,
+                              textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 9,
+                                height: 1.1,
                                 fontWeight: isActive
                                     ? FontWeight.bold
                                     : FontWeight.normal,
