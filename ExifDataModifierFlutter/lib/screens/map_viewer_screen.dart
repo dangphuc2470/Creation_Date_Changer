@@ -399,7 +399,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         await raf.close();
       }
     } catch (_) {
-      return await file.readAsBytes();
+      return Uint8List(0);
     }
   }
 

@@ -672,6 +672,7 @@ class _GeotagScreenState extends State<GeotagScreen> {
                           clipBehavior: Clip.antiAlias,
                           child: Image.file(item.file,
                               fit: BoxFit.cover,
+                              cacheWidth: 120,
                               errorBuilder: (c, o, s) => const Icon(
                                   Icons.broken_image,
                                   color: Colors.grey)),
@@ -1252,6 +1253,7 @@ class _GeotagScreenState extends State<GeotagScreen> {
           child: Image.file(
             File(history.path),
             fit: BoxFit.cover,
+            cacheWidth: 120,
             errorBuilder: (context, error, stackTrace) =>
                 const Icon(Icons.broken_image, size: 20),
           ),

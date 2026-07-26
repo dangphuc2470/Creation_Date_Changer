@@ -482,6 +482,7 @@ class _LensMetadataScreenState extends State<LensMetadataScreen> {
                       child: Image.file(
                         item.file,
                         fit: BoxFit.cover,
+                        cacheWidth: 120,
                         errorBuilder: (c, e, s) =>
                             const Icon(Icons.image, color: Colors.grey),
                       ),
