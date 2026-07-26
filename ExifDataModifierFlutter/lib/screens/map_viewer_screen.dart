@@ -1241,56 +1241,54 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
       for (final photo in datePhotos) {
         if (photo.dateTaken == null) continue;
-        final photoLocal = photo.dateTaken!;
 
-        // Compute interpolated position for ungeotagged photos
+        // Compute interpolated position for ungeotagged photos using UTC time
+        final photoUtc = photo.dateTaken!.subtract(Duration(minutes: (tz * 60).toInt()));
+
         if (photo.gpsLatLng == null && points.isNotEmpty) {
           photo.interpolatedLatLng =
-              _interpolatePositionAtTime(photoLocal, points, tz);
+              _interpolatePositionAtTime(photo.dateTaken!, points, tz);
         }
 
         if (items.isNotEmpty) {
           TimelineItem? best;
-          int minDiffMs = 999999999;
 
+          // 1. Direct match: photo falls inside item time window [startTime, endTime] (both in UTC)
           for (int i = 0; i < items.length; i++) {
             final item = items[i];
-            final localStart =
-                item.startTime.add(Duration(minutes: (tz * 60).toInt()));
-            final localEnd =
-                item.endTime.add(Duration(minutes: (tz * 60).toInt()));
-
-            // 1. Direct match: photo timestamp falls inside item time window
-            if (photoLocal.compareTo(localStart) >= 0 &&
-                photoLocal.compareTo(localEnd) <= 0) {
+            if (photoUtc.compareTo(item.startTime) >= 0 &&
+                photoUtc.compareTo(item.endTime) <= 0) {
               best = item;
               break;
             }
+          }
 
-            // 2. Nearest boundary match
-            final diffStart = (photoLocal.millisecondsSinceEpoch -
-                    localStart.millisecondsSinceEpoch)
-                .abs();
-            final diffEnd = (photoLocal.millisecondsSinceEpoch -
-                    localEnd.millisecondsSinceEpoch)
-                .abs();
-            final diff = min(diffStart, diffEnd);
-            if (diff < minDiffMs) {
-              minDiffMs = diff;
-              best = item;
+          // 2. Boundary checks for photos taken before first item or after last item
+          if (best == null) {
+            if (photoUtc.isBefore(items.first.startTime)) {
+              best = items.first;
+            } else if (photoUtc.isAfter(items.last.endTime)) {
+              best = items.last;
             }
           }
 
-          // 3. Boundary bounds checks
-          final firstLocalStart = items.first.startTime
-              .add(Duration(minutes: (tz * 60).toInt()));
-          final lastLocalEnd =
-              items.last.endTime.add(Duration(minutes: (tz * 60).toInt()));
-
-          if (photoLocal.isAfter(lastLocalEnd)) {
-            best = items.last;
-          } else if (photoLocal.isBefore(firstLocalStart)) {
-            best = items.first;
+          // 3. Gap matching: find nearest item boundary for photos taken in gaps between items
+          if (best == null) {
+            int minDiffMs = 999999999;
+            for (int i = 0; i < items.length; i++) {
+              final item = items[i];
+              final diffStart = (photoUtc.millisecondsSinceEpoch -
+                      item.startTime.millisecondsSinceEpoch)
+                  .abs();
+              final diffEnd = (photoUtc.millisecondsSinceEpoch -
+                      item.endTime.millisecondsSinceEpoch)
+                  .abs();
+              final diff = min(diffStart, diffEnd);
+              if (diff < minDiffMs) {
+                minDiffMs = diff;
+                best = item;
+              }
+            }
           }
 
           if (best != null) {
