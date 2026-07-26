@@ -74,6 +74,9 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
           context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
           context.read<BatchGeotagProvider>().loadTimelineLocationsFromAppDb();
 
+          // Auto switch to MapViewerScreen tab (Index 5)
+          appState.setIndex(5);
+
           setState(() {
             _lastImportedCount = points.length;
             _isLoading = false;
@@ -125,6 +128,9 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
           // Reload geotag providers with the new points
           context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
           context.read<BatchGeotagProvider>().loadTimelineLocationsFromAppDb();
+
+          // Auto switch to MapViewerScreen tab (Index 5)
+          appState.setIndex(5);
 
           setState(() {
             _lastImportedCount = points.length;
@@ -203,6 +209,9 @@ class _ImportExportScreenState extends State<ImportExportScreen> {
             // Reload geotag providers with the new points
             context.read<GeotagProvider>().loadTimelineLocationsFromAppDb();
             context.read<BatchGeotagProvider>().loadTimelineLocationsFromAppDb();
+
+            // Auto switch to MapViewerScreen tab (Index 5)
+            appState.setIndex(5);
 
             int totalPts = 0;
             for (final g in finalGroups) {

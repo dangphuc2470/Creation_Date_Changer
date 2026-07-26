@@ -157,6 +157,10 @@ class AppStateProvider extends ChangeNotifier {
       _activePaths[activeFile.path] = activePoints;
     }
 
+    if (points.isNotEmpty) {
+      _lastImportedDate = points.first.timestamp;
+    }
+
     await initializeAndScanAppStorage();
   }
 
@@ -327,11 +331,13 @@ class AppStateProvider extends ChangeNotifier {
   // ── Timeline handle state ──────────────────────────────────────────────────
   List<DateInfo> _allDates = [];
   String? _lastLoadedPath;
+  DateTime? _lastImportedDate;
   final Map<String, List<LocationPoint>> _activePaths = {}; // filePath -> points
   final Map<String, Color> _pathColors = {}; // filePath -> color
 
   List<DateInfo> get allDates => _allDates;
   String? get lastLoadedPath => _lastLoadedPath;
+  DateTime? get lastImportedDate => _lastImportedDate;
   Map<String, List<LocationPoint>> get activePaths => _activePaths;
   Map<String, Color> get pathColors => _pathColors;
 

@@ -5196,12 +5196,29 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     );
   }
 
+  DateTime? _lastHandledImportDate;
+
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppStateProvider>();
     final settings = context.watch<SettingsProvider>();
     final isEditing = appState.isEditing;
     final timeOffset = settings.geotagTimezone.toDouble();
+
+    // Reactive update when a new timeline date is imported from ImportExportScreen or DropTarget
+    if (appState.lastImportedDate != null &&
+        appState.lastImportedDate != _lastHandledImportDate) {
+      _lastHandledImportDate = appState.lastImportedDate;
+      final importedDate = DateTime.utc(
+        appState.lastImportedDate!.year,
+        appState.lastImportedDate!.month,
+        appState.lastImportedDate!.day,
+      );
+      _selectedDate = importedDate;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadPointsForSelectedDate();
+      });
+    }
 
     // Make sure we have selectedDate initialized
     if (_selectedDate == null) {
