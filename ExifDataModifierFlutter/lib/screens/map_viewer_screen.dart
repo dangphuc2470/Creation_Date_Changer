@@ -486,10 +486,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       debugPrint('EXIF read error for ${entry.filename}: $e');
     }
 
-    // Fallback: extract date from filename pattern (e.g. 5D2_20260524_172117_21889.JPG or IMG_20260316_085005.JPG)
+    // Fallback: extract date from filename pattern (e.g. 6D_20260524_190545_01047.JPG or 5D2_20260524_172117.JPG)
     if (entry.dateTaken == null) {
       try {
-        final match = RegExp(r'(\d{4})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})')
+        final match = RegExp(r'(20\d{2})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})')
             .firstMatch(entry.filename);
         if (match != null) {
           entry.dateTaken = DateTime.utc(
@@ -504,6 +504,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       } catch (_) {}
     }
   }
+
   List<String> _parseCsvLine(String line) {
     List<String> result = [];
     bool insideQuotes = false;
@@ -551,8 +552,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         ];
 
         final result = await Process.run(exe, args);
-        if (result.exitCode <= 1 && result.stdout.toString().isNotEmpty) {
-          final lines = LineSplitter.split(result.stdout.toString()).toList();
+        final stdoutStr = result.stdout.toString().trim();
+
+        if (result.exitCode == 0 && stdoutStr.startsWith('SourceFile')) {
+          final lines = LineSplitter.split(stdoutStr).toList();
           if (lines.length > 1) {
             final header = _parseCsvLine(lines.first);
             final fileIdx = header.indexWhere((h) => h.contains('SourceFile'));
@@ -620,7 +623,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             }
           }
         } else {
-          // Fallback to Dart read if ExifTool CSV fails
+          // Fallback to Dart read if ExifTool CSV fails or outputs error
           await Future.wait(chunk.map(_readExifFromPhoto));
         }
 
