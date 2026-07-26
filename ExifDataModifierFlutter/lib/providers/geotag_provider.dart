@@ -166,6 +166,12 @@ class GeotagProvider extends ChangeNotifier {
     } catch (_) {}
 
     if (Platform.isWindows) {
+      try {
+        final exeDir = File(Platform.resolvedExecutable).parent;
+        final installedExe = File(p.join(exeDir.path, 'exiftool.exe'));
+        if (await installedExe.exists()) return installedExe.path;
+      } catch (_) {}
+
       final cPath = 'C:\\exiftool\\exiftool.exe';
       if (await File(cPath).exists()) return cPath;
     }

@@ -486,6 +486,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       debugPrint('EXIF read error for ${entry.filename}: $e');
     }
   }
+
   Future<String> _getExifToolExecutable() async {
     try {
       final result = await Process.run('exiftool', ['-ver']);
@@ -493,6 +494,16 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     } catch (_) {}
 
     if (Platform.isWindows) {
+      // 1. Try executable parent directory (where CMake deploys exiftool.exe + exiftool_files)
+      try {
+        final exeDir = File(Platform.resolvedExecutable).parent;
+        final installedExe = File(path.join(exeDir.path, 'exiftool.exe'));
+        if (await installedExe.exists()) {
+          return installedExe.path;
+        }
+      } catch (_) {}
+
+      // 2. Try standard C:\exiftool\exiftool.exe
       const cPath = r'C:\exiftool\exiftool.exe';
       if (await File(cPath).exists()) return cPath;
     }
@@ -1112,7 +1123,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   // ── Photo helpers for Timeline tiles ──────────────────────────────────
   final Set<int> _expandedPhotoGrids = {};
 
-  void _geotagAllInItem(TimelineItem item) {
+  Future<void> _geotagAllInItem(TimelineItem item) async {
     final ungeotagged = (item is TimelinePlace)
         ? item.ungeotaggedPhotos
         : (item is TimelinePath ? item.ungeotaggedPhotos : <PhotoEntry>[]);
@@ -1130,12 +1141,19 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       }
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Applied geotags to ${photosToTag.length} photos'),
-      backgroundColor: Colors.teal,
-      duration: const Duration(seconds: 2),
-    ));
+    // Write EXIF GPS metadata directly into photo files on disk via ExifTool
+    await _writePhotoGpsToExif(photosToTag);
 
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content:
+            Text('Applied & saved EXIF geotags for ${photosToTag.length} photo(s)'),
+        backgroundColor: Colors.teal,
+        duration: const Duration(seconds: 2),
+      ));
+    }
+
+    if (!mounted) return;
     final appState = context.read<AppStateProvider>();
     final settings = context.read<SettingsProvider>();
     final pts = appState.activePaths[_currentDateInfo(appState).filePath] ?? [];
@@ -1143,7 +1161,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   }
 
   /// Modify Photo Geotag -> Snap photo GPS coordinate to timeline interpolated location
-  void _modifyGeotagsFromTimelineInItem(TimelineItem item) {
+  Future<void> _modifyGeotagsFromTimelineInItem(TimelineItem item) async {
     final geotagged = (item is TimelinePlace)
         ? item.geotaggedPhotos
         : (item is TimelinePath ? item.geotaggedPhotos : <PhotoEntry>[]);
@@ -1156,7 +1174,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     final points = appState.activePaths[dateInfo.filePath] ?? [];
     if (points.isEmpty) return;
 
-    int updatedCount = 0;
+    final List<PhotoEntry> modifiedPhotos = [];
     setState(() {
       for (final photo in geotagged) {
         if (photo.dateTaken == null) continue;
@@ -1166,17 +1184,24 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           photo.gpsLatLng = interpolated;
           photo.interpolatedLatLng = null;
           photo.addedToTimeline = true;
-          updatedCount++;
+          modifiedPhotos.add(photo);
         }
       }
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content:
-          Text('Updated $updatedCount photo geotag(s) to match timeline track'),
-      backgroundColor: Colors.teal,
-      duration: const Duration(seconds: 2),
-    ));
+    // Write updated EXIF GPS metadata directly into photo files on disk via ExifTool
+    if (modifiedPhotos.isNotEmpty) {
+      await _writePhotoGpsToExif(modifiedPhotos);
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            'Updated & saved EXIF geotags for ${modifiedPhotos.length} photo(s)'),
+        backgroundColor: Colors.teal,
+        duration: const Duration(seconds: 2),
+      ));
+    }
 
     _assignPhotosToTimelineItems(points, tz);
   }
@@ -1582,9 +1607,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Geotag applied & saved to file EXIF: "${photo.filename}" '
-            '(${loc.latitude.toStringAsFixed(5)}, '
-            '${loc.longitude.toStringAsFixed(5)})'),
+        content:
+            Text('Geotag applied & saved to file EXIF: "${photo.filename}" '
+                '(${loc.latitude.toStringAsFixed(5)}, '
+                '${loc.longitude.toStringAsFixed(5)})'),
         backgroundColor: Colors.teal,
         duration: const Duration(seconds: 2),
       ));
@@ -2069,8 +2095,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         }
       }
     }
-
-
 
     // Check if clicked near the hover dot
     if (canDragOrEdit && _hoveredLatLng != null && _hoveredPoint != null) {
@@ -3050,11 +3074,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   int closestIdx = -1;
                   int minDiff = 999999999;
                   for (int i = 0; i < allDayPoints.length; i++) {
-                    final diff = (allDayPoints[i]
-                                .timestamp
-                                .millisecondsSinceEpoch -
-                            pt.timestamp.millisecondsSinceEpoch)
-                        .abs();
+                    final diff =
+                        (allDayPoints[i].timestamp.millisecondsSinceEpoch -
+                                pt.timestamp.millisecondsSinceEpoch)
+                            .abs();
                     if (diff < minDiff && diff < 5000) {
                       minDiff = diff;
                       closestIdx = i;
@@ -4802,8 +4825,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                           ),
                         ),
 
-
-
                       // Photo strip / preview panel
                       if (_photos.isNotEmpty)
                         Positioned(
@@ -4895,9 +4916,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                 size: 15,
                                 color: settings.requireShiftToDrag
                                     ? Colors.white
-                                    : Theme.of(context)
-                                        .colorScheme
-                                        .onSurface,
+                                    : Theme.of(context).colorScheme.onSurface,
                               ),
                               const SizedBox(width: 6),
                               Text(
@@ -4909,9 +4928,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                   fontWeight: FontWeight.bold,
                                   color: settings.requireShiftToDrag
                                       ? Colors.white
-                                      : Theme.of(context)
-                                          .colorScheme
-                                          .onSurface,
+                                      : Theme.of(context).colorScheme.onSurface,
                                 ),
                               ),
                             ],
