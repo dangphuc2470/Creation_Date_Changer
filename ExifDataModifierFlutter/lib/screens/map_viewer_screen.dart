@@ -139,6 +139,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   bool _showCalendar = false;
   bool _viewAsPath = true;
   double _sidebarWidth = 380.0;
+  String _chartMode = 'daily';
 
   // Hover state (non-edit mode)
   LocationPoint? _hoveredPoint;
@@ -3679,9 +3680,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
-  String _formatPointTime(DateTime utcTime, double timezoneOffset) {
+  String _formatPointTime(DateTime utcTime, double timezoneOffset, {bool includeDate = false}) {
     final localTime =
         utcTime.add(Duration(minutes: (timezoneOffset * 60).toInt()));
+    if (includeDate || _chartMode != 'daily') {
+      return DateFormat('dd/MM HH:mm').format(localTime);
+    }
     return DateFormat('HH:mm:ss').format(localTime);
   }
 
@@ -4156,6 +4160,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             allDates: appState.allDates,
             points: points,
             timezoneOffset: offset,
+            chartMode: _chartMode,
+            onModeChanged: (mode) {
+              setState(() {
+                _chartMode = mode;
+              });
+            },
             onDateSelected: (date) {
               setState(() {
                 _selectedDate = date;
@@ -4192,7 +4202,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                           children: [
                             Text(
                               _viewAsPath
-                                  ? 'Timeline'
+                                  ? (_chartMode == 'monthly'
+                                      ? 'Monthly Timeline'
+                                      : (_chartMode == 'yearly'
+                                          ? 'Yearly Timeline'
+                                          : 'Timeline'))
                                   : 'Track Details (${points.length} pts)',
                               style:
                                   const TextStyle(fontWeight: FontWeight.bold),
@@ -5219,9 +5233,37 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       ),
     );
 
-    final List<LocationPoint> pointsToShow = isEditing
-        ? appState.editingPoints
-        : (appState.activePaths[currentDateInfo.filePath] ?? []);
+    List<LocationPoint> pointsToShow;
+    if (isEditing) {
+      pointsToShow = appState.editingPoints;
+    } else if (_chartMode == 'monthly') {
+      final monthDates = appState.allDates.where((d) =>
+          _selectedDate != null &&
+          d.date.year == _selectedDate!.year &&
+          d.date.month == _selectedDate!.month &&
+          d.filePath.isNotEmpty);
+      final List<LocationPoint> allMonthPts = [];
+      for (final d in monthDates) {
+        final pts = appState.activePaths[d.filePath] ?? [];
+        allMonthPts.addAll(pts);
+      }
+      allMonthPts.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      pointsToShow = allMonthPts;
+    } else if (_chartMode == 'yearly') {
+      final yearDates = appState.allDates.where((d) =>
+          _selectedDate != null &&
+          d.date.year == _selectedDate!.year &&
+          d.filePath.isNotEmpty);
+      final List<LocationPoint> allYearPts = [];
+      for (final d in yearDates) {
+        final pts = appState.activePaths[d.filePath] ?? [];
+        allYearPts.addAll(pts);
+      }
+      allYearPts.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      pointsToShow = allYearPts;
+    } else {
+      pointsToShow = appState.activePaths[currentDateInfo.filePath] ?? [];
+    }
 
     return DropTarget(
       onDragEntered: (_) => setState(() => _isDraggingPhotoOver = true),
@@ -8480,6 +8522,8 @@ class MonthlyDistanceChart extends StatefulWidget {
   final List<LocationPoint> points;
   final double timezoneOffset;
   final Function(DateTime) onDateSelected;
+  final String chartMode;
+  final Function(String)? onModeChanged;
 
   const MonthlyDistanceChart({
     super.key,
@@ -8488,6 +8532,8 @@ class MonthlyDistanceChart extends StatefulWidget {
     required this.points,
     required this.timezoneOffset,
     required this.onDateSelected,
+    this.chartMode = 'daily',
+    this.onModeChanged,
   });
 
   @override
@@ -8495,8 +8541,22 @@ class MonthlyDistanceChart extends StatefulWidget {
 }
 
 class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
-  String _mode = 'daily'; // 'daily', 'monthly', 'yearly'
+  late String _mode; // 'daily', 'monthly', 'yearly'
   int? _hoveredIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _mode = widget.chartMode;
+  }
+
+  @override
+  void didUpdateWidget(covariant MonthlyDistanceChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.chartMode != widget.chartMode) {
+      _mode = widget.chartMode;
+    }
+  }
 
   String _formatDistance(double meters) {
     if (meters < 1000) {
@@ -8769,6 +8829,7 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                           _mode = val;
                           _hoveredIndex = null;
                         });
+                        widget.onModeChanged?.call(val);
                       }
                     },
                   ),
