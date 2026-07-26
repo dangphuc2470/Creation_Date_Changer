@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/lens_template.dart';
+import '../models/favorite_road.dart';
 
 class SettingsProvider extends ChangeNotifier {
   late SharedPreferences _prefs;
@@ -20,6 +21,8 @@ class SettingsProvider extends ChangeNotifier {
   String googleMapsApiKey = '';
   bool requireShiftToDrag = false;
   bool get requireCtrlToDrag => requireShiftToDrag;
+
+  List<FavoriteRoad> favoriteRoads = [];
 
   bool get isLoaded => _isLoaded;
 
@@ -41,6 +44,11 @@ class SettingsProvider extends ChangeNotifier {
     requireShiftToDrag = _prefs.getBool('requireShiftToDrag') ??
         _prefs.getBool('requireCtrlToDrag') ??
         false;
+
+    final favJson = _prefs.getStringList('favoriteRoads');
+    if (favJson != null) {
+      favoriteRoads = favJson.map((e) => FavoriteRoad.fromJson(e)).toList();
+    }
 
     final lensesJson = _prefs.getStringList('lensTemplates');
     if (lensesJson != null) {
@@ -182,4 +190,19 @@ class SettingsProvider extends ChangeNotifier {
 
   Future<void> updateRequireCtrlToDrag(bool val) =>
       updateRequireShiftToDrag(val);
+
+  Future<void> addFavoriteRoad(FavoriteRoad road) async {
+    favoriteRoads.removeWhere((r) => r.id == road.id);
+    favoriteRoads.insert(0, road);
+    await _prefs.setStringList(
+        'favoriteRoads', favoriteRoads.map((r) => r.toJson()).toList());
+    notifyListeners();
+  }
+
+  Future<void> removeFavoriteRoad(String id) async {
+    favoriteRoads.removeWhere((r) => r.id == id);
+    await _prefs.setStringList(
+        'favoriteRoads', favoriteRoads.map((r) => r.toJson()).toList());
+    notifyListeners();
+  }
 }

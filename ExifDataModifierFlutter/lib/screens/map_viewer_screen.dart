@@ -16,6 +16,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/location_point.dart';
+import '../models/favorite_road.dart';
 import '../providers/app_state_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/location_manager.dart';
@@ -3107,6 +3108,341 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     });
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // SECTION: Favorite Roads — save, list, snap & redistribute timestamps
+  // ─────────────────────────────────────────────────────────────────────────
+
+  void _openFavoriteRoadsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final settings = context.watch<SettingsProvider>();
+          final favorites = settings.favoriteRoads;
+
+          return AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.star, color: Colors.amber),
+                SizedBox(width: 8),
+                Text('Favorite Roads Collection'),
+              ],
+            ),
+            content: SizedBox(
+              width: 500,
+              height: 400,
+              child: favorites.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No favorite roads saved yet.\n\nClick "Add to Favorite Roads" in any road segment menu to save routes here!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: favorites.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, idx) {
+                        final fav = favorites[idx];
+                        final distKm =
+                            (fav.distanceMeters / 1000).toStringAsFixed(2);
+                        final dateStr =
+                            DateFormat('yyyy-MM-dd HH:mm').format(fav.createdAt);
+
+                        return ListTile(
+                          leading: const CircleAvatar(
+                            backgroundColor: Colors.amber,
+                            child: Icon(Icons.route, color: Colors.white, size: 20),
+                          ),
+                          title: Text(fav.name,
+                              style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text(
+                              '${fav.points.length} points • $distKm km • Saved $dateStr'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline,
+                                color: Colors.red),
+                            tooltip: 'Delete Favorite Road',
+                            onPressed: () async {
+                              final confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (c) => AlertDialog(
+                                  title: const Text('Delete Favorite Road'),
+                                  content: Text(
+                                      'Are you sure you want to remove "${fav.name}" from your favorite roads?'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(c, false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    ElevatedButton(
+                                      onPressed: () => Navigator.pop(c, true),
+                                      child: const Text('Delete'),
+                                    ),
+                                  ],
+                                ),
+                              );
+
+                              if (confirm == true) {
+                                await settings.removeFavoriteRoad(fav.id);
+                                setModalState(() {});
+                              }
+                            },
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _addSegmentToFavorites(
+      BuildContext context, TimelinePath item) async {
+    final settings = context.read<SettingsProvider>();
+    final defaultName =
+        'Road (${(item.distance / 1000).toStringAsFixed(1)} km, ${item.points.length} pts)';
+    final controller = TextEditingController(text: defaultName);
+
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.star, color: Colors.amber),
+            SizedBox(width: 8),
+            Text('Add to Favorite Roads'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+                'Save this road geometry to your Favorite Roads collection for quick snapping later:'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'Favorite Road Name',
+                border: OutlineInputBorder(),
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Save to Favorites'),
+          ),
+        ],
+      ),
+    );
+
+    if (name != null && name.isNotEmpty) {
+      final road = FavoriteRoad(
+        id: 'fav_${DateTime.now().millisecondsSinceEpoch}',
+        name: name,
+        points: item.points.map((p) => p.latLng).toList(),
+        distanceMeters: item.distance,
+        createdAt: DateTime.now(),
+      );
+      await settings.addFavoriteRoad(road);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Saved "$name" to Favorite Roads!'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showSnapToFavoriteDialog(
+      BuildContext context, TimelinePath item) async {
+    final settings = context.read<SettingsProvider>();
+    final favorites = settings.favoriteRoads;
+
+    if (favorites.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.star_outline, color: Colors.amber),
+              SizedBox(width: 8),
+              Text('No Favorite Roads Saved'),
+            ],
+          ),
+          content: const Text(
+            'You have no saved Favorite Roads yet.\n\nUse "Add to Favorite Roads" on any road segment menu to save a route first!',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final selectedRoad = await showDialog<FavoriteRoad>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.star, color: Colors.amber),
+            SizedBox(width: 8),
+            Text('Snap to Favorite Road'),
+          ],
+        ),
+        content: SizedBox(
+          width: 450,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Select a Favorite Road to snap and replace this road segment geometry. Timestamps will be automatically redistributed proportionally by distance:',
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: favorites.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, idx) {
+                    final fav = favorites[idx];
+                    final distKm =
+                        (fav.distanceMeters / 1000).toStringAsFixed(2);
+                    return ListTile(
+                      leading: const CircleAvatar(
+                        backgroundColor: Colors.amber,
+                        child: Icon(Icons.route, color: Colors.white, size: 20),
+                      ),
+                      title: Text(fav.name,
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text('${fav.points.length} points • $distKm km'),
+                      onTap: () => Navigator.pop(ctx, fav),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (selectedRoad != null) {
+      await _snapSegmentToFavoriteRoad(context, item, selectedRoad);
+    }
+  }
+
+  Future<void> _snapSegmentToFavoriteRoad(
+      BuildContext context, TimelinePath item, FavoriteRoad favRoad) async {
+    if (favRoad.points.length < 2) return;
+
+    final appState = context.read<AppStateProvider>();
+    final settings = context.read<SettingsProvider>();
+    final double tz = settings.geotagTimezone.toDouble();
+    final dateInfo = _currentDateInfo(appState);
+    final dayPoints = appState.activePaths[dateInfo.filePath] ?? [];
+
+    // Backup current segment for undo
+    final segmentKey = _getSegmentKey(item.startTime, item.endTime);
+    _unsnappedSegmentBackups[segmentKey] =
+        List<LocationPoint>.from(item.points);
+
+    // Calculate timestamps for favRoad.points linearly between item.startTime and item.endTime
+    final favPts = favRoad.points;
+    final List<double> distances = [0.0];
+    double totalDist = 0.0;
+    for (int i = 0; i < favPts.length - 1; i++) {
+      final d = GeoUtils.distanceBetween(favPts[i], favPts[i + 1]);
+      totalDist += d;
+      distances.add(totalDist);
+    }
+
+    final timeStart = item.startTime;
+    final timeEnd = item.endTime;
+    final totalDuration = timeEnd.difference(timeStart);
+
+    final List<LocationPoint> newSegmentPoints = [];
+    for (int i = 0; i < favPts.length; i++) {
+      final progress = totalDist > 0
+          ? distances[i] / totalDist
+          : (i / (favPts.length - 1));
+      final addMs = (totalDuration.inMilliseconds * progress).toInt();
+      final ptTime = timeStart.add(Duration(milliseconds: addMs));
+
+      newSegmentPoints.add(
+        LocationPoint(
+          latitude: favPts[i].latitude,
+          longitude: favPts[i].longitude,
+          timestamp: ptTime,
+        ),
+      );
+    }
+
+    // Find start & end indices in dayPoints
+    int startIdx = -1;
+    int endIdx = -1;
+    if (item.points.isNotEmpty) {
+      final pFirst = item.points.first;
+      final pLast = item.points.last;
+      startIdx = dayPoints.indexWhere((p) => p.timestamp == pFirst.timestamp);
+      endIdx = dayPoints.indexWhere((p) => p.timestamp == pLast.timestamp);
+    }
+
+    List<LocationPoint> updatedDayPoints = [];
+    if (startIdx != -1 && endIdx != -1 && startIdx <= endIdx) {
+      updatedDayPoints = [
+        ...dayPoints.sublist(0, startIdx),
+        ...newSegmentPoints,
+        ...dayPoints.sublist(endIdx + 1),
+      ];
+    } else {
+      updatedDayPoints = List<LocationPoint>.from(dayPoints);
+    }
+
+    appState.activePaths[dateInfo.filePath] = updatedDayPoints;
+    await appState.saveListPoints(dateInfo, updatedDayPoints);
+    _assignPhotosToTimelineItems(updatedDayPoints, tz);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Snapped segment to "${favRoad.name}"! Timestamps redistributed proportionally.',
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   String _formatPointTime(DateTime utcTime, double timezoneOffset) {
     final localTime =
         utcTime.add(Duration(minutes: (timezoneOffset * 60).toInt()));
@@ -3117,6 +3453,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   // SECTION: Point dialogs — add point, edit point
   // ─────────────────────────────────────────────────────────────────────────
 
+  // ignore: unused_element
   void _openAddPointDialog(BuildContext context, AppStateProvider appState,
       DateInfo dateInfo, List<LocationPoint> currentPoints) {
     final latCtrl = TextEditingController();
@@ -3779,26 +4116,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                 ],
                               ),
                             ),
-                            IconButton(
-                              icon: Icon(
-                                  _viewAsPath ? Icons.list : Icons.timeline),
-                              onPressed: () {
-                                setState(() {
-                                  _viewAsPath = !_viewAsPath;
-                                });
-                              },
-                              tooltip: _viewAsPath
-                                  ? 'Show Raw List'
-                                  : 'Show Timeline',
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.add_circle_outline,
-                                  color: Colors.blue),
-                              onPressed: isEditing || _viewAsPath
-                                  ? null
-                                  : () => _openAddPointDialog(
-                                      context, appState, dateInfo, points),
-                              tooltip: 'Add Coordinate',
+                             IconButton(
+                              icon: const Icon(Icons.star, color: Colors.amber),
+                              onPressed: () => _openFavoriteRoadsDialog(context),
+                              tooltip: 'Favorite Roads',
                             ),
                           ],
                         ),
@@ -6493,6 +6814,28 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                     ),
                                   ),
                                   const PopupMenuItem(
+                                    value: 'add_favorite',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.star_border,
+                                            size: 18, color: Colors.amber),
+                                        SizedBox(width: 8),
+                                        Text('Add to Favorite Roads'),
+                                      ],
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'snap_favorite',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.star,
+                                            size: 18, color: Colors.amber),
+                                        SizedBox(width: 8),
+                                        Text('Snap to Favorite Road...'),
+                                      ],
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
                                     value: 'restore_original',
                                     child: Row(
                                       children: [
@@ -6531,6 +6874,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                       context.read<AppStateProvider>();
                                   final dateInfo = _currentDateInfo(appState);
                                   _undoSnapSegment(item, appState, dateInfo);
+                                } else if (val == 'add_favorite') {
+                                  _addSegmentToFavorites(context, item);
+                                } else if (val == 'snap_favorite') {
+                                  _showSnapToFavoriteDialog(context, item);
                                 } else if (val == 'restore_original') {
                                   final appState =
                                       context.read<AppStateProvider>();
