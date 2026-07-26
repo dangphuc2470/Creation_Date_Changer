@@ -3370,40 +3370,185 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     final dateInfo = _currentDateInfo(appState);
     final dayPoints = appState.activePaths[dateInfo.filePath] ?? [];
 
+    // 1. Endpoint Similarity Check
+    if (item.points.isNotEmpty) {
+      final startPt = item.points.first.latLng;
+      final endPt = item.points.last.latLng;
+      final startDiff = GeoUtils.distanceBetween(favRoad.points.first, startPt);
+      final endDiff = GeoUtils.distanceBetween(favRoad.points.last, endPt);
+
+      // If endpoints differ by > 1.5 km (1500m), show warning modal
+      if (startDiff > 1500 || endDiff > 1500) {
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                SizedBox(width: 8),
+                Text('Start/End Points Mismatch'),
+              ],
+            ),
+            content: Text(
+              'The start/end points of "${favRoad.name}" differ significantly from this road segment:\n\n'
+              '• Start distance diff: ${(startDiff / 1000).toStringAsFixed(2)} km\n'
+              '• End distance diff: ${(endDiff / 1000).toStringAsFixed(2)} km\n\n'
+              'Only favorite roads with matching start and end points should be snapped. Do you want to snap anyway?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Snap Anyway'),
+              ),
+            ],
+          ),
+        );
+
+        if (confirm != true) return;
+      }
+    }
+
     // Backup current segment for undo
     final segmentKey = _getSegmentKey(item.startTime, item.endTime);
     _unsnappedSegmentBackups[segmentKey] =
         List<LocationPoint>.from(item.points);
 
-    // Calculate timestamps for favRoad.points linearly between item.startTime and item.endTime
-    final favPts = favRoad.points;
-    final List<double> distances = [0.0];
-    double totalDist = 0.0;
-    for (int i = 0; i < favPts.length - 1; i++) {
-      final d = GeoUtils.distanceBetween(favPts[i], favPts[i + 1]);
-      totalDist += d;
-      distances.add(totalDist);
-    }
-
-    final timeStart = item.startTime;
-    final timeEnd = item.endTime;
-    final totalDuration = timeEnd.difference(timeStart);
+    // 2. Intermediate Places Check
+    // Find any TimelinePlace items for this day that sit strictly inside [item.startTime, item.endTime]
+    final allItems = _clusterTimeline(dayPoints, tz);
+    final placesInBetween = allItems.whereType<TimelinePlace>().where((p) =>
+        (p.startTime.isAfter(item.startTime) ||
+            p.startTime.isAtSameMomentAs(item.startTime)) &&
+        (p.endTime.isBefore(item.endTime) ||
+            p.endTime.isAtSameMomentAs(item.endTime))).toList();
 
     final List<LocationPoint> newSegmentPoints = [];
-    for (int i = 0; i < favPts.length; i++) {
-      final progress = totalDist > 0
-          ? distances[i] / totalDist
-          : (i / (favPts.length - 1));
-      final addMs = (totalDuration.inMilliseconds * progress).toInt();
-      final ptTime = timeStart.add(Duration(milliseconds: addMs));
+    final favPts = favRoad.points;
 
-      newSegmentPoints.add(
-        LocationPoint(
+    if (placesInBetween.isEmpty) {
+      // Direct snap whole favorite road
+      final List<double> distances = [0.0];
+      double totalDist = 0.0;
+      for (int i = 0; i < favPts.length - 1; i++) {
+        final d = GeoUtils.distanceBetween(favPts[i], favPts[i + 1]);
+        totalDist += d;
+        distances.add(totalDist);
+      }
+
+      final timeStart = item.startTime;
+      final timeEnd = item.endTime;
+      final totalDuration = timeEnd.difference(timeStart);
+
+      for (int i = 0; i < favPts.length; i++) {
+        final progress =
+            totalDist > 0 ? distances[i] / totalDist : (i / (favPts.length - 1));
+        final addMs = (totalDuration.inMilliseconds * progress).toInt();
+        newSegmentPoints.add(LocationPoint(
           latitude: favPts[i].latitude,
           longitude: favPts[i].longitude,
-          timestamp: ptTime,
-        ),
-      );
+          timestamp: timeStart.add(Duration(milliseconds: addMs)),
+        ));
+      }
+    } else {
+      // Intermediate places exist! Project each place onto favPts and split segments cleanly around place start & end times
+      placesInBetween.sort((a, b) => a.startTime.compareTo(b.startTime));
+
+      // Project places onto favPts to get split indices
+      final List<int> splitIndices = [];
+      final List<LatLng> splitPoints = [];
+
+      for (final place in placesInBetween) {
+        final proj = GeoUtils.findClosestOnPolyline(place.center, favPts);
+        splitIndices.add(proj.insertIndex);
+        splitPoints.add(proj.projectedPoint);
+      }
+
+      DateTime currentSegStartTime = item.startTime;
+      int currentFavIndex = 0;
+
+      for (int k = 0; k < placesInBetween.length; k++) {
+        final place = placesInBetween[k];
+        final splitIdx = splitIndices[k];
+        final splitPt = splitPoints[k];
+
+        // 1. Build Road Sub-segment before place (from currentSegStartTime to place.startTime)
+        final List<LatLng> subFavPts = [];
+        for (int i = currentFavIndex; i <= splitIdx; i++) {
+          subFavPts.add(favPts[i]);
+        }
+        subFavPts.add(splitPt);
+
+        if (subFavPts.length >= 2) {
+          final List<double> subDists = [0.0];
+          double subTotalD = 0.0;
+          for (int i = 0; i < subFavPts.length - 1; i++) {
+            final d = GeoUtils.distanceBetween(subFavPts[i], subFavPts[i + 1]);
+            subTotalD += d;
+            subDists.add(subTotalD);
+          }
+
+          final subDuration = place.startTime.difference(currentSegStartTime);
+          for (int i = 0; i < subFavPts.length; i++) {
+            final progress =
+                subTotalD > 0 ? subDists[i] / subTotalD : (i / (subFavPts.length - 1));
+            final addMs = (subDuration.inMilliseconds * progress).toInt();
+            newSegmentPoints.add(LocationPoint(
+              latitude: subFavPts[i].latitude,
+              longitude: subFavPts[i].longitude,
+              timestamp: currentSegStartTime.add(Duration(milliseconds: addMs)),
+            ));
+          }
+        }
+
+        // 2. Add Place stay points (from place.startTime to place.endTime)
+        newSegmentPoints.add(LocationPoint(
+          latitude: splitPt.latitude,
+          longitude: splitPt.longitude,
+          timestamp: place.startTime,
+        ));
+        newSegmentPoints.add(LocationPoint(
+          latitude: splitPt.latitude,
+          longitude: splitPt.longitude,
+          timestamp: place.endTime,
+        ));
+
+        // Advance to after place
+        currentSegStartTime = place.endTime;
+        currentFavIndex = splitIdx + 1;
+      }
+
+      // 3. Build Final Road Sub-segment after last place (from place.endTime to item.endTime)
+      final List<LatLng> finalSubPts = [
+        if (splitPoints.isNotEmpty) splitPoints.last,
+        for (int i = currentFavIndex; i < favPts.length; i++) favPts[i],
+      ];
+
+      if (finalSubPts.length >= 2) {
+        final List<double> subDists = [0.0];
+        double subTotalD = 0.0;
+        for (int i = 0; i < finalSubPts.length - 1; i++) {
+          final d = GeoUtils.distanceBetween(finalSubPts[i], finalSubPts[i + 1]);
+          subTotalD += d;
+          subDists.add(subTotalD);
+        }
+
+        final subDuration = item.endTime.difference(currentSegStartTime);
+        for (int i = 0; i < finalSubPts.length; i++) {
+          final progress =
+              subTotalD > 0 ? subDists[i] / subTotalD : (i / (finalSubPts.length - 1));
+          final addMs = (subDuration.inMilliseconds * progress).toInt();
+          newSegmentPoints.add(LocationPoint(
+            latitude: finalSubPts[i].latitude,
+            longitude: finalSubPts[i].longitude,
+            timestamp: currentSegStartTime.add(Duration(milliseconds: addMs)),
+          ));
+        }
+      }
     }
 
     // Find start & end indices in dayPoints
@@ -3435,9 +3580,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Snapped segment to "${favRoad.name}"! Timestamps redistributed proportionally.',
+            'Snapped segment to "${favRoad.name}"! Road 1 ends at place start, Road 2 resumes at place end.',
           ),
-          duration: const Duration(seconds: 3),
+          duration: const Duration(seconds: 4),
         ),
       );
     }

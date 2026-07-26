@@ -154,7 +154,78 @@ class GeoUtils {
     
     final numerator = ((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1).abs();
     final denominator = sqrt(pow(y2 - y1, 2) + pow(x2 - x1, 2));
-    
-    return numerator / denominator;
+
+    return denominator == 0 ? 0.0 : numerator / denominator;
   }
+
+  /// Find nearest point on a polyline for projecting places onto favorite roads
+  static PolylineProjection findClosestOnPolyline(LatLng point, List<LatLng> polyline) {
+    if (polyline.isEmpty) {
+      return PolylineProjection(insertIndex: 0, projectedPoint: point, distanceMeters: 0, t: 0);
+    }
+    if (polyline.length == 1) {
+      return PolylineProjection(
+        insertIndex: 0,
+        projectedPoint: polyline.first,
+        distanceMeters: distanceBetween(point, polyline.first),
+        t: 0,
+      );
+    }
+
+    double minDistance = double.infinity;
+    int bestSegmentIdx = 0;
+    LatLng bestProjPoint = polyline.first;
+    double bestT = 0.0;
+
+    for (int i = 0; i < polyline.length - 1; i++) {
+      final a = polyline[i];
+      final b = polyline[i + 1];
+
+      final x0 = point.latitude, y0 = point.longitude;
+      final x1 = a.latitude, y1 = a.longitude;
+      final x2 = b.latitude, y2 = b.longitude;
+
+      final dx = x2 - x1, dy = y2 - y1;
+      final lenSq = dx * dx + dy * dy;
+
+      double t = 0.0;
+      if (lenSq > 0) {
+        t = ((x0 - x1) * dx + (y0 - y1) * dy) / lenSq;
+        t = t.clamp(0.0, 1.0);
+      }
+
+      final projLat = x1 + t * dx;
+      final projLng = y1 + t * dy;
+      final projPt = LatLng(projLat, projLng);
+      final dist = distanceBetween(point, projPt);
+
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestSegmentIdx = i;
+        bestProjPoint = projPt;
+        bestT = t;
+      }
+    }
+
+    return PolylineProjection(
+      insertIndex: bestSegmentIdx,
+      projectedPoint: bestProjPoint,
+      distanceMeters: minDistance,
+      t: bestT,
+    );
+  }
+}
+
+class PolylineProjection {
+  final int insertIndex;
+  final LatLng projectedPoint;
+  final double distanceMeters;
+  final double t;
+
+  PolylineProjection({
+    required this.insertIndex,
+    required this.projectedPoint,
+    required this.distanceMeters,
+    required this.t,
+  });
 }
