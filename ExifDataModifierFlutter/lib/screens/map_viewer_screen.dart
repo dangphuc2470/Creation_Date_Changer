@@ -1202,54 +1202,87 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   /// Stores result in [_timelineItemsWithPhotos] and calls [setState].
   void _assignPhotosToTimelineItems(List<LocationPoint> points, double tz) {
     final items = _clusterTimeline(points, tz);
-
-    // Reset existing assignments
-    for (final item in items) {
-      if (item is TimelinePlace) {
-        item.geotaggedPhotos = [];
-        item.ungeotaggedPhotos = [];
-      } else if (item is TimelinePath) {
-        item.geotaggedPhotos = [];
-        item.ungeotaggedPhotos = [];
-      }
-    }
-
     final datePhotos = _currentDatePhotos;
-    for (final photo in datePhotos) {
-      // Compute interpolated position for ungeotagged photos
-      if (photo.gpsLatLng == null &&
-          photo.dateTaken != null &&
-          points.isNotEmpty) {
-        photo.interpolatedLatLng =
-            _interpolatePositionAtTime(photo.dateTaken!, points, tz);
+
+    if (items.isEmpty && datePhotos.isNotEmpty) {
+      final geotagged = datePhotos.where((p) => p.gpsLatLng != null).toList();
+      final ungeotagged = datePhotos.where((p) => p.gpsLatLng == null).toList();
+
+      LatLng center = const LatLng(10.776889, 106.700806);
+      if (geotagged.isNotEmpty) {
+        double avgLat = 0, avgLng = 0;
+        for (final p in geotagged) {
+          avgLat += p.gpsLatLng!.latitude;
+          avgLng += p.gpsLatLng!.longitude;
+        }
+        center = LatLng(avgLat / geotagged.length, avgLng / geotagged.length);
       }
 
-      if (photo.dateTaken == null) continue;
-
-      final utc =
-          photo.dateTaken!.subtract(Duration(minutes: (tz * 60).toInt()));
-
-      TimelineItem? best;
-      for (int i = 0; i < items.length; i++) {
-        final item = items[i];
-        if (utc.compareTo(item.startTime) >= 0 &&
-            utc.compareTo(item.endTime) <= 0) {
-          best = item;
-          break;
-        }
-        // Let the last segment capture photos taken after its endTime
-        if (i == items.length - 1 && utc.isAfter(item.startTime)) {
-          best = item;
+      final syntheticPlace = TimelinePlace(
+        points: const [],
+        center: center,
+        startTime: datePhotos.first.dateTaken ?? DateTime.now(),
+        endTime: datePhotos.last.dateTaken ?? DateTime.now(),
+      );
+      syntheticPlace.geotaggedPhotos = geotagged;
+      syntheticPlace.ungeotaggedPhotos = ungeotagged;
+      items.add(syntheticPlace);
+    } else {
+      // Reset existing assignments
+      for (final item in items) {
+        if (item is TimelinePlace) {
+          item.geotaggedPhotos = [];
+          item.ungeotaggedPhotos = [];
+        } else if (item is TimelinePath) {
+          item.geotaggedPhotos = [];
+          item.ungeotaggedPhotos = [];
         }
       }
-      if (best == null) continue;
 
-      if (photo.gpsLatLng != null) {
-        if (best is TimelinePlace) best.geotaggedPhotos.add(photo);
-        if (best is TimelinePath) best.geotaggedPhotos.add(photo);
-      } else if (photo.interpolatedLatLng != null) {
-        if (best is TimelinePlace) best.ungeotaggedPhotos.add(photo);
-        if (best is TimelinePath) best.ungeotaggedPhotos.add(photo);
+      for (final photo in datePhotos) {
+        // Compute interpolated position for ungeotagged photos
+        if (photo.gpsLatLng == null &&
+            photo.dateTaken != null &&
+            points.isNotEmpty) {
+          photo.interpolatedLatLng =
+              _interpolatePositionAtTime(photo.dateTaken!, points, tz);
+        }
+
+        if (items.isNotEmpty) {
+          final utc = photo.dateTaken != null
+              ? photo.dateTaken!.subtract(Duration(minutes: (tz * 60).toInt()))
+              : DateTime.now().toUtc();
+
+          TimelineItem best = items.first;
+          int minDiffMs = 999999999;
+          for (int i = 0; i < items.length; i++) {
+            final item = items[i];
+            if (utc.compareTo(item.startTime) >= 0 &&
+                utc.compareTo(item.endTime) <= 0) {
+              best = item;
+              break;
+            }
+            final diffStart = (utc.millisecondsSinceEpoch -
+                    item.startTime.millisecondsSinceEpoch)
+                .abs();
+            final diffEnd = (utc.millisecondsSinceEpoch -
+                    item.endTime.millisecondsSinceEpoch)
+                .abs();
+            final diff = min(diffStart, diffEnd);
+            if (diff < minDiffMs) {
+              minDiffMs = diff;
+              best = item;
+            }
+          }
+
+          if (photo.gpsLatLng != null) {
+            if (best is TimelinePlace) best.geotaggedPhotos.add(photo);
+            if (best is TimelinePath) best.geotaggedPhotos.add(photo);
+          } else {
+            if (best is TimelinePlace) best.ungeotaggedPhotos.add(photo);
+            if (best is TimelinePath) best.ungeotaggedPhotos.add(photo);
+          }
+        }
       }
     }
 
