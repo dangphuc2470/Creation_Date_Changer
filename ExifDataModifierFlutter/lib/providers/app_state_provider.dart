@@ -481,7 +481,37 @@ class AppStateProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updatePointCoordinate(int index, LatLng newLatLng) {
+  /// Automatically redistributes timestamps proportionally according to physical distance
+  /// for all points between the nearest control/pinned points before and after [index].
+  void redistributeTimestampsAroundPoint(int index) {
+    if (index < 0 || index >= _editingPoints.length) return;
+    if (_editingPoints.length <= 2) return;
+
+    // Find previous control point 'a'
+    int a = 0;
+    for (int i = index - 1; i >= 0; i--) {
+      if (_pinnedPointIndices.contains(i)) {
+        a = i;
+        break;
+      }
+    }
+
+    // Find next control point 'b'
+    int b = _editingPoints.length - 1;
+    for (int i = index + 1; i < _editingPoints.length; i++) {
+      if (_pinnedPointIndices.contains(i)) {
+        b = i;
+        break;
+      }
+    }
+
+    if (b > a + 1) {
+      _interpolateRange(a, b);
+      notifyListeners();
+    }
+  }
+
+  void updatePointCoordinate(int index, LatLng newLatLng, {bool autoRedistributeTime = true}) {
     if (index < 0 || index >= _editingPoints.length) return;
     final oldPt = _editingPoints[index];
     _editingPoints[index] = LocationPoint(
@@ -491,7 +521,12 @@ class AppStateProvider extends ChangeNotifier {
       elevation: oldPt.elevation,
       activityType: oldPt.activityType,
     );
-    notifyListeners();
+
+    if (autoRedistributeTime) {
+      redistributeTimestampsAroundPoint(index);
+    } else {
+      notifyListeners();
+    }
   }
 
   void updatePointTimeAndInterpolate(int index, DateTime newTime) {

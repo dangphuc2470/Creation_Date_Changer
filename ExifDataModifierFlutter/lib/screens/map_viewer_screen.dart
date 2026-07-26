@@ -2864,6 +2864,15 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
 
     if (_isDraggingPoint) {
+      final appState = context.read<AppStateProvider>();
+      final settings = context.read<SettingsProvider>();
+      final double tz = settings.geotagTimezone.toDouble();
+      if (_selectedPointIndex != null) {
+        appState.redistributeTimestampsAroundPoint(_selectedPointIndex!);
+        final info = _currentDateInfo(appState);
+        final pts = appState.activePaths[info.filePath] ?? [];
+        _assignPhotosToTimelineItems(pts, tz);
+      }
       setState(() {
         _isDraggingPoint = false;
       });
