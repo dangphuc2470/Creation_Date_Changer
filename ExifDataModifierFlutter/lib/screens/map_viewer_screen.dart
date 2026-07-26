@@ -543,14 +543,17 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             final dateIdx =
                 header.indexWhere((h) => h.contains('DateTimeOriginal'));
 
+            String normPath(String p) =>
+                path.normalize(p).toLowerCase().replaceAll('/', '\\');
+
             final mapByPath = <String, PhotoEntry>{
-              for (final e in chunk) path.normalize(e.file.path): e,
+              for (final e in chunk) normPath(e.file.path): e,
             };
 
             for (int j = 1; j < lines.length; j++) {
               final row = _parseCsvLine(lines[j]);
               if (row.isEmpty || fileIdx < 0 || fileIdx >= row.length) continue;
-              final filePath = path.normalize(row[fileIdx]);
+              final filePath = normPath(row[fileIdx]);
               final entry = mapByPath[filePath];
               if (entry == null) continue;
 
@@ -560,10 +563,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   row[dateIdx].isNotEmpty &&
                   row[dateIdx] != '-') {
                 try {
-                  final dtParts = row[dateIdx].split(' ');
+                  final rawDate = row[dateIdx].replaceAll(':', '-');
+                  final dtParts = rawDate.split(' ');
                   if (dtParts.length == 2) {
                     final dParts = dtParts[0].split('-');
-                    final tParts = dtParts[1].split(':');
+                    final tParts = dtParts[1].split('-');
                     if (dParts.length == 3 && tParts.length == 3) {
                       entry.dateTaken = DateTime.utc(
                         int.parse(dParts[0]),
@@ -589,6 +593,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   entry.gpsLatLng = LatLng(lat, lng);
                 }
               }
+            }
+
+            // Fallback for any items in chunk where ExifTool didn't extract date
+            final unparsed = chunk.where((e) => e.dateTaken == null).toList();
+            if (unparsed.isNotEmpty) {
+              await Future.wait(unparsed.map(_readExifFromPhoto));
             }
           }
         } else {
