@@ -112,6 +112,16 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateLensTemplate(LensTemplate template) async {
+    final index =
+        lensTemplates.indexWhere((element) => element.id == template.id);
+    if (index != -1) {
+      lensTemplates[index] = template;
+      await _saveLensTemplates();
+      notifyListeners();
+    }
+  }
+
   Future<void> removeLensTemplate(String id) async {
     lensTemplates.removeWhere((element) => element.id == id);
     // Also remove any mappings pointing to this lens

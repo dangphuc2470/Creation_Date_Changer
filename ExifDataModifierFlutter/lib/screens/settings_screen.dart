@@ -222,10 +222,23 @@ class SettingsScreen extends StatelessWidget {
                       return ListTile(
                         title: Text(lens.name),
                         subtitle: Text(
-                            '${lens.focalLength}mm f/${lens.fNumber} - ${lens.make}'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () => provider.removeLensTemplate(lens.id),
+                            '${lens.focalLength}mm f/${lens.fNumber} - ${lens.make} ${lens.model}'.trim()),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.blue),
+                              tooltip: 'Edit Lens Template',
+                              onPressed: () =>
+                                  _showEditLensDialog(context, lens),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              tooltip: 'Delete Lens Template',
+                              onPressed: () =>
+                                  provider.removeLensTemplate(lens.id),
+                            ),
+                          ],
                         ),
                       );
                     }),
@@ -236,6 +249,80 @@ class SettingsScreen extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  void _showEditLensDialog(BuildContext context, LensTemplate lens) {
+    final nameCtrl = TextEditingController(text: lens.name);
+    final makeCtrl = TextEditingController(text: lens.make);
+    final modelCtrl = TextEditingController(text: lens.model);
+    final focalLengthCtrl =
+        TextEditingController(text: lens.focalLength.toString());
+    final fNumberCtrl =
+        TextEditingController(text: lens.fNumber.toString());
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Edit Manual Lens'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Display Name (e.g. Carl Zeiss)')),
+                TextField(
+                    controller: makeCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Lens Make (e.g. Carl Zeiss Jena)')),
+                TextField(
+                    controller: modelCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Lens Model (e.g. 135mm f/3.5)')),
+                TextField(
+                    controller: focalLengthCtrl,
+                    decoration:
+                        const InputDecoration(labelText: 'Focal Length (mm)'),
+                    keyboardType: TextInputType.number),
+                TextField(
+                    controller: fNumberCtrl,
+                    decoration:
+                        const InputDecoration(labelText: 'F-Number (Aperture)'),
+                    keyboardType: TextInputType.number),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () {
+                final fl =
+                    double.tryParse(focalLengthCtrl.text) ?? lens.focalLength;
+                final fn = double.tryParse(fNumberCtrl.text) ?? lens.fNumber;
+
+                final updatedTemplate = LensTemplate(
+                  id: lens.id,
+                  name: nameCtrl.text,
+                  make: makeCtrl.text,
+                  model: modelCtrl.text,
+                  focalLength: fl,
+                  fNumber: fn,
+                );
+                context
+                    .read<SettingsProvider>()
+                    .updateLensTemplate(updatedTemplate);
+                Navigator.pop(ctx);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
     );
   }
 
