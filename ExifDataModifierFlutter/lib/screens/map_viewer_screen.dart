@@ -1,3 +1,6 @@
+﻿// ignore_for_file: unused_field
+
+import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
 import 'dart:io';
@@ -17,11 +20,13 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/location_point.dart';
 import '../models/favorite_road.dart';
+import '../models/lens_template.dart';
 import '../providers/app_state_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/location_manager.dart';
 import '../constants/timeline_constants.dart';
 import '../utils/geo_utils.dart';
+import '../services/nominatim_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION: Top-level helpers — ProjectionResult, IndexPoint, PhotoEntry
@@ -97,6 +102,24 @@ class IndexPoint {
   IndexPoint(this.index, this.point);
 }
 
+bool _isInvalidLensName(String? val) {
+  if (val == null) return true;
+  final lower = val.trim().toLowerCase();
+  if (lower.isEmpty ||
+      lower == '0' ||
+      lower == '0mm' ||
+      lower == '0.0mm' ||
+      lower == '0.0 mm' ||
+      lower == '-' ||
+      lower == 'n/a' ||
+      lower == 'none' ||
+      lower.startsWith('unknown') ||
+      lower.contains('unknown (')) {
+    return true;
+  }
+  return false;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Photo entry: dropped/picked photo with optional EXIF GPS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,12 +138,234 @@ class PhotoEntry {
   /// Only populated for photos without EXIF GPS.
   LatLng? interpolatedLatLng;
   bool addedToTimeline = false;
+  bool isGpsModified = false;
 
-  PhotoEntry({required this.file, required this.filename});
+  /// Lens & Camera metadata
+  String? lensModel;
+  String? lensMake;
+  double? focalLength;
+  double? fNumber;
+  String? shutterSpeed;
+
+  PhotoEntry({required this.file, required this.filename}) {
+    try {
+      final match = RegExp(
+              r'(20\d{2})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})[_-]?(\d{2})')
+          .firstMatch(filename);
+      if (match != null) {
+        dateTaken = DateTime.utc(
+          int.parse(match.group(1)!),
+          int.parse(match.group(2)!),
+          int.parse(match.group(3)!),
+          int.parse(match.group(4)!),
+          int.parse(match.group(5)!),
+          int.parse(match.group(6)!),
+        );
+      }
+    } catch (_) {}
+  }
 
   /// Position shown on map: EXIF GPS (may be dragged) or interpolated.
   LatLng? get assignedLatLng => gpsLatLng ?? interpolatedLatLng;
   bool get hasExifGps => gpsLatLng != null;
+  bool get hasLensInfo => !_isInvalidLensName(lensModel);
+
+  Map<String, dynamic> toJson() {
+    return {
+      'filePath': file.path,
+      'filename': filename,
+      'dateTaken': dateTaken?.toIso8601String(),
+      'gpsLat': gpsLatLng?.latitude,
+      'gpsLng': gpsLatLng?.longitude,
+      'interpolatedLat': interpolatedLatLng?.latitude,
+      'interpolatedLng': interpolatedLatLng?.longitude,
+      'addedToTimeline': addedToTimeline,
+      'isGpsModified': isGpsModified,
+      'lensModel': _isInvalidLensName(lensModel) ? null : lensModel,
+      'lensMake': lensMake,
+      'focalLength': focalLength,
+      'fNumber': fNumber,
+      'shutterSpeed': shutterSpeed,
+    };
+  }
+
+  factory PhotoEntry.fromJson(Map<String, dynamic> json) {
+    final entry = PhotoEntry(
+      file: File(json['filePath'] as String),
+      filename: json['filename'] as String? ?? '',
+    );
+    if (json['dateTaken'] != null) {
+      entry.dateTaken = DateTime.tryParse(json['dateTaken'] as String);
+    }
+    if (json['gpsLat'] != null && json['gpsLng'] != null) {
+      entry.gpsLatLng = LatLng(
+        (json['gpsLat'] as num).toDouble(),
+        (json['gpsLng'] as num).toDouble(),
+      );
+    }
+    if (json['interpolatedLat'] != null && json['interpolatedLng'] != null) {
+      entry.interpolatedLatLng = LatLng(
+        (json['interpolatedLat'] as num).toDouble(),
+        (json['interpolatedLng'] as num).toDouble(),
+      );
+    }
+    entry.addedToTimeline = json['addedToTimeline'] as bool? ?? false;
+    entry.isGpsModified = json['isGpsModified'] as bool? ?? false;
+    final rawLens = json['lensModel'] as String?;
+    entry.lensModel = _isInvalidLensName(rawLens) ? null : rawLens;
+    entry.lensMake = json['lensMake'] as String?;
+    if (json['focalLength'] != null) {
+      entry.focalLength = (json['focalLength'] as num).toDouble();
+    }
+    if (json['fNumber'] != null) {
+      entry.fNumber = (json['fNumber'] as num).toDouble();
+    }
+    entry.shutterSpeed = json['shutterSpeed'] as String?;
+    return entry;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom Fade Context Menu (Fade-only transition without expand/scale animation)
+// ─────────────────────────────────────────────────────────────────────────────
+Future<T?> showFadeMenu<T>({
+  required BuildContext context,
+  required RelativeRect position,
+  required List<PopupMenuEntry<T>> items,
+  T? initialValue,
+  double? elevation,
+  ShapeBorder? shape,
+  Color? color,
+  bool useRootNavigator = false,
+}) {
+  assert(items.isNotEmpty);
+
+  final NavigatorState navigator =
+      Navigator.of(context, rootNavigator: useRootNavigator);
+  return navigator.push(
+    _FadePopupMenuRoute<T>(
+      position: position,
+      items: items,
+      elevation: elevation,
+      shape: shape,
+      color: color,
+    ),
+  );
+}
+
+class _FadePopupMenuRoute<T> extends PopupRoute<T> {
+  final RelativeRect position;
+  final List<PopupMenuEntry<T>> items;
+  final ShapeBorder? shape;
+  final Color? color;
+  final double? elevation;
+
+  _FadePopupMenuRoute({
+    required this.position,
+    required this.items,
+    this.shape,
+    this.color,
+    this.elevation,
+  });
+
+  @override
+  Color? get barrierColor => null;
+
+  @override
+  bool get barrierDismissible => true;
+
+  @override
+  String? get barrierLabel => 'Dismiss';
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 120);
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return FadeTransition(
+      opacity: CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOut,
+        reverseCurve: Curves.easeIn,
+      ),
+      child: child,
+    );
+  }
+
+  @override
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) {
+    final mediaQuery = MediaQuery.of(context);
+    return MediaQuery.removePadding(
+      context: context,
+      removeTop: true,
+      removeBottom: true,
+      removeLeft: true,
+      removeRight: true,
+      child: CustomSingleChildLayout(
+        delegate: _PopupMenuLayoutDelegate(
+          position: position,
+          padding: mediaQuery.padding,
+        ),
+        child: Material(
+          type: MaterialType.card,
+          elevation: elevation ?? 8.0,
+          color: color ?? Theme.of(context).colorScheme.surface,
+          shape: shape ??
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          clipBehavior: Clip.antiAlias,
+          child: IntrinsicWidth(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: items,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PopupMenuLayoutDelegate extends SingleChildLayoutDelegate {
+  final RelativeRect position;
+  final EdgeInsets padding;
+
+  _PopupMenuLayoutDelegate({
+    required this.position,
+    required this.padding,
+  });
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
+    return constraints.loosen();
+  }
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    double x = position.left;
+    double y = position.top;
+    if (x + childSize.width > size.width) {
+      x = size.width - childSize.width - 8;
+    }
+    if (y + childSize.height > size.height) {
+      y = size.height - childSize.height - 8;
+    }
+    return Offset(max(0.0, x), max(0.0, y));
+  }
+
+  @override
+  bool shouldRelayout(_PopupMenuLayoutDelegate oldDelegate) {
+    return position != oldDelegate.position;
+  }
 }
 
 class MapViewerScreen extends StatefulWidget {
@@ -137,7 +382,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
   DateTime? _selectedDate;
   bool _showCalendar = false;
-  bool _viewAsPath = true;
+  final bool _viewAsPath = true;
   double _sidebarWidth = 380.0;
   String _chartMode = 'daily';
 
@@ -166,15 +411,21 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   int? _draggingPlaceIndex;
   LatLng? _draggingPlaceStartLatLng;
   LatLng? _draggedPlaceCurrentLatLng;
+  bool _ignoreNextPlaceContextMenu = false;
   final Map<String, List<LocationPoint>> _unsnappedSegmentBackups = {};
   bool _isSaving = false;
   int _savingCount = 0; // tracks concurrent saves
+
+  // ── Geocode cache for Place labels (lat,lng → place name) ──────────────
+  final Map<String, String?> _geocodeCache = {};
+  final Set<String> _geocodingInProgress = {};
 
   // ── Photo layer ─────────────────────────────────────────────────────────
   final List<PhotoEntry> _photos = [];
   bool _isDraggingPhotoOver = false;
   PhotoEntry? _selectedPhoto; // for strip/preview
   bool _showPhotoGrid = false;
+  final ScrollController _timelineScrollController = ScrollController();
 
   // ── Import Progress State ────────────────────────────────────────────────
   bool _isImportingPhotos = false;
@@ -187,9 +438,84 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   bool _isDraggingPhoto = false;
   LatLng? _photoDragStartLatLng;
   final Map<PhotoEntry, LatLng> _initialPhotoLocations = {};
+  bool get _hasUnsavedPhotoChanges => _photos.any((p) => p.isGpsModified);
 
   // ── Multi-select (Ctrl+click) ─────────────────────────────────────────
   final Set<PhotoEntry> _selectedPhotoSet = {};
+  PhotoEntry? _shiftStartPhoto;
+  double _clusterJitterMeters = 5.0;
+  bool _isWritingExif = false;
+  int _exifTotal = 0;
+  int _exifProcessed = 0;
+  static _MapViewerScreenState? activeState;
+  final List<_MacNotification> _macNotifications = [];
+
+  void showMacToast(String message, {Color? backgroundColor}) {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final notif = _MacNotification(
+      id: id,
+      message: message,
+      backgroundColor: backgroundColor ?? Colors.green.shade700,
+    );
+    setState(() {
+      _macNotifications.add(notif);
+    });
+
+    // Auto dismiss after 3.5 seconds
+    Future.delayed(const Duration(milliseconds: 3500), () {
+      if (mounted) {
+        setState(() {
+          _macNotifications.removeWhere((n) => n.id == id);
+        });
+      }
+    });
+  }
+
+  /// Focus sidebar timeline to the item that contains [photo]'s dateTaken.
+  /// If no timeline item is found, falls back to the first item.
+  void _focusTimelineForPhoto(PhotoEntry photo) {
+    final items = _timelineItemsWithPhotos;
+    if (items == null || items.isEmpty) return;
+    final settings = context.read<SettingsProvider>();
+    final tz = settings.geotagTimezone.toDouble();
+    final taken = photo.dateTaken;
+
+    int targetIdx = 0;
+    if (taken != null) {
+      final photoUtc = taken.toUtc();
+      for (int i = 0; i < items.length; i++) {
+        final item = items[i];
+        DateTime? start;
+        DateTime? end;
+        if (item is TimelinePlace) {
+          start = item.startTime;
+          end = item.endTime;
+        } else if (item is TimelinePath) {
+          start = item.startTime;
+          end = item.endTime;
+        }
+        if (start == null || end == null) continue;
+        final startUtc = start.toUtc().subtract(Duration(hours: tz.toInt()));
+        final endUtc = end.toUtc().subtract(Duration(hours: tz.toInt()));
+        if (!photoUtc.isBefore(startUtc) && !photoUtc.isAfter(endUtc)) {
+          targetIdx = i;
+          break;
+        }
+      }
+    }
+
+    setState(() => _selectedTimelineItemIndex = targetIdx);
+
+    // Scroll sidebar to the target item (estimate ~80px per item)
+    const estimatedItemHeight = 80.0;
+    final offset = (targetIdx * estimatedItemHeight)
+        .clamp(0.0, _timelineScrollController.position.maxScrollExtent);
+    _timelineScrollController.animateTo(
+      offset,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeInOut,
+    );
+  }
 
   // ── Step-by-step Edit Undo Stack ─────────────────────────────────────
   final List<List<LocationPoint>> _editHistoryStack = [];
@@ -219,7 +545,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     _loadPointsForSelectedDate(keepSelection: true);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      _MacToastMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             'Undid 1 edit step (${_editHistoryStack.length} step${_editHistoryStack.length == 1 ? '' : 's'} remaining)',
@@ -241,7 +567,30 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   @override
   void initState() {
     super.initState();
+    activeState = this;
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
     _loadLastSelectedDate();
+    _loadCachedPhotos();
+  }
+
+  bool _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final isCtrl = HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed;
+    if (isCtrl && event.logicalKey == LogicalKeyboardKey.keyA) {
+      // Ctrl+A: chọn hết ảnh ngày hiện tại trong strip
+      setState(() {
+        _selectedPhotoSet
+          ..clear()
+          ..addAll(_currentDatePhotos);
+        if (_currentDatePhotos.isNotEmpty) {
+          _selectedPhoto = _currentDatePhotos.first;
+          _shiftStartPhoto = _currentDatePhotos.first;
+        }
+      });
+      return true; // consumed
+    }
+    return false;
   }
 
   Future<void> _loadLastSelectedDate() async {
@@ -272,12 +621,111 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
+  // ── Photo Caching & Persistence ────────────────────────────────────────
+  Future<void> _saveCachedPhotoPaths() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonList = _photos.map((p) => jsonEncode(p.toJson())).toList();
+      await prefs.setStringList('cached_imported_photos_json', jsonList);
+    } catch (e) {
+      debugPrint('Error saving cached photos JSON: $e');
+    }
+  }
+
+  Future<void> _loadCachedPhotos() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonList = prefs.getStringList('cached_imported_photos_json');
+
+      if (jsonList != null && jsonList.isNotEmpty) {
+        final restoredEntries = <PhotoEntry>[];
+        for (final str in jsonList) {
+          try {
+            final map = jsonDecode(str) as Map<String, dynamic>;
+            final entry = PhotoEntry.fromJson(map);
+            if (await entry.file.exists()) {
+              restoredEntries.add(entry);
+            }
+          } catch (_) {}
+        }
+
+        if (restoredEntries.isNotEmpty && mounted) {
+          setState(() {
+            _photos.addAll(restoredEntries);
+          });
+          await _autoInsertGeotaggedPhotoPoints(restoredEntries);
+          final appState = context.read<AppStateProvider>();
+          final settings = context.read<SettingsProvider>();
+          final dateInfo = _currentDateInfo(appState);
+          final pts = appState.activePaths[dateInfo.filePath] ?? [];
+          _assignPhotosToTimelineItems(pts, settings.geotagTimezone.toDouble());
+
+          final missingMeta = restoredEntries
+              .where((e) =>
+                  !e.hasLensInfo ||
+                  e.shutterSpeed == null ||
+                  e.shutterSpeed!.isEmpty)
+              .toList();
+          if (missingMeta.isNotEmpty) {
+            _batchReadExifWithExifTool(missingMeta).then((_) {
+              _saveCachedPhotoPaths();
+              if (mounted) setState(() {});
+            });
+          }
+        }
+        return;
+      }
+
+      // Backward compatibility fallback for path-only list
+      final savedPaths = prefs.getStringList('cached_imported_photo_paths');
+      if (savedPaths != null && savedPaths.isNotEmpty) {
+        final existingFiles = <File>[];
+        for (final p in savedPaths) {
+          final file = File(p);
+          if (await file.exists()) {
+            existingFiles.add(file);
+          }
+        }
+        if (existingFiles.isNotEmpty) {
+          await _loadPhotosFromFiles(existingFiles, isRestoringCache: true);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading cached photos: $e');
+    }
+  }
+
+  Future<void> _clearCachedPhotos() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('cached_imported_photo_paths');
+      await prefs.remove('cached_imported_photos_json');
+      setState(() {
+        _photos.clear();
+        _selectedPhoto = null;
+        _selectedPhotoSet.clear();
+        _shiftStartPhoto = null;
+        _timelineItemsWithPhotos = null;
+      });
+      if (mounted) {
+        _MacToastMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cleared all cached imported photos.')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error clearing cached photos: $e');
+    }
+  }
+
   void _loadPointsForSelectedDate(
       {bool fitBounds = true, bool keepSelection = false}) async {
     setState(() {
       if (!keepSelection) {
         _selectedTimelineItemIndex = null;
       }
+      _selectedPhoto = null;
+      _selectedPhotoSet.clear();
+      _shiftStartPhoto = null;
       _timelineItemsWithPhotos =
           null; // clear so sidebar rebuilds with fresh assign
     });
@@ -380,7 +828,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
   @override
   void dispose() {
+    if (activeState == this) {
+      activeState = null;
+    }
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     _mapAnimationController?.dispose();
+    _timelineScrollController.dispose();
     super.dispose();
   }
 
@@ -492,6 +945,53 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             entry.gpsLatLng = LatLng(finalLat, finalLng);
           }
         }
+
+        // Lens Model (e.g. MakerNote LensModel: EF50mm f/1.8 STM)
+        final lensTag = tags['MakerNote LensModel'] ??
+            tags['EXIF LensModel'] ??
+            tags['EXIF LensID'] ??
+            tags['Image LensModel'];
+        if (lensTag != null) {
+          final val = lensTag.printable.trim();
+          if (val.isNotEmpty && val != '-') {
+            entry.lensModel = val;
+          }
+        }
+
+        // Focal Length
+        final focalTag = tags['EXIF FocalLength'];
+        if (focalTag != null) {
+          try {
+            if (focalTag.values is IfdRatios) {
+              final r = (focalTag.values as IfdRatios).ratios.first;
+              entry.focalLength =
+                  r.numerator / (r.denominator == 0 ? 1 : r.denominator);
+            }
+          } catch (_) {}
+        }
+
+        // FNumber
+        final fNumTag = tags['EXIF FNumber'];
+        if (fNumTag != null) {
+          try {
+            if (fNumTag.values is IfdRatios) {
+              final r = (fNumTag.values as IfdRatios).ratios.first;
+              entry.fNumber =
+                  r.numerator / (r.denominator == 0 ? 1 : r.denominator);
+            }
+          } catch (_) {}
+        }
+
+        // Exposure Time (Shutter speed)
+        final shutterTag = tags['EXIF ExposureTime'] ??
+            tags['EXIF ShutterSpeedValue'] ??
+            tags['Image ExposureTime'];
+        if (shutterTag != null) {
+          final rawVal = shutterTag.printable.trim();
+          if (rawVal.isNotEmpty && rawVal != '-') {
+            entry.shutterSpeed = rawVal.endsWith('s') ? rawVal : '${rawVal}s';
+          }
+        }
       }
     } catch (e) {
       debugPrint('EXIF read error for ${entry.filename}: $e');
@@ -537,12 +1037,13 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     return result;
   }
 
-  /// Fast batch EXIF scanner using ExifTool CSV with -fast flag (avoids reading full image files from disk)
+  /// Fast batch EXIF scanner using ExifTool CSV with -fast2 flag & -@ argfile (ultra-fast 10x batch header reading)
   Future<void> _batchReadExifWithExifTool(List<PhotoEntry> entries) async {
     if (entries.isEmpty) return;
     try {
       final exe = await _getExifToolExecutable();
-      const int maxChunkSize = 100;
+      final tempDir = await getTemporaryDirectory();
+      const int maxChunkSize = 1000;
 
       for (int i = 0; i < entries.length; i += maxChunkSize) {
         final chunk = entries.sublist(
@@ -550,20 +1051,36 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           i + maxChunkSize > entries.length ? entries.length : i + maxChunkSize,
         );
 
+        final timestamp = DateTime.now().microsecondsSinceEpoch;
+        final argFile = File(path.join(tempDir.path, 'read_exif_$timestamp.txt'));
+        await argFile.writeAsString(chunk.map((e) => e.file.path).join('\n'), flush: true);
+
         final args = [
           '-c',
           '%.6f',
           '-GPSLatitude#',
           '-GPSLongitude#',
           '-DateTimeOriginal',
+          '-LensModel',
+          '-LensID',
+          '-Lens',
+          '-LensMake',
+          '-FocalLength#',
+          '-FNumber#',
+          '-ExposureTime',
           '-d',
           '%Y-%m-%d %H:%M:%S',
           '-fast',
           '-csv',
-          ...chunk.map((e) => e.file.path),
+          '-@',
+          argFile.path,
         ];
 
         final result = await Process.run(exe, args);
+        try {
+          if (await argFile.exists()) await argFile.delete();
+        } catch (_) {}
+
         final stdoutStr = result.stdout.toString().trim();
 
         if (result.exitCode == 0 && stdoutStr.startsWith('SourceFile')) {
@@ -575,6 +1092,19 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             final lngIdx = header.indexWhere((h) => h.contains('GPSLongitude'));
             final dateIdx =
                 header.indexWhere((h) => h.contains('DateTimeOriginal'));
+            final lensModelIdx =
+                header.indexWhere((h) => h.toLowerCase().contains('lensmodel'));
+            final lensIdIdx =
+                header.indexWhere((h) => h.toLowerCase().contains('lensid'));
+            final lensIdx = header.indexWhere((h) => h.toLowerCase() == 'lens');
+            final lensMakeIdx =
+                header.indexWhere((h) => h.toLowerCase().contains('lensmake'));
+            final focalIdx = header
+                .indexWhere((h) => h.toLowerCase().contains('focallength'));
+            final fNumIdx =
+                header.indexWhere((h) => h.toLowerCase().contains('fnumber'));
+            final shutterIdx = header
+                .indexWhere((h) => h.toLowerCase().contains('exposuretime'));
 
             String normPath(String p) =>
                 path.normalize(p).toLowerCase().replaceAll('/', '\\');
@@ -625,6 +1155,47 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 if (lat != null && lng != null) {
                   entry.gpsLatLng = LatLng(lat, lng);
                 }
+              }
+
+              // Lens info (tries LensModel -> LensID -> Lens)
+              String? modelVal;
+              if (lensModelIdx >= 0 &&
+                  lensModelIdx < row.length &&
+                  !_isInvalidLensName(row[lensModelIdx])) {
+                modelVal = row[lensModelIdx];
+              } else if (lensIdIdx >= 0 &&
+                  lensIdIdx < row.length &&
+                  !_isInvalidLensName(row[lensIdIdx])) {
+                modelVal = row[lensIdIdx];
+              } else if (lensIdx >= 0 &&
+                  lensIdx < row.length &&
+                  !_isInvalidLensName(row[lensIdx])) {
+                modelVal = row[lensIdx];
+              }
+              if (!_isInvalidLensName(modelVal)) {
+                entry.lensModel = modelVal;
+              } else {
+                entry.lensModel = null;
+              }
+
+              if (lensMakeIdx >= 0 &&
+                  lensMakeIdx < row.length &&
+                  row[lensMakeIdx].isNotEmpty &&
+                  row[lensMakeIdx] != '-') {
+                entry.lensMake = row[lensMakeIdx];
+              }
+              if (focalIdx >= 0 && focalIdx < row.length) {
+                entry.focalLength = double.tryParse(row[focalIdx]);
+              }
+              if (fNumIdx >= 0 && fNumIdx < row.length) {
+                entry.fNumber = double.tryParse(row[fNumIdx]);
+              }
+              if (shutterIdx >= 0 &&
+                  shutterIdx < row.length &&
+                  row[shutterIdx].isNotEmpty &&
+                  row[shutterIdx] != '-') {
+                final val = row[shutterIdx].trim();
+                entry.shutterSpeed = val.endsWith('s') ? val : '${val}s';
               }
             }
 
@@ -689,31 +1260,104 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
-  /// Write updated GPS coordinates directly into file EXIF using ExifTool
   Future<void> _writePhotoGpsToExif(List<PhotoEntry> photos) async {
+    if (photos.isEmpty) return;
+    setState(() {
+      _isWritingExif = true;
+      _exifTotal = photos.length;
+      _exifProcessed = 0;
+    });
+
+    Directory? tempDir;
+    File? csvFile;
+    File? argFile;
+
     try {
       final exe = await _getExifToolExecutable();
+      tempDir = await getTemporaryDirectory();
 
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      csvFile = File(path.join(tempDir.path, 'exif_coords_$timestamp.csv'));
+      argFile = File(path.join(tempDir.path, 'exif_paths_$timestamp.txt'));
+
+      final csvBuf = StringBuffer();
+      csvBuf.writeln(
+          'SourceFile,GPSLatitude,GPSLatitudeRef,GPSLongitude,GPSLongitudeRef');
+
+      final argBuf = StringBuffer();
+
+      int validCount = 0;
       for (final photo in photos) {
         final loc = photo.assignedLatLng;
         if (loc == null) continue;
+
+        final lat = loc.latitude.abs();
         final latRef = loc.latitude >= 0 ? 'N' : 'S';
+        final lng = loc.longitude.abs();
         final lngRef = loc.longitude >= 0 ? 'E' : 'W';
 
-        final result = await Process.run(exe, [
+        // Escape path for CSV
+        final escapedPath = photo.file.path.replaceAll('"', '""');
+        csvBuf.writeln('"$escapedPath",$lat,$latRef,$lng,$lngRef');
+
+        argBuf.writeln(photo.file.path);
+        validCount++;
+      }
+
+      if (validCount > 0) {
+        await csvFile.writeAsString(csvBuf.toString(), flush: true);
+        await argFile.writeAsString(argBuf.toString(), flush: true);
+
+        setState(() {
+          _exifTotal = validCount;
+        });
+
+        final process = await Process.start(exe, [
+          '-progress',
+          '-csv=${csvFile.path}',
           '-overwrite_original',
-          '-GPSLatitude#=${loc.latitude}',
-          '-GPSLongitude#=${loc.longitude}',
-          '-GPSLatitudeRef=$latRef',
-          '-GPSLongitudeRef=$lngRef',
-          photo.file.path,
+          '-@',
+          argFile.path,
         ]);
 
-        debugPrint(
-            '[ExifTool Write] ${photo.filename} exitCode=${result.exitCode} out=${result.stdout} err=${result.stderr}');
+        final progressRegex = RegExp(r'\[\s*(\d+)/\s*(\d+)\]');
+        process.stdout.transform(utf8.decoder).listen((data) {
+          final matches = progressRegex.allMatches(data);
+          for (final match in matches) {
+            final current = int.tryParse(match.group(1) ?? '');
+            if (current != null && current > 0 && current <= validCount) {
+              setState(() {
+                _exifProcessed = current;
+              });
+            }
+          }
+        });
+
+        final exitCode = await process.exitCode;
+        debugPrint('[ExifTool Write Batch] exitCode=$exitCode');
+        if (exitCode == 0) {
+          setState(() {
+            for (final photo in photos) {
+              if (photo.assignedLatLng != null) {
+                photo.isGpsModified = false;
+              }
+            }
+          });
+        }
       }
     } catch (e) {
-      debugPrint('[ExifTool Write Error] $e');
+      debugPrint('[ExifTool Write Batch Error] $e');
+    } finally {
+      try {
+        if (csvFile != null && await csvFile.exists()) await csvFile.delete();
+        if (argFile != null && await argFile.exists()) await argFile.delete();
+      } catch (_) {}
+
+      setState(() {
+        _isWritingExif = false;
+        _exifTotal = 0;
+        _exifProcessed = 0;
+      });
     }
   }
 
@@ -721,7 +1365,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     final ext = path.toLowerCase();
     return ext.endsWith('.jpg') ||
         ext.endsWith('.jpeg') ||
-        ext.endsWith('.png') ||
         ext.endsWith('.heic') ||
         ext.endsWith('.webp');
   }
@@ -760,7 +1403,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   }
 
   // ── Load photos (from drop or picker) ───────────────────────────────────
-  Future<void> _loadPhotosFromFiles(List<File> files) async {
+  Future<void> _loadPhotosFromFiles(List<File> files,
+      {bool isRestoringCache = false}) async {
     setState(() {
       _isImportingPhotos = true;
       _importTotalPhotos = 0;
@@ -807,6 +1451,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       _photos.addAll(newEntries);
     });
 
+    // Save imported photo paths cache
+    await _saveCachedPhotoPaths();
+
     // Auto-insert geotagged photos into timeline + rebuild assignments
     await _autoInsertGeotaggedPhotoPoints(newEntries);
 
@@ -815,6 +1462,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         _isImportingPhotos = false;
       });
     }
+
+    // Skip auto-nav / dialog when restoring cache on startup
+    if (isRestoringCache) return;
 
     // Analyze unique dates in imported photos
     final Map<DateTime, int> importedDatesCount = {};
@@ -919,6 +1569,14 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           ),
         ),
         actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _clearCachedPhotos();
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Clear All Photos'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Close'),
@@ -1091,7 +1749,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     });
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      _MacToastMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Added GPS from "${photo.filename}" to timeline '
             '(${photo.gpsLatLng!.latitude.toStringAsFixed(5)}, '
             '${photo.gpsLatLng!.longitude.toStringAsFixed(5)})'),
@@ -1121,34 +1779,50 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     final settings = context.read<SettingsProvider>();
     final double tz = settings.geotagTimezone.toDouble();
 
-    final gpsEntries = newEntries.where((e) => e.gpsLatLng != null).toList();
-    if (gpsEntries.isEmpty) {
-      // No GPS photos — just rebuild assignments from existing track
-      final info = _currentDateInfo(appState);
-      final pts = appState.activePaths[info.filePath] ?? [];
+    if (_selectedDate == null) return;
+    final cdi = _currentDateInfo(appState);
+
+    // If day has no timeline file, do NOT auto-create timeline track on maps
+    if (cdi.filePath.isEmpty) {
+      final pts = appState.activePaths[cdi.filePath] ?? [];
       _assignPhotosToTimelineItems(pts, tz);
       return;
     }
 
-    if (_selectedDate == null) return;
-    final cdi = _currentDateInfo(appState);
+    final gpsEntries = newEntries.where((e) => e.gpsLatLng != null).toList();
+    if (gpsEntries.isEmpty) {
+      // No GPS photos — just rebuild assignments from existing track
+      final pts = appState.activePaths[cdi.filePath] ?? [];
+      _assignPhotosToTimelineItems(pts, tz);
+      return;
+    }
     List<LocationPoint> cur = cdi.filePath.isNotEmpty
         ? await LocationManager.loadLocationFile(cdi.filePath)
         : [];
 
+    bool pointsAdded = false;
     for (final entry in gpsEntries) {
-      final ts = entry.dateTaken != null
-          ? entry.dateTaken!.subtract(Duration(minutes: (tz * 60).toInt()))
-          : DateTime.now().toUtc();
-      cur.add(LocationPoint(
-        latitude: entry.gpsLatLng!.latitude,
-        longitude: entry.gpsLatLng!.longitude,
-        timestamp: ts,
-      ));
-      entry.addedToTimeline = true;
+      if (entry.dateTaken != null &&
+          entry.dateTaken!.year == cdi.date.year &&
+          entry.dateTaken!.month == cdi.date.month &&
+          entry.dateTaken!.day == cdi.date.day) {
+        final ts =
+            entry.dateTaken!.subtract(Duration(minutes: (tz * 60).toInt()));
+        cur.add(LocationPoint(
+          latitude: entry.gpsLatLng!.latitude,
+          longitude: entry.gpsLatLng!.longitude,
+          timestamp: ts,
+        ));
+        entry.addedToTimeline = true;
+        pointsAdded = true;
+      }
     }
-    cur.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    await appState.saveListPoints(cdi, cur);
+
+    if (pointsAdded) {
+      cur.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      await appState.saveListPoints(cdi, cur);
+    }
+
     if (!mounted) return;
     _loadPointsForSelectedDate(); // will call _assignPhotosToTimelineItems
   }
@@ -1203,12 +1877,72 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   List<PhotoEntry> get _currentDatePhotos {
     if (_selectedDate == null) return _photos;
     final sel = _selectedDate!;
-    return _photos.where((p) {
+    final filtered = _photos.where((p) {
       if (p.dateTaken == null) return true;
       return p.dateTaken!.year == sel.year &&
           p.dateTaken!.month == sel.month &&
           p.dateTaken!.day == sel.day;
     }).toList();
+    filtered.sort((a, b) {
+      if (a.dateTaken == null && b.dateTaken == null) return 0;
+      if (a.dateTaken == null) return 1;
+      if (b.dateTaken == null) return -1;
+      return a.dateTaken!.compareTo(b.dateTaken!);
+    });
+    return filtered;
+  }
+
+  void _handlePhotoSelection(PhotoEntry photo) {
+    setState(() {
+      final isCtrl = HardwareKeyboard.instance.isControlPressed;
+      final isShift = HardwareKeyboard.instance.isShiftPressed;
+
+      if (isShift) {
+        final currentPhotos = _currentDatePhotos;
+        final clickedIdx = currentPhotos.indexOf(photo);
+        int anchorIdx = -1;
+        if (_shiftStartPhoto != null) {
+          anchorIdx = currentPhotos.indexOf(_shiftStartPhoto!);
+        } else if (_selectedPhoto != null) {
+          anchorIdx = currentPhotos.indexOf(_selectedPhoto!);
+          _shiftStartPhoto = _selectedPhoto;
+        } else if (_selectedPhotoSet.isNotEmpty) {
+          anchorIdx = currentPhotos.indexOf(_selectedPhotoSet.last);
+          _shiftStartPhoto = _selectedPhotoSet.last;
+        } else {
+          _shiftStartPhoto = photo;
+        }
+
+        if (anchorIdx != -1 && clickedIdx != -1) {
+          final start = min(anchorIdx, clickedIdx);
+          final end = max(anchorIdx, clickedIdx);
+          _selectedPhotoSet.clear();
+          for (int i = start; i <= end; i++) {
+            _selectedPhotoSet.add(currentPhotos[i]);
+          }
+        } else {
+          _selectedPhotoSet.add(photo);
+        }
+        _selectedPhoto = photo;
+      } else if (isCtrl) {
+        _shiftStartPhoto = photo;
+        if (_selectedPhotoSet.contains(photo)) {
+          _selectedPhotoSet.remove(photo);
+        } else {
+          _selectedPhotoSet.add(photo);
+        }
+        _selectedPhoto = photo;
+      } else {
+        _shiftStartPhoto = photo;
+        if (_selectedPhotoSet.length > 1 ||
+            !_selectedPhotoSet.contains(photo)) {
+          _selectedPhotoSet.clear();
+          _selectedPhotoSet.add(photo);
+        }
+        _selectedPhoto = photo;
+        _showPhotoGrid = false;
+      }
+    });
   }
 
   /// Clusters [points] into [TimelineItem]s, then assigns each [PhotoEntry]
@@ -1370,7 +2104,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     await _writePhotoGpsToExif(photosToTag);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      _MacToastMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
             'Applied & saved EXIF geotags for ${photosToTag.length} photo(s)'),
         backgroundColor: Colors.teal,
@@ -1420,7 +2154,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      _MacToastMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
             'Updated & saved EXIF geotags for ${modifiedPhotos.length} photo(s)'),
         backgroundColor: Colors.teal,
@@ -1487,7 +2221,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     await appState.saveListPoints(dateInfo, points);
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    _MacToastMessenger.of(context).showSnackBar(SnackBar(
       content: Text(
           'Updated timeline track with $modifiedPointsCount photo location(s)'),
       backgroundColor: Colors.indigo,
@@ -1507,40 +2241,704 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     return GestureDetector(
       onTap: () => setState(() {
         if (HardwareKeyboard.instance.isControlPressed) {
+          _shiftStartPhoto = photo;
           if (_selectedPhotoSet.contains(photo)) {
             _selectedPhotoSet.remove(photo);
           } else {
             _selectedPhotoSet.add(photo);
           }
+        } else if (HardwareKeyboard.instance.isShiftPressed) {
+          final currentPhotos = _currentDatePhotos;
+          final clickedIdx = currentPhotos.indexOf(photo);
+          int anchorIdx = -1;
+          if (_shiftStartPhoto != null) {
+            anchorIdx = currentPhotos.indexOf(_shiftStartPhoto!);
+          } else if (_selectedPhoto != null) {
+            anchorIdx = currentPhotos.indexOf(_selectedPhoto!);
+            _shiftStartPhoto = _selectedPhoto;
+          } else if (_selectedPhotoSet.isNotEmpty) {
+            anchorIdx = currentPhotos.indexOf(_selectedPhotoSet.last);
+            _shiftStartPhoto = _selectedPhotoSet.last;
+          } else {
+            _shiftStartPhoto = photo;
+          }
+
+          if (anchorIdx != -1 && clickedIdx != -1) {
+            final start = min(anchorIdx, clickedIdx);
+            final end = max(anchorIdx, clickedIdx);
+            _selectedPhotoSet.clear();
+            for (int i = start; i <= end; i++) {
+              _selectedPhotoSet.add(currentPhotos[i]);
+            }
+          } else {
+            _selectedPhotoSet.add(photo);
+          }
+          _selectedPhoto = photo;
         } else {
           _selectedPhotoSet.clear();
           _selectedPhoto = (_selectedPhoto == photo) ? null : photo;
+          _shiftStartPhoto = _selectedPhoto;
         }
       }),
-      child: Container(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: borderColor, width: isSel ? 2.0 : 1.5),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(6.5),
-          child: Image.file(
-            photo.file,
+      onSecondaryTapDown: (details) {
+        _ignoreNextPlaceContextMenu = true;
+        _showPhotoContextMenu(context, details.globalPosition, photo);
+      },
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
             width: 38,
             height: 38,
-            fit: BoxFit.cover,
-            cacheWidth: 80,
-            errorBuilder: (_, __, ___) => Container(
-              color: Colors.grey.shade800,
-              child: const Icon(Icons.broken_image,
-                  size: 14, color: Colors.white54),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: borderColor, width: isSel ? 3.5 : 1.5),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(6.5),
+              child: Image.file(
+                photo.file,
+                width: 38,
+                height: 38,
+                fit: BoxFit.cover,
+                cacheWidth: 80,
+                errorBuilder: (_, __, ___) => Container(
+                  color: Colors.grey.shade800,
+                  child: const Icon(Icons.broken_image,
+                      size: 14, color: Colors.white54),
+                ),
+              ),
             ),
           ),
-        ),
+          if (!photo.hasLensInfo)
+            Positioned(
+              top: -2,
+              right: -2,
+              child: Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+              ),
+            ),
+        ],
       ),
     );
+  }
+
+  void _showPhotoContextMenu(
+      BuildContext context, Offset globalPosition, PhotoEntry photo) {
+    if (!_selectedPhotoSet.contains(photo)) {
+      setState(() {
+        _selectedPhotoSet.clear();
+        _selectedPhotoSet.add(photo);
+        _selectedPhoto = photo;
+      });
+    }
+
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final relativeRect = RelativeRect.fromRect(
+      Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
+      Offset.zero & overlay.size,
+    );
+
+    final selectedCount = _selectedPhotoSet.length;
+
+    showFadeMenu<String>(
+      context: context,
+      position: relativeRect,
+      items: [
+        PopupMenuItem(
+          value: 'geotag_all',
+          child: Row(
+            children: [
+              const Icon(Icons.pin_drop, size: 18, color: Colors.teal),
+              const SizedBox(width: 8),
+              Text(selectedCount > 1
+                  ? 'Geotag All Selected ($selectedCount)'
+                  : 'Geotag Photo'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'add_lens',
+          child: Row(
+            children: [
+              const Icon(Icons.camera_alt, size: 18, color: Colors.deepPurple),
+              const SizedBox(width: 8),
+              Text(selectedCount > 1
+                  ? 'Add Lens Metadata ($selectedCount)'
+                  : 'Add Lens Metadata'),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: 'invert_select',
+          child: Row(
+            children: [
+              Icon(Icons.swap_horiz, size: 18),
+              SizedBox(width: 8),
+              Text('Invert Selection'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'deselect_all',
+          child: Row(
+            children: [
+              Icon(Icons.clear_all, size: 18, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Deselect All'),
+            ],
+          ),
+        ),
+      ],
+    ).then((val) {
+      if (val == null) return;
+      if (val == 'geotag_all') {
+        _geotagSelectedPhotos();
+      } else if (val == 'add_lens') {
+        _showAddLensDialogForSelectedPhotos();
+      } else if (val == 'invert_select') {
+        _invertPhotoSelection();
+      } else if (val == 'deselect_all') {
+        setState(() {
+          _selectedPhotoSet.clear();
+          _selectedPhoto = null;
+        });
+      }
+    });
+  }
+
+  void _invertPhotoSelection() {
+    final currentPhotos = _currentDatePhotos;
+    setState(() {
+      final newSet = <PhotoEntry>{};
+      for (final p in currentPhotos) {
+        if (!_selectedPhotoSet.contains(p)) {
+          newSet.add(p);
+        }
+      }
+      _selectedPhotoSet.clear();
+      _selectedPhotoSet.addAll(newSet);
+      _selectedPhoto =
+          _selectedPhotoSet.isNotEmpty ? _selectedPhotoSet.first : null;
+    });
+  }
+
+  Future<void> _geotagSelectedPhotos() async {
+    final targets = _selectedPhotoSet.toList();
+    if (targets.isEmpty && _selectedPhoto != null) {
+      targets.add(_selectedPhoto!);
+    }
+    if (targets.isEmpty) return;
+
+    for (final p in targets) {
+      if (p.interpolatedLatLng != null && p.gpsLatLng == null) {
+        await _applyInterpolatedGeotag(p);
+      }
+    }
+  }
+
+  void _showAddLensDialogForSelectedPhotos() {
+    final targets = _selectedPhotoSet.isNotEmpty
+        ? _selectedPhotoSet.toList()
+        : (_selectedPhoto != null ? [_selectedPhoto!] : <PhotoEntry>[]);
+    if (targets.isEmpty) return;
+
+    final settings = context.read<SettingsProvider>();
+    LensTemplate? selectedTemplate =
+        settings.lensTemplates.isNotEmpty ? settings.lensTemplates.first : null;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final templates = settings.lensTemplates;
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(Icons.camera_alt, color: Colors.deepPurple),
+                const SizedBox(width: 8),
+                Text('Add Lens Metadata (${targets.length} photos)'),
+              ],
+            ),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Select a Lens Template to write EXIF Make, Model, Focal Length, and F-Number:',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                  ),
+                  const SizedBox(height: 16),
+                  if (templates.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.orange.shade200),
+                      ),
+                      child: const Text(
+                        'No lens templates saved. Click "+ Add New Lens Template" below to create your first lens!',
+                        style: TextStyle(fontSize: 12, color: Colors.orange),
+                      ),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 250),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: templates.length,
+                        itemBuilder: (c, i) {
+                          final t = templates[i];
+                          final isSelected = selectedTemplate?.id == t.id;
+                          return ListTile(
+                            dense: true,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              side: BorderSide(
+                                color: isSelected
+                                    ? Colors.deepPurple
+                                    : Colors.grey.shade300,
+                                width: isSelected ? 2 : 1,
+                              ),
+                            ),
+                            leading: CircleAvatar(
+                              backgroundColor: isSelected
+                                  ? Colors.deepPurple
+                                  : Colors.grey.shade200,
+                              child: Icon(Icons.camera,
+                                  size: 18,
+                                  color: isSelected
+                                      ? Colors.white
+                                      : Colors.grey.shade700),
+                            ),
+                            title: Text(t.name,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 13)),
+                            subtitle: Text(
+                              '${t.make} ${t.model} • ${t.focalLength}mm f/${t.fNumber}',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit, size: 18),
+                                  tooltip: 'Edit Template',
+                                  onPressed: () {
+                                    _showEditCustomLensTemplateDialog(
+                                        context, settings, t, (updated) {
+                                      setModalState(() {
+                                        selectedTemplate = updated;
+                                      });
+                                    });
+                                  },
+                                ),
+                                if (isSelected)
+                                  const Icon(Icons.check_circle,
+                                      color: Colors.deepPurple),
+                              ],
+                            ),
+                            onTap: () {
+                              setModalState(() {
+                                selectedTemplate = t;
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      _showAddCustomLensTemplateDialog(context, settings,
+                          (newTemplate) {
+                        setModalState(() {
+                          selectedTemplate = newTemplate;
+                        });
+                      });
+                    },
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Add New Lens Template'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style:
+                    FilledButton.styleFrom(backgroundColor: Colors.deepPurple),
+                onPressed: selectedTemplate == null
+                    ? null
+                    : () {
+                        Navigator.pop(ctx);
+                        _applyLensMetadataToPhotos(targets, selectedTemplate!);
+                      },
+                child: Text('Apply to ${targets.length} Photo(s)'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showEditCustomLensTemplateDialog(
+      BuildContext context,
+      SettingsProvider settings,
+      LensTemplate template,
+      Function(LensTemplate) onUpdated) {
+    final nameCtrl = TextEditingController(text: template.name);
+    final makeCtrl = TextEditingController(text: template.make);
+    final modelCtrl = TextEditingController(text: template.model);
+    final focalCtrl =
+        TextEditingController(text: template.focalLength.toString());
+    final fNumberCtrl =
+        TextEditingController(text: template.fNumber.toString());
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Lens Template'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(
+                  labelText: 'Preset Name (e.g. Carl Zeiss 135mm)'),
+            ),
+            TextField(
+              controller: makeCtrl,
+              decoration:
+                  const InputDecoration(labelText: 'Make (e.g. Carl Zeiss)'),
+            ),
+            TextField(
+              controller: modelCtrl,
+              decoration:
+                  const InputDecoration(labelText: 'Model (e.g. 135mm f/3.5)'),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: focalCtrl,
+                    decoration:
+                        const InputDecoration(labelText: 'Focal Length (mm)'),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: fNumberCtrl,
+                    decoration: const InputDecoration(labelText: 'F-Number'),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final focal =
+                  double.tryParse(focalCtrl.text) ?? template.focalLength;
+              final fNum =
+                  double.tryParse(fNumberCtrl.text) ?? template.fNumber;
+              final updated = LensTemplate(
+                id: template.id,
+                name: nameCtrl.text.isNotEmpty
+                    ? nameCtrl.text
+                    : '${makeCtrl.text} ${modelCtrl.text}'.trim(),
+                make: makeCtrl.text,
+                model: modelCtrl.text,
+                focalLength: focal,
+                fNumber: fNum,
+              );
+              settings.updateLensTemplate(updated);
+              onUpdated(updated);
+              Navigator.pop(ctx);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddCustomLensTemplateDialog(BuildContext context,
+      SettingsProvider settings, Function(LensTemplate) onCreated) {
+    final nameCtrl = TextEditingController();
+    final makeCtrl = TextEditingController();
+    final modelCtrl = TextEditingController();
+    final focalCtrl = TextEditingController();
+    final fNumberCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Create Lens Template'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(
+                  labelText: 'Preset Name (e.g. Carl Zeiss 135mm)'),
+            ),
+            TextField(
+              controller: makeCtrl,
+              decoration:
+                  const InputDecoration(labelText: 'Make (e.g. Carl Zeiss)'),
+            ),
+            TextField(
+              controller: modelCtrl,
+              decoration:
+                  const InputDecoration(labelText: 'Model (e.g. 135mm f/3.5)'),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: focalCtrl,
+                    decoration:
+                        const InputDecoration(labelText: 'Focal Length (mm)'),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: fNumberCtrl,
+                    decoration: const InputDecoration(labelText: 'F-Number'),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final focal = double.tryParse(focalCtrl.text) ?? 50.0;
+              final fNum = double.tryParse(fNumberCtrl.text) ?? 2.8;
+              final template = LensTemplate(
+                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                name: nameCtrl.text.isNotEmpty
+                    ? nameCtrl.text
+                    : '${makeCtrl.text} ${modelCtrl.text}'.trim(),
+                make: makeCtrl.text,
+                model: modelCtrl.text,
+                focalLength: focal,
+                fNumber: fNum,
+              );
+              settings.addLensTemplate(template);
+              onCreated(template);
+              Navigator.pop(ctx);
+            },
+            child: const Text('Save & Select'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _applyLensMetadataToPhotos(
+      List<PhotoEntry> selectedPhotos, LensTemplate template) async {
+    if (selectedPhotos.isEmpty) return;
+
+    final photosToProcess = <PhotoEntry>[];
+    String? globalConflictChoice;
+
+    for (final photo in selectedPhotos) {
+      if (photo.hasLensInfo) {
+        if (globalConflictChoice == 'skip') {
+          continue;
+        } else if (globalConflictChoice == 'overwrite') {
+          photosToProcess.add(photo);
+          continue;
+        }
+
+        bool applyToAllRemaining = false;
+        final result = await showDialog<String>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) {
+            return StatefulBuilder(
+              builder: (ctx, setModalState) {
+                final currentLensStr = photo.lensModel ??
+                    photo.lensMake ??
+                    '${photo.focalLength}mm';
+                return AlertDialog(
+                  title: const Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                      SizedBox(width: 8),
+                      Text('Lens Metadata Conflict'),
+                    ],
+                  ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Photo "${photo.filename}" already has lens metadata:\n'
+                        '• Current Lens: $currentLensStr\n\n'
+                        'Do you want to overwrite it with "${template.name}"?',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      const SizedBox(height: 16),
+                      CheckboxListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text(
+                            'Apply choice to all remaining conflicts',
+                            style: TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.bold)),
+                        value: applyToAllRemaining,
+                        onChanged: (val) {
+                          setModalState(() {
+                            applyToAllRemaining = val ?? false;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, 'skip'),
+                      child: const Text('Skip'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, 'overwrite'),
+                      child: const Text('Overwrite'),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+
+        if (result == 'overwrite') {
+          photosToProcess.add(photo);
+          if (applyToAllRemaining) {
+            globalConflictChoice = 'overwrite';
+          }
+        } else {
+          if (applyToAllRemaining) {
+            globalConflictChoice = 'skip';
+          }
+        }
+      } else {
+        photosToProcess.add(photo);
+      }
+    }
+
+    if (photosToProcess.isEmpty) {
+      if (mounted) {
+        _MacToastMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No photos updated (all skipped).')),
+        );
+      }
+      return;
+    }
+
+    await _writeLensMetadataWithExifTool(photosToProcess, template);
+  }
+
+  Future<void> _writeLensMetadataWithExifTool(
+      List<PhotoEntry> photos, LensTemplate template) async {
+    setState(() {
+      _isWritingExif = true;
+      _exifTotal = photos.length;
+      _exifProcessed = 0;
+    });
+
+    try {
+      final exe = await _getExifToolExecutable();
+      final tempDir = await getTemporaryDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final argFile = File(path.join(tempDir.path, 'lens_args_$timestamp.txt'));
+
+      final argBuf = StringBuffer();
+      argBuf.writeln('-Lens=${template.name}');
+      argBuf.writeln('-LensModel=${template.model}');
+      argBuf.writeln('-LensMake=${template.make}');
+      argBuf.writeln('-FocalLength=${template.focalLength}');
+      argBuf.writeln('-FNumber=${template.fNumber}');
+      argBuf.writeln('-overwrite_original');
+
+      for (final photo in photos) {
+        argBuf.writeln(photo.file.path);
+      }
+
+      await argFile.writeAsString(argBuf.toString(), flush: true);
+
+      final result = await Process.run(exe, ['-@', argFile.path]);
+
+      if (result.exitCode == 0) {
+        setState(() {
+          for (final photo in photos) {
+            photo.lensModel = template.model;
+            photo.lensMake = template.make;
+            photo.focalLength = template.focalLength;
+            photo.fNumber = template.fNumber;
+          }
+        });
+        _saveCachedPhotoPaths();
+
+        if (mounted) {
+          _MacToastMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Applied lens "${template.name}" to ${photos.length} photo(s)!',
+              ),
+              backgroundColor: Colors.teal,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      } else {
+        throw Exception(result.stderr);
+      }
+    } catch (e) {
+      if (mounted) {
+        _MacToastMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to write Lens EXIF: $e')),
+        );
+      }
+    } finally {
+      setState(() {
+        _isWritingExif = false;
+        _exifTotal = 0;
+        _exifProcessed = 0;
+      });
+    }
   }
 
   Widget _buildGeotagAllButton(TimelineItem item) {
@@ -1831,7 +3229,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     await _writePhotoGpsToExif([photo]);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      _MacToastMessenger.of(context).showSnackBar(SnackBar(
         content:
             Text('Geotag applied & saved to file EXIF: "${photo.filename}" '
                 '(${loc.latitude.toStringAsFixed(5)}, '
@@ -1847,6 +3245,147 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     final settings = context.read<SettingsProvider>();
     final pts = appState.activePaths[_currentDateInfo(appState).filePath] ?? [];
     _assignPhotosToTimelineItems(pts, settings.geotagTimezone.toDouble());
+  }
+
+  void _clusterSelectedPhotos() {
+    if (_selectedPhotoSet.isEmpty) return;
+
+    LatLng? baseLatLng;
+    // 1. Tìm ảnh đầu tiên có tọa độ trong đống được chọn
+    for (final photo in _selectedPhotoSet) {
+      if (photo.assignedLatLng != null) {
+        baseLatLng = photo.assignedLatLng;
+        break;
+      }
+    }
+    // 2. Thử dùng _selectedPhoto nếu không tìm thấy
+    if (baseLatLng == null && _selectedPhoto != null) {
+      baseLatLng = _selectedPhoto!.assignedLatLng;
+    }
+    // 3. Nếu vẫn không thấy, lấy tâm bản đồ hiện tại
+    baseLatLng ??= _mapController.camera.center;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        double localJitter = _clusterJitterMeters;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.pin_drop, color: Colors.teal),
+                  SizedBox(width: 8),
+                  Text('Cluster Photos',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Gom ${_selectedPhotoSet.length} ảnh về tọa độ:\n'
+                    '${baseLatLng!.latitude.toStringAsFixed(5)}, ${baseLatLng.longitude.toStringAsFixed(5)}',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Bán kính nhiễu (Jitter):',
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600)),
+                      Text('${localJitter.toStringAsFixed(1)} m',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.teal,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  Slider(
+                    value: localJitter,
+                    min: 0.0,
+                    max: 100.0,
+                    divisions: 100,
+                    label: '${localJitter.toStringAsFixed(1)}m',
+                    onChanged: (val) {
+                      setDialogState(() {
+                        localJitter = val;
+                      });
+                    },
+                  ),
+                  const Text(
+                    '* 0m sẽ xếp chồng hoàn toàn. Giá trị lớn hơn sẽ nhích nhẹ ngẫu nhiên quanh tọa độ chuẩn.',
+                    style: TextStyle(fontSize: 10, color: Colors.grey),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                      backgroundColor: Colors.teal.shade700),
+                  onPressed: () {
+                    setState(() {
+                      _clusterJitterMeters = localJitter;
+                    });
+                    Navigator.pop(context);
+                    _executeClusterPhotos(baseLatLng!, localJitter);
+                  },
+                  child: const Text('Cluster'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _executeClusterPhotos(LatLng baseLatLng, double jitterMeters) {
+    // Chuyển đổi mét sang độ vĩ độ/kinh độ xấp xỉ
+    // Ở xích đạo, 1 độ vĩ độ/kinh độ khoảng 111,320m.
+    final double maxDegreeJitter = jitterMeters / 111320.0;
+
+    final random = Random();
+    setState(() {
+      for (final photo in _selectedPhotoSet) {
+        double latJitter = 0.0;
+        double lngJitter = 0.0;
+        if (maxDegreeJitter > 0) {
+          latJitter = (random.nextDouble() - 0.5) * 2 * maxDegreeJitter;
+          lngJitter = (random.nextDouble() - 0.5) * 2 * maxDegreeJitter;
+        }
+        final newLatLng = LatLng(
+          baseLatLng.latitude + latJitter,
+          baseLatLng.longitude + lngJitter,
+        );
+        photo.gpsLatLng = newLatLng;
+        photo.interpolatedLatLng = null; // Cập nhật thành GPS thực tế
+        photo.isGpsModified = true;
+      }
+    });
+
+    final appState = context.read<AppStateProvider>();
+    final settings = context.read<SettingsProvider>();
+    final dateInfo = _currentDateInfo(appState);
+    final points = appState.activePaths[dateInfo.filePath] ?? [];
+    _assignPhotosToTimelineItems(points, settings.geotagTimezone.toDouble());
+
+    _MacToastMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Clustered ${_selectedPhotoSet.length} photo(s) with ${jitterMeters.toStringAsFixed(1)}m jitter — tap "Save All" to write EXIF',
+        ),
+        backgroundColor: Colors.orange.shade700,
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2235,10 +3774,18 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       return;
     }
     final photoThreshold = 0.025 / pow(2, currentZoom - 10);
-    final photoThresholdSq = photoThreshold * photoThreshold;
+    // Khi đang multi-select, tăng ngưỡng hit 2.5x để dễ bắt ảnh hơn
+    final effectiveThreshold =
+        _selectedPhotoSet.length > 1 ? photoThreshold * 2.5 : photoThreshold;
+    final photoThresholdSq = effectiveThreshold * effectiveThreshold;
     PhotoEntry? hitPhoto;
     double hitPhotoDistSq = double.infinity;
-    for (final photo in _photos) {
+
+    // Khi multi-select: chỉ hit-test ảnh trong set, bỏ qua ảnh chưa select
+    final photosToTest =
+        _selectedPhotoSet.length > 1 ? _selectedPhotoSet.toList() : _photos;
+
+    for (final photo in photosToTest) {
       final loc = photo.assignedLatLng;
       if (loc == null) continue;
       final dLat = loc.latitude - tapLatLng.latitude;
@@ -2271,6 +3818,12 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         }
       });
       return; // consume event — don't edit route
+    }
+
+    // Nếu đang multi-select mà tap không trúng ảnh nào → vẫn block event
+    // để tránh vô tình kéo path khi đang cầm đống ảnh
+    if (_selectedPhotoSet.length > 1 && canDragOrEdit) {
+      return;
     }
 
     // ── Place marker dragging check ──────────────────────────────────────────
@@ -2519,6 +4072,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               LatLng(startLoc.latitude + dLat, startLoc.longitude + dLng);
           photo.gpsLatLng = moved;
           photo.interpolatedLatLng = moved;
+          photo.isGpsModified = true;
         });
       });
       return;
@@ -2751,7 +4305,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           }
 
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
+            _MacToastMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
                     '${pointsToDelete.length} point${pointsToDelete.length > 1 ? 's' : ''} deleted.'),
@@ -2811,12 +4365,50 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             updated.insert(_draggedHoverDotInsertIndex!, newPoint);
           }
 
+          final targetIdx =
+              existingIdx != -1 ? existingIdx : _draggedHoverDotInsertIndex!;
+          final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
+          if (isShiftPressed) {
+            int anchorStart = 0;
+            for (int k = targetIdx; k >= 0; k--) {
+              final nearestOld = _findNearestOldPoint(updated[k], dayPoints);
+              final dist = GeoUtils.distanceBetween(
+                  updated[k].latLng, nearestOld.latLng);
+              if (dist < 15.0) {
+                anchorStart = k;
+                break;
+              }
+            }
+
+            int anchorEnd = updated.length - 1;
+            for (int m = targetIdx; m < updated.length; m++) {
+              final nearestOld = _findNearestOldPoint(updated[m], dayPoints);
+              final dist = GeoUtils.distanceBetween(
+                  updated[m].latLng, nearestOld.latLng);
+              if (dist < 15.0) {
+                anchorEnd = m;
+                break;
+              }
+            }
+
+            if (anchorEnd > anchorStart + 1) {
+              _interpolatePointsRange(updated, anchorStart, anchorEnd);
+            }
+          }
+
           // Repaint immediately with 0ms latency, then save to disk async
           appState.updateActivePathInMemory(dateInfo, updated);
 
+          final settings = context.read<SettingsProvider>();
+          final tz = settings.geotagTimezone.toDouble();
+          setState(() {
+            _assignPhotosToTimelineItems(updated, tz);
+          });
+
           if (_autoSnapOnDrag && _draggedHoverDotSegment != null && mounted) {
-            _snapSegmentToRoads(
-                context, appState, dateInfo, updated, _draggedHoverDotSegment!);
+            _snapSegmentToRoads(context, appState, dateInfo, updated,
+                _draggedHoverDotSegment!, newPoint.latLng,
+                forceEvenTimeDistribution: isShiftPressed);
           }
 
           // Persist to disk asynchronously (does NOT block UI)
@@ -2840,7 +4432,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     if (_isDraggingPhoto) {
       final draggedCount = _initialPhotoLocations.length;
       final targetLoc = _draggingPhoto?.assignedLatLng;
-      final draggedPhotos = List<PhotoEntry>.from(_initialPhotoLocations.keys);
 
       setState(() {
         _isDraggingPhoto = false;
@@ -2856,16 +4447,14 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       final points = appState.activePaths[dateInfo.filePath] ?? [];
       _assignPhotosToTimelineItems(points, settings.geotagTimezone.toDouble());
 
-      // Permanently write new GPS coordinates directly into file EXIF using ExifTool
-      _writePhotoGpsToExif(draggedPhotos);
-
       if (targetLoc != null && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        _MacToastMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Updated EXIF geotag for $draggedCount photo${draggedCount > 1 ? 's' : ''} to ${targetLoc.latitude.toStringAsFixed(5)}, ${targetLoc.longitude.toStringAsFixed(5)}',
+              'Moved $draggedCount photo(s) to ${targetLoc.latitude.toStringAsFixed(5)}, ${targetLoc.longitude.toStringAsFixed(5)} — tap "Save All" to write EXIF',
             ),
-            duration: const Duration(seconds: 2),
+            backgroundColor: Colors.orange.shade700,
+            duration: const Duration(seconds: 3),
           ),
         );
       }
@@ -2961,7 +4550,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     final googleApiKey = settings.googleMapsApiKey;
 
     if (useGoogle && googleApiKey.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      _MacToastMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text(
                 'Please configure your Google Maps API Key in Settings to snap roads.')),
@@ -3111,8 +4700,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         nearestIdx = i;
       }
     }
+    final tz = settings.geotagTimezone.toDouble();
     setState(() {
       _selectedPointIndex = nearestIdx;
+      _assignPhotosToTimelineItems(finalPoints, tz);
     });
   }
 
@@ -3271,7 +4862,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       );
       await settings.addFavoriteRoad(road);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        _MacToastMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Saved "$name" to Favorite Roads!'),
             duration: const Duration(seconds: 2),
@@ -3595,7 +5186,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     _assignPhotosToTimelineItems(updatedDayPoints, tz);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      _MacToastMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             'Snapped segment to "${favRoad.name}"! Road 1 ends at place start, Road 2 resumes at place end.',
@@ -3668,7 +5259,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        _MacToastMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               'Imported ${files.length} timeline file(s) with ${allImportedPoints.length} points!',
@@ -3680,13 +5271,21 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
-  String _formatPointTime(DateTime utcTime, double timezoneOffset, {bool includeDate = false}) {
+  String _formatPointTime(DateTime utcTime, double timezoneOffset,
+      {bool includeDate = false}) {
     final localTime =
-        utcTime.add(Duration(minutes: (timezoneOffset * 60).toInt()));
+        utcTime.toUtc().add(Duration(minutes: (timezoneOffset * 60).toInt()));
     if (includeDate || _chartMode != 'daily') {
-      return DateFormat('dd/MM HH:mm').format(localTime);
+      return DateFormat('HH:mm dd/MM').format(localTime);
     }
-    return DateFormat('HH:mm:ss').format(localTime);
+    if (_selectedDate != null) {
+      if (localTime.year != _selectedDate!.year ||
+          localTime.month != _selectedDate!.month ||
+          localTime.day != _selectedDate!.day) {
+        return DateFormat('HH:mm dd/MM').format(localTime);
+      }
+    }
+    return DateFormat('HH:mm').format(localTime);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -3698,8 +5297,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       DateInfo dateInfo, List<LocationPoint> currentPoints) {
     final latCtrl = TextEditingController();
     final lngCtrl = TextEditingController();
-    final timeCtrl = TextEditingController(
-        text: DateFormat('HH:mm:ss').format(DateTime.now()));
+    final timeCtrl =
+        TextEditingController(text: DateFormat('HH:mm').format(DateTime.now()));
 
     showDialog(
       context: context,
@@ -3739,12 +5338,15 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
               try {
                 final timeParts = timeCtrl.text.split(':');
-                if (timeParts.length != 3) throw Exception('Format error');
+                if (timeParts.length < 2) throw Exception('Format error');
                 final hr = int.parse(timeParts[0]);
                 final min = int.parse(timeParts[1]);
-                final sec = int.parse(timeParts[2]);
+                final sec = timeParts.length > 2 ? int.parse(timeParts[2]) : 0;
 
-                final utcDate = DateTime.utc(
+                final settings = context.read<SettingsProvider>();
+                final offset = settings.geotagTimezone.toDouble();
+
+                final localDate = DateTime(
                   dateInfo.date.year,
                   dateInfo.date.month,
                   dateInfo.date.day,
@@ -3752,6 +5354,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   min,
                   sec,
                 );
+                final utcDate = localDate
+                    .subtract(Duration(minutes: (offset * 60).toInt()))
+                    .toUtc();
 
                 final newPoint = LocationPoint(
                   latitude: lat,
@@ -3770,7 +5375,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 if (ctx.mounted) Navigator.pop(ctx);
               } catch (_) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  _MacToastMessenger.of(context).showSnackBar(
                     const SnackBar(
                         content: Text('Invalid time format. Use HH:mm:ss.')),
                   );
@@ -3905,7 +5510,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 if (ctx.mounted) Navigator.pop(ctx);
               } catch (_) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  _MacToastMessenger.of(context).showSnackBar(
                     const SnackBar(
                         content: Text('Invalid time format. Use HH:mm:ss.')),
                   );
@@ -4220,7 +5825,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                       await appState.snapToRoads(dateInfo);
                                       _loadPointsForSelectedDate();
                                       if (context.mounted) {
-                                        ScaffoldMessenger.of(context)
+                                        _MacToastMessenger.of(context)
                                             .showSnackBar(
                                           const SnackBar(
                                             content: Text(
@@ -4300,7 +5905,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                         setState(() {
                                           _autoSnapOnDrag = val;
                                         });
-                                        ScaffoldMessenger.of(context)
+                                        _MacToastMessenger.of(context)
                                             .showSnackBar(
                                           SnackBar(
                                             content: Text(
@@ -4340,6 +5945,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                   );
                                 }
                                 return ListView.builder(
+                                  controller: _timelineScrollController,
                                   itemCount: timelineItems.length,
                                   itemBuilder: (context, idx) {
                                     final isSelected =
@@ -4575,6 +6181,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             points: pts.map((p) => p.latLng).toList(),
             strokeWidth: TimelineConstants.polylineStrokeWidthInactive,
             color: Colors.grey.withValues(alpha: 0.4),
+            borderStrokeWidth: 1.0,
+            borderColor: Colors.grey.shade900.withValues(alpha: 0.3),
           ),
         );
       }
@@ -4619,6 +6227,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             points: pointsToShow.map((p) => p.latLng).toList(),
             strokeWidth: TimelineConstants.polylineStrokeWidthEditing,
             color: TimelineConstants.editRouteColor,
+            borderStrokeWidth: 1.5,
+            borderColor: Colors.deepOrange.shade900,
           ),
         );
       } else if (_viewAsPath && timelineItems.isNotEmpty) {
@@ -4629,7 +6239,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             Color lineColor;
             double width;
 
-            final hasTimelineSelection = (_selectedTimelineItemIndex != null);
+            final hasTimelineSelection = (_selectedTimelineItemIndex != null &&
+                _selectedTimelineItemIndex! < timelineItems.length);
 
             if (hasTimelineSelection) {
               final selectedItem = timelineItems[_selectedTimelineItemIndex!];
@@ -4693,11 +6304,17 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               }
             }
 
+            final outlineColor = (lineColor.a < 1.0)
+                ? Colors.purple.shade900.withValues(alpha: lineColor.a)
+                : Colors.purple.shade900;
+
             polylines.add(
               Polyline(
                 points: pathLatLngs,
                 strokeWidth: width,
                 color: lineColor,
+                borderStrokeWidth: 1.5,
+                borderColor: outlineColor,
               ),
             );
           }
@@ -4709,6 +6326,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             points: pointsToShow.map((p) => p.latLng).toList(),
             strokeWidth: 4.0,
             color: Colors.purple,
+            borderStrokeWidth: 1.5,
+            borderColor: Colors.purple.shade900,
           ),
         );
       }
@@ -5027,7 +6646,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        DateFormat('HH:mm:ss').format(localHoverTime),
+                        DateFormat('HH:mm').format(localHoverTime),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 13,
@@ -5053,7 +6672,6 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       final loc = photo.assignedLatLng;
       if (loc == null) continue;
 
-      final isCtrl = HardwareKeyboard.instance.isControlPressed;
       final isSelected =
           _selectedPhoto == photo || _selectedPhotoSet.contains(photo);
       final isDragging = _draggingPhoto == photo;
@@ -5070,19 +6688,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         width: size,
         height: size,
         child: GestureDetector(
-          onTap: () => setState(() {
-            if (isCtrl) {
-              if (_selectedPhotoSet.contains(photo)) {
-                _selectedPhotoSet.remove(photo);
-              } else {
-                _selectedPhotoSet.add(photo);
-              }
-            } else {
-              _selectedPhotoSet.clear();
-              _selectedPhoto = (_selectedPhoto == photo) ? null : photo;
-              _showPhotoGrid = false;
-            }
-          }),
+          onTap: () => _handlePhotoSelection(photo),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             decoration: BoxDecoration(
@@ -5184,6 +6790,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
   @override
   Widget build(BuildContext context) {
+    // Refresh activeState mỗi frame để tránh bị null sau hot reload
+    activeState = this;
     final appState = context.watch<AppStateProvider>();
     final settings = context.watch<SettingsProvider>();
     final isEditing = appState.isEditing;
@@ -5262,7 +6870,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       allYearPts.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       pointsToShow = allYearPts;
     } else {
-      pointsToShow = appState.activePaths[currentDateInfo.filePath] ?? [];
+      pointsToShow =
+          _getPointsForSelectedDay(appState, _selectedDate!, timeOffset);
     }
 
     return DropTarget(
@@ -5302,363 +6911,369 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       child: Scaffold(
         body: Stack(
           children: [
-            Row(
-              children: [
-                Container(
-                  width: _sidebarWidth,
-                  color: Theme.of(context).colorScheme.surface,
-                  child: _buildSidebar(
-                      context, appState, currentDateInfo, pointsToShow),
-                ),
-                GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onHorizontalDragUpdate: (details) {
-                    setState(() {
-                      _sidebarWidth = (_sidebarWidth + details.delta.dx)
-                          .clamp(280.0, 800.0);
-                    });
-                  },
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.resizeLeftRight,
-                    child: Container(
-                      width: 8,
-                      color: Colors.transparent,
-                      child: const Center(
-                          child: VerticalDivider(width: 1, thickness: 1)),
+            AbsorbPointer(
+              absorbing: _isWritingExif,
+              child: Row(
+                children: [
+                  Container(
+                    width: _sidebarWidth,
+                    color: Theme.of(context).colorScheme.surface,
+                    child: _buildSidebar(
+                        context, appState, currentDateInfo, pointsToShow),
+                  ),
+                  GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onHorizontalDragUpdate: (details) {
+                      setState(() {
+                        _sidebarWidth = (_sidebarWidth + details.delta.dx)
+                            .clamp(280.0, 800.0);
+                      });
+                    },
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.resizeLeftRight,
+                      child: Container(
+                        width: 8,
+                        color: Colors.transparent,
+                        child: const Center(
+                            child: VerticalDivider(width: 1, thickness: 1)),
+                      ),
                     ),
                   ),
-                ),
-                // Map Panel
-                Expanded(
-                  child: Stack(
-                    children: [
-                      _buildMap(context, appState, settings, pointsToShow),
+                  // Map Panel
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        _buildMap(context, appState, settings, pointsToShow),
 
-                      // Map mode / Map Layer & Action Menu toolbar
-                      Positioned(
-                        top: 16,
-                        left: _showCalendar ? 350 : 16,
-                        child: Row(
-                          children: [
-                            // Quick Map Layer Switcher (Satellite, Roadmap, OSM)
-                            PopupMenuButton<String>(
-                              tooltip: 'Change Map Layer',
-                              onSelected: (provider) {
-                                settings.updateMapProvider(provider);
-                              },
-                              itemBuilder: (context) => [
-                                PopupMenuItem(
-                                  value: 'google_satellite',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.satellite_alt, size: 18),
-                                      const SizedBox(width: 8),
-                                      const Text('Google Satellite'),
-                                      if (settings.mapProvider ==
-                                          'google_satellite') ...[
-                                        const Spacer(),
-                                        const Icon(Icons.check,
-                                            size: 16, color: Colors.teal),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem(
-                                  value: 'bing_satellite',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.satellite, size: 18),
-                                      const SizedBox(width: 8),
-                                      const Text('Bing Satellite'),
-                                      if (settings.mapProvider ==
-                                          'bing_satellite') ...[
-                                        const Spacer(),
-                                        const Icon(Icons.check,
-                                            size: 16, color: Colors.teal),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem(
-                                  value: 'google_roadmap',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.map, size: 18),
-                                      const SizedBox(width: 8),
-                                      const Text('Google Roadmap'),
-                                      if (settings.mapProvider ==
-                                          'google_roadmap') ...[
-                                        const Spacer(),
-                                        const Icon(Icons.check,
-                                            size: 16, color: Colors.teal),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem(
-                                  value: 'osm',
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.public, size: 18),
-                                      const SizedBox(width: 8),
-                                      const Text('OpenStreetMap'),
-                                      if (settings.mapProvider == 'osm') ...[
-                                        const Spacer(),
-                                        const Icon(Icons.check,
-                                            size: 16, color: Colors.teal),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              child: Material(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(20),
-                                elevation: 2,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        settings.mapProvider
-                                                .contains('satellite')
-                                            ? Icons.satellite_alt
-                                            : Icons.map,
-                                        size: 16,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        settings.mapProvider ==
-                                                'google_satellite'
-                                            ? 'Satellite'
-                                            : (settings.mapProvider ==
-                                                    'bing_satellite'
-                                                ? 'Bing Sat'
-                                                : (settings.mapProvider ==
-                                                        'google_roadmap'
-                                                    ? 'Roadmap'
-                                                    : 'OSM')),
-                                        style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold),
-                                      ),
-                                      const Icon(Icons.arrow_drop_down,
-                                          size: 18),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-
-                            // Single Unified Action Menu Button
-                            PopupMenuButton<String>(
-                              tooltip: 'Menu',
-                              onSelected: (value) async {
-                                if (value == 'edit_path') {
-                                  appState
-                                      .startEditing(currentDateInfo.filePath);
-                                } else if (value == 'add_photos') {
-                                  final result = await FilePicker.platform
-                                      .pickFiles(
-                                          allowMultiple: true,
-                                          type: FileType.image);
-                                  if (result != null && mounted) {
-                                    await _loadPhotosFromFiles(result.paths
-                                        .whereType<String>()
-                                        .map(File.new)
-                                        .toList());
-                                  }
-                                } else if (value == 'add_folder') {
-                                  final folderPath = await FilePicker.platform
-                                      .getDirectoryPath();
-                                  if (folderPath != null && mounted) {
-                                    await _loadPhotosFromFiles(
-                                        [File(folderPath)]);
-                                  }
-                                } else if (value == 'clear_photos') {
-                                  setState(() {
-                                    _photos.clear();
-                                    _selectedPhoto = null;
-                                    _showPhotoGrid = false;
-                                  });
-                                }
-                              },
-                              itemBuilder: (context) => [
-                                if (!isEditing &&
-                                    currentDateInfo.filePath.isNotEmpty)
-                                  const PopupMenuItem(
-                                    value: 'edit_path',
+                        // Map mode / Map Layer & Action Menu toolbar
+                        Positioned(
+                          top: 16,
+                          left: _showCalendar ? 350 : 16,
+                          child: Row(
+                            children: [
+                              // Quick Map Layer Switcher (Satellite, Roadmap, OSM)
+                              PopupMenuButton<String>(
+                                tooltip: 'Change Map Layer',
+                                onSelected: (provider) {
+                                  settings.updateMapProvider(provider);
+                                },
+                                itemBuilder: (context) => [
+                                  PopupMenuItem(
+                                    value: 'google_satellite',
                                     child: Row(
                                       children: [
-                                        Icon(Icons.edit_road,
-                                            size: 18, color: Colors.blue),
-                                        SizedBox(width: 8),
-                                        Text('Edit Path'),
+                                        const Icon(Icons.satellite_alt,
+                                            size: 18),
+                                        const SizedBox(width: 8),
+                                        const Text('Google Satellite'),
+                                        if (settings.mapProvider ==
+                                            'google_satellite') ...[
+                                          const Spacer(),
+                                          const Icon(Icons.check,
+                                              size: 16, color: Colors.teal),
+                                        ],
                                       ],
                                     ),
                                   ),
-                                const PopupMenuItem(
-                                  value: 'add_photos',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.add_photo_alternate,
-                                          size: 18, color: Colors.purple),
-                                      SizedBox(width: 8),
-                                      Text('Add Photos'),
-                                    ],
-                                  ),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'add_folder',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.create_new_folder,
-                                          size: 18, color: Colors.deepPurple),
-                                      SizedBox(width: 8),
-                                      Text('Add Folder (Recursive)'),
-                                    ],
-                                  ),
-                                ),
-                                if (_photos.isNotEmpty) ...[
-                                  const PopupMenuDivider(),
-                                  const PopupMenuItem(
-                                    value: 'clear_photos',
+                                  PopupMenuItem(
+                                    value: 'bing_satellite',
                                     child: Row(
                                       children: [
-                                        Icon(Icons.clear_all,
-                                            size: 18, color: Colors.red),
-                                        SizedBox(width: 8),
-                                        Text('Clear All Photos'),
+                                        const Icon(Icons.satellite, size: 18),
+                                        const SizedBox(width: 8),
+                                        const Text('Bing Satellite'),
+                                        if (settings.mapProvider ==
+                                            'bing_satellite') ...[
+                                          const Spacer(),
+                                          const Icon(Icons.check,
+                                              size: 16, color: Colors.teal),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'google_roadmap',
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.map, size: 18),
+                                        const SizedBox(width: 8),
+                                        const Text('Google Roadmap'),
+                                        if (settings.mapProvider ==
+                                            'google_roadmap') ...[
+                                          const Spacer(),
+                                          const Icon(Icons.check,
+                                              size: 16, color: Colors.teal),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'osm',
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.public, size: 18),
+                                        const SizedBox(width: 8),
+                                        const Text('OpenStreetMap'),
+                                        if (settings.mapProvider == 'osm') ...[
+                                          const Spacer(),
+                                          const Icon(Icons.check,
+                                              size: 16, color: Colors.teal),
+                                        ],
                                       ],
                                     ),
                                   ),
                                 ],
-                              ],
-                              child: Material(
-                                color: Theme.of(context).colorScheme.primary,
-                                borderRadius: BorderRadius.circular(20),
-                                elevation: 2,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 8),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.menu,
-                                          size: 16, color: Colors.white),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        _photos.isEmpty
-                                            ? 'Menu'
-                                            : 'Menu (${_photos.length} photos)',
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white,
+                                child: Material(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(20),
+                                  elevation: 2,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 8),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          settings.mapProvider
+                                                  .contains('satellite')
+                                              ? Icons.satellite_alt
+                                              : Icons.map,
+                                          size: 16,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
                                         ),
-                                      ),
-                                    ],
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          settings.mapProvider ==
+                                                  'google_satellite'
+                                              ? 'Satellite'
+                                              : (settings.mapProvider ==
+                                                      'bing_satellite'
+                                                  ? 'Bing Sat'
+                                                  : (settings.mapProvider ==
+                                                          'google_roadmap'
+                                                      ? 'Roadmap'
+                                                      : 'OSM')),
+                                          style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold),
+                                        ),
+                                        const Icon(Icons.arrow_drop_down,
+                                            size: 18),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ),
+                              const SizedBox(width: 8),
 
-                      // Floating Calendar Overlay
-                      if (_showCalendar)
-                        Positioned(
-                          top: 16,
-                          left: 16,
-                          child: Material(
-                            elevation: 8,
-                            borderRadius: BorderRadius.circular(12),
-                            shadowColor: Colors.black38,
-                            child: SizedBox(
-                              width: 320,
-                              child: CustomCalendarInline(
-                                selectedDate: _selectedDate ?? DateTime.now(),
-                                allDates: appState.allDates,
-                                photos: _photos,
-                                onDateSelected: (date) {
-                                  setState(() => _selectedDate = date);
-                                  _loadPointsForSelectedDate();
-                                },
-                                onClose: () =>
-                                    setState(() => _showCalendar = false),
-                              ),
-                            ),
-                          ),
-                        ),
-
-                      // Save / Cancel Floating Buttons
-                      if (isEditing)
-                        Positioned(
-                          bottom: _photos.isNotEmpty ? 168 : 20,
-                          left: 16,
-                          child: Row(
-                            children: [
-                              FloatingActionButton.extended(
-                                heroTag: 'save_edit',
-                                onPressed: () async {
-                                  await appState.saveEditingChanges(timeOffset);
-                                  setState(() => _selectedPointIndex = null);
-                                  _loadPointsForSelectedDate();
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                          content:
-                                              Text('Timeline edits saved.')),
-                                    );
+                              // Single Unified Action Menu Button
+                              PopupMenuButton<String>(
+                                tooltip: 'Menu',
+                                onSelected: (value) async {
+                                  if (value == 'edit_path') {
+                                    appState
+                                        .startEditing(currentDateInfo.filePath);
+                                  } else if (value == 'add_photos') {
+                                    final result = await FilePicker.platform
+                                        .pickFiles(
+                                            allowMultiple: true,
+                                            type: FileType.image);
+                                    if (result != null && mounted) {
+                                      await _loadPhotosFromFiles(result.paths
+                                          .whereType<String>()
+                                          .map(File.new)
+                                          .toList());
+                                    }
+                                  } else if (value == 'add_folder') {
+                                    final folderPath = await FilePicker.platform
+                                        .getDirectoryPath();
+                                    if (folderPath != null && mounted) {
+                                      await _loadPhotosFromFiles(
+                                          [File(folderPath)]);
+                                    }
+                                  } else if (value == 'clear_photos') {
+                                    setState(() {
+                                      _photos.clear();
+                                      _selectedPhoto = null;
+                                      _showPhotoGrid = false;
+                                    });
                                   }
                                 },
-                                icon: const Icon(Icons.save),
-                                label: const Text('Save Changes'),
-                                backgroundColor: Colors.green,
-                                foregroundColor: Colors.white,
-                              ),
-                              const SizedBox(width: 8),
-                              FloatingActionButton.extended(
-                                heroTag: 'cancel_edit',
-                                onPressed: () {
-                                  appState.cancelEditing();
-                                  setState(() {
-                                    _selectedPointIndex = null;
-                                    _hoveredLatLng = null;
-                                    _hoveredProjection = null;
-                                  });
-                                },
-                                icon: const Icon(Icons.cancel),
-                                label: const Text('Cancel'),
-                                backgroundColor: Colors.red,
-                                foregroundColor: Colors.white,
+                                itemBuilder: (context) => [
+                                  if (!isEditing &&
+                                      currentDateInfo.filePath.isNotEmpty)
+                                    const PopupMenuItem(
+                                      value: 'edit_path',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.edit_road,
+                                              size: 18, color: Colors.blue),
+                                          SizedBox(width: 8),
+                                          Text('Edit Path'),
+                                        ],
+                                      ),
+                                    ),
+                                  const PopupMenuItem(
+                                    value: 'add_photos',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.add_photo_alternate,
+                                            size: 18, color: Colors.purple),
+                                        SizedBox(width: 8),
+                                        Text('Add Photos'),
+                                      ],
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'add_folder',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.create_new_folder,
+                                            size: 18, color: Colors.deepPurple),
+                                        SizedBox(width: 8),
+                                        Text('Add Folder (Recursive)'),
+                                      ],
+                                    ),
+                                  ),
+                                  if (_photos.isNotEmpty) ...[
+                                    const PopupMenuDivider(),
+                                    const PopupMenuItem(
+                                      value: 'clear_photos',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.clear_all,
+                                              size: 18, color: Colors.red),
+                                          SizedBox(width: 8),
+                                          Text('Clear All Photos'),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                                child: Material(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  borderRadius: BorderRadius.circular(20),
+                                  elevation: 2,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 8),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.menu,
+                                            size: 16, color: Colors.white),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          _photos.isEmpty
+                                              ? 'Menu'
+                                              : 'Menu (${_photos.length} photos)',
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
                         ),
 
-                      // Photo strip / preview panel
-                      if (_photos.isNotEmpty)
-                        Positioned(
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          child: _buildPhotoPanel(
-                              context, appState, currentDateInfo, settings),
-                        ),
-                    ],
+                        // Floating Calendar Overlay
+                        if (_showCalendar)
+                          Positioned(
+                            top: 16,
+                            left: 16,
+                            child: Material(
+                              elevation: 8,
+                              borderRadius: BorderRadius.circular(12),
+                              shadowColor: Colors.black38,
+                              child: SizedBox(
+                                width: 320,
+                                child: CustomCalendarInline(
+                                  selectedDate: _selectedDate ?? DateTime.now(),
+                                  allDates: appState.allDates,
+                                  photos: _photos,
+                                  onDateSelected: (date) {
+                                    setState(() => _selectedDate = date);
+                                    _loadPointsForSelectedDate();
+                                  },
+                                  onClose: () =>
+                                      setState(() => _showCalendar = false),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                        // Save / Cancel Floating Buttons
+                        if (isEditing)
+                          Positioned(
+                            bottom: _photos.isNotEmpty ? 168 : 20,
+                            left: 16,
+                            child: Row(
+                              children: [
+                                FloatingActionButton.extended(
+                                  heroTag: 'save_edit',
+                                  onPressed: () async {
+                                    await appState
+                                        .saveEditingChanges(timeOffset);
+                                    setState(() => _selectedPointIndex = null);
+                                    _loadPointsForSelectedDate();
+                                    if (context.mounted) {
+                                      _MacToastMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                            content:
+                                                Text('Timeline edits saved.')),
+                                      );
+                                    }
+                                  },
+                                  icon: const Icon(Icons.save),
+                                  label: const Text('Save Changes'),
+                                  backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white,
+                                ),
+                                const SizedBox(width: 8),
+                                FloatingActionButton.extended(
+                                  heroTag: 'cancel_edit',
+                                  onPressed: () {
+                                    appState.cancelEditing();
+                                    setState(() {
+                                      _selectedPointIndex = null;
+                                      _hoveredLatLng = null;
+                                      _hoveredProjection = null;
+                                    });
+                                  },
+                                  icon: const Icon(Icons.cancel),
+                                  label: const Text('Cancel'),
+                                  backgroundColor: Colors.red,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ],
+                            ),
+                          ),
+
+                        // Photo strip / preview panel
+                        if (_photos.isNotEmpty)
+                          Positioned(
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            child: _buildPhotoPanel(
+                                context, appState, currentDateInfo, settings),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
 
             // Drag-over overlay
@@ -5705,6 +7320,52 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (_isWritingExif) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withOpacity(0.3),
+                          width: 1,
+                        ),
+                        boxShadow: const [
+                          BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 8,
+                              offset: Offset(0, 3))
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Theme.of(context).colorScheme.primary,
+                              value: _exifTotal > 0
+                                  ? _exifProcessed / _exifTotal
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Writing EXIF: $_exifProcessed / $_exifTotal',
+                            style: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   // Shift Edit Toggle Button
                   Tooltip(
                     message: settings.requireShiftToDrag
@@ -5846,6 +7507,80 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 ],
               ),
             ),
+
+            // macOS Style Stacked Notifications
+            if (_macNotifications.isNotEmpty)
+              Positioned(
+                top: 16,
+                right: 16,
+                child: SizedBox(
+                  width: 320,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: _macNotifications.map((n) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: n.backgroundColor.withOpacity(0.92),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.12),
+                              width: 1,
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Colors.black38,
+                                blurRadius: 10,
+                                offset: Offset(0, 4),
+                              )
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.info_outline,
+                                      size: 16, color: Colors.white),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      n.message,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  InkWell(
+                                    onTap: () {
+                                      setState(() {
+                                        _macNotifications.removeWhere(
+                                            (item) => item.id == n.id);
+                                      });
+                                    },
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(2.0),
+                                      child: Icon(Icons.close,
+                                          size: 14, color: Colors.white70),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -5894,6 +7629,49 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                 ),
                 const Spacer(),
+                if (_selectedPhotoSet.length > 1) ...[
+                  FilledButton.icon(
+                    onPressed: _clusterSelectedPhotos,
+                    icon: const Icon(Icons.pin_drop, size: 14),
+                    label: Text('Cluster (${_selectedPhotoSet.length})',
+                        style: const TextStyle(fontSize: 12)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.teal.shade700,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (_hasUnsavedPhotoChanges)
+                  FilledButton.icon(
+                    onPressed: () async {
+                      final photosToSave =
+                          _photos.where((p) => p.isGpsModified).toList();
+                      if (photosToSave.isEmpty) return;
+                      await _writePhotoGpsToExif(photosToSave);
+                      if (context.mounted) {
+                        _MacToastMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                                'Saved EXIF for ${photosToSave.length} photo(s)'),
+                            backgroundColor: Colors.green.shade700,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.save, size: 16),
+                    label:
+                        const Text('Save All', style: TextStyle(fontSize: 12)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
                 IconButton(
                   icon: const Icon(Icons.grid_view, size: 18),
                   tooltip: 'Expand Grid',
@@ -5916,98 +7694,142 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           // Horizontal scroll strip
           SizedBox(
             height: 110,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              itemCount: _currentDatePhotos.length,
-              itemBuilder: (context, idx) {
-                final photo = _currentDatePhotos[idx];
-                final isSelected = _selectedPhoto == photo;
-                return GestureDetector(
-                  onTap: () => setState(() {
-                    _selectedPhoto = isSelected ? null : photo;
-                    // Pan map to photo location
-                    if (!isSelected && photo.gpsLatLng != null) {
-                      _animatedMapMove(photo.gpsLatLng!, 15.0);
-                    }
-                  }),
-                  child: Container(
-                    width: 80,
-                    height: 80,
-                    margin: const EdgeInsets.only(right: 8),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(context).copyWith(
+                dragDevices: {
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.mouse,
+                  PointerDeviceKind.trackpad,
+                  PointerDeviceKind.stylus,
+                },
+              ),
+              child: ListView.builder(
+                physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics()),
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                itemCount: _currentDatePhotos.length,
+                itemBuilder: (context, idx) {
+                  final photo = _currentDatePhotos[idx];
+                  final isSelected = _selectedPhoto == photo ||
+                      _selectedPhotoSet.contains(photo);
+                  return GestureDetector(
+                    onTap: () {
+                      _handlePhotoSelection(photo);
+                      if (_selectedPhoto == photo && photo.gpsLatLng != null) {
+                        _animatedMapMove(
+                          photo.gpsLatLng!,
+                          _mapController.camera.zoom > 12.0
+                              ? _mapController.camera.zoom
+                              : 15.0,
+                        );
+                      } else if (_selectedPhoto == photo &&
+                          photo.gpsLatLng == null) {
+                        // No GPS: focus sidebar timeline at photo's time
+                        WidgetsBinding.instance.addPostFrameCallback(
+                            (_) => _focusTimelineForPhoto(photo));
+                      }
+                    },
+                    onSecondaryTapDown: (details) {
+                      _showPhotoContextMenu(
+                          context, details.globalPosition, photo);
+                    },
+                    child: Container(
+                      width: 80,
+                      height: 80,
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: EdgeInsets.all(isSelected ? 3.5 : (photo.addedToTimeline ? 2.5 : 0)),
+                      decoration: BoxDecoration(
                         color: isSelected
                             ? Theme.of(context).colorScheme.primary
                             : (photo.addedToTimeline
                                 ? Colors.green
                                 : Colors.transparent),
-                        width: 2,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(5),
+                            child: Image.file(
+                              photo.file,
+                              width: double.infinity,
+                              height: double.infinity,
+                              fit: BoxFit.cover,
+                              cacheWidth: 150,
+                              errorBuilder: (_, __, ___) => Container(
+                                color: Colors.grey.shade800,
+                                child: const Icon(Icons.broken_image,
+                                    size: 16, color: Colors.white54),
+                              ),
+                            ),
+                          ),
+                          // Red dot badge for missing Lens info (Top-Left)
+                          if (!photo.hasLensInfo)
+                            Positioned(
+                              top: 4,
+                              left: 4,
+                              child: Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: Colors.red,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: Colors.white, width: 1.5),
+                                ),
+                              ),
+                            ),
+                          // GPS badge
+                          if (photo.gpsLatLng != null || photo.isGpsModified)
+                            Positioned(
+                              top: 4,
+                              right: 4,
+                              child: Container(
+                                padding: const EdgeInsets.all(2),
+                                decoration: BoxDecoration(
+                                  color: photo.isGpsModified
+                                      ? Colors.amber.shade800
+                                      : (photo.addedToTimeline
+                                          ? Colors.green
+                                          : Colors.blue),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  photo.isGpsModified
+                                      ? Icons.edit
+                                      : (photo.addedToTimeline
+                                          ? Icons.check
+                                          : Icons.gps_fixed),
+                                  size: 10,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          // File name
+                          Positioned(
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 3, vertical: 2),
+                              color: Colors.black54,
+                              child: Text(
+                                photo.filename,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 8),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    child: Stack(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: Image.file(
-                            photo.file,
-                            width: 80,
-                            height: 80,
-                            fit: BoxFit.cover,
-                            cacheWidth: 150,
-                            errorBuilder: (_, __, ___) => Container(
-                              color: Colors.grey.shade800,
-                              child: const Icon(Icons.broken_image,
-                                  size: 16, color: Colors.white54),
-                            ),
-                          ),
-                        ),
-                        // GPS badge
-                        if (photo.gpsLatLng != null)
-                          Positioned(
-                            top: 4,
-                            right: 4,
-                            child: Container(
-                              padding: const EdgeInsets.all(2),
-                              decoration: BoxDecoration(
-                                color: photo.addedToTimeline
-                                    ? Colors.green
-                                    : Colors.blue,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                photo.addedToTimeline
-                                    ? Icons.check
-                                    : Icons.gps_fixed,
-                                size: 10,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        // File name
-                        Positioned(
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 3, vertical: 2),
-                            color: Colors.black54,
-                            child: Text(
-                              photo.filename,
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 8),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
 
@@ -6050,8 +7872,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             ),
           ),
           const SizedBox(width: 12),
-          // Info
+          // Info Column
           Expanded(
+            flex: 4,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -6086,13 +7909,89 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
+          // Vertical Divider
+          Container(
+            height: 38,
+            width: 1,
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+          const SizedBox(width: 12),
+          // Metadata Column (Lens, Focal Length, F-Number, Shutter Speed)
+          Expanded(
+            flex: 5,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.camera_outlined,
+                        size: 13, color: Colors.purpleAccent),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        photo.hasLensInfo
+                            ? (photo.lensModel ??
+                                photo.lensMake ??
+                                '${photo.focalLength}mm')
+                            : 'Lens: Not Set (${photo.focalLength != null ? "${photo.focalLength!.toStringAsFixed(1).replaceAll('.0', '')}mm" : "0mm"} / f/${photo.fNumber != null ? photo.fNumber!.toStringAsFixed(1).replaceAll('.0', '') : "0"})',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: photo.hasLensInfo
+                              ? Theme.of(context).colorScheme.onSurface
+                              : Colors.redAccent,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    const Icon(Icons.tune, size: 12, color: Colors.grey),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        'Focal: ${photo.focalLength != null ? "${photo.focalLength!.toStringAsFixed(1).replaceAll('.0', '')}mm" : "0mm"}  •  '
+                        'Aperture: ${photo.fNumber != null ? "f/${photo.fNumber!.toStringAsFixed(1).replaceAll('.0', '')}" : "f/0"}  •  '
+                        'Speed: ${photo.shutterSpeed ?? "-"}',
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          color: Colors.grey,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
           // Actions
           if (photo.gpsLatLng != null && !photo.addedToTimeline)
             FilledButton.icon(
-              onPressed: () => _addPhotoGpsToTimeline(photo),
-              icon: const Icon(Icons.timeline, size: 16),
-              label: const Text('Add to Timeline'),
+              onPressed: () async {
+                await _addPhotoGpsToTimeline(photo);
+                await _writePhotoGpsToExif([photo]);
+                if (context.mounted) {
+                  _MacToastMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                          'Added to timeline & EXIF saved for "${photo.filename}"'),
+                      backgroundColor: Colors.green.shade700,
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.save_as, size: 16),
+              label: const Text('Save'),
               style: FilledButton.styleFrom(
                 backgroundColor: Colors.indigo,
                 padding:
@@ -6102,9 +8001,22 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             )
           else if (photo.gpsLatLng == null && photo.interpolatedLatLng != null)
             FilledButton.icon(
-              onPressed: () => _applyInterpolatedGeotag(photo),
-              icon: const Icon(Icons.pin_drop, size: 16),
-              label: const Text('Apply Geotag'),
+              onPressed: () async {
+                await _applyInterpolatedGeotag(photo);
+                await _writePhotoGpsToExif([photo]);
+                if (context.mounted) {
+                  _MacToastMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                          'Geotag applied & EXIF saved for "${photo.filename}"'),
+                      backgroundColor: Colors.green.shade700,
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.save_as, size: 16),
+              label: const Text('Save'),
               style: FilledButton.styleFrom(
                 backgroundColor: Colors.teal,
                 padding:
@@ -6121,35 +8033,34 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             ),
           const SizedBox(width: 8),
           if (photo.assignedLatLng != null) ...[
-            ElevatedButton.icon(
-              onPressed: () async {
-                await _writePhotoGpsToExif([photo]);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                          'EXIF GPS saved to file for "${photo.filename}"'),
-                      backgroundColor: Colors.deepPurple,
-                      duration: const Duration(seconds: 2),
-                    ),
-                  );
+            IconButton(
+              onPressed: () => _animatedMapMove(photo.assignedLatLng!, 16),
+              icon: const Icon(Icons.center_focus_strong, size: 18),
+              tooltip: 'Navigate to location',
+              visualDensity: VisualDensity.compact,
+            ),
+            OutlinedButton.icon(
+              onPressed: () {
+                if (Platform.isWindows) {
+                  Process.run('start', ['', photo.file.path], runInShell: true);
                 }
               },
-              icon: const Icon(Icons.save_as, size: 16),
-              label: const Text('Save EXIF to File'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.deepPurple,
-                foregroundColor: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                textStyle: const TextStyle(fontSize: 12),
-              ),
+              icon: const Icon(Icons.open_in_new, size: 16),
+              label: const Text('Open', style: TextStyle(fontSize: 12)),
             ),
+          ],
+          if (_selectedPhotoSet.length > 1) ...[
             const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: () => _animatedMapMove(photo.assignedLatLng!, 16),
-              icon: const Icon(Icons.center_focus_strong, size: 16),
-              label: const Text('Go to', style: TextStyle(fontSize: 12)),
+            FilledButton.icon(
+              onPressed: _clusterSelectedPhotos,
+              icon: const Icon(Icons.pin_drop, size: 16),
+              label: const Text('Cluster Selected',
+                  style: TextStyle(fontSize: 12)),
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.teal.shade700,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
             ),
           ],
           const SizedBox(width: 4),
@@ -6241,7 +8152,16 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                       _showPhotoGrid = false;
                     });
                     if (photo.gpsLatLng != null) {
-                      _animatedMapMove(photo.gpsLatLng!, 15);
+                      _animatedMapMove(
+                        photo.gpsLatLng!,
+                        _mapController.camera.zoom > 12.0
+                            ? _mapController.camera.zoom
+                            : 15.0,
+                      );
+                    } else {
+                      // No GPS: focus sidebar timeline at photo's time
+                      WidgetsBinding.instance.addPostFrameCallback(
+                          (_) => _focusTimelineForPhoto(photo));
                     }
                   },
                   child: Stack(
@@ -6266,19 +8186,23 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                         child: Container(
                           padding: const EdgeInsets.all(3),
                           decoration: BoxDecoration(
-                            color: photo.addedToTimeline
-                                ? Colors.green
-                                : (photo.gpsLatLng != null
-                                    ? Colors.blue
-                                    : Colors.orange),
+                            color: photo.isGpsModified
+                                ? Colors.amber.shade800
+                                : (photo.addedToTimeline
+                                    ? Colors.green
+                                    : (photo.gpsLatLng != null
+                                        ? Colors.blue
+                                        : Colors.orange)),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
-                            photo.addedToTimeline
-                                ? Icons.check
-                                : (photo.gpsLatLng != null
-                                    ? Icons.gps_fixed
-                                    : Icons.gps_off),
+                            photo.isGpsModified
+                                ? Icons.edit
+                                : (photo.addedToTimeline
+                                    ? Icons.check
+                                    : (photo.gpsLatLng != null
+                                        ? Icons.gps_fixed
+                                        : Icons.gps_off)),
                             size: 12,
                             color: Colors.white,
                           ),
@@ -6448,12 +8372,197 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     return items;
   }
 
+  List<LocationPoint> _getPointsForSelectedDay(
+      AppStateProvider appState, DateTime selectedDate, double timezoneOffset) {
+    if (appState.isEditing) {
+      return appState.editingPoints;
+    }
+
+    final currentDayInfo = appState.allDates.firstWhere(
+      (d) =>
+          d.date.year == selectedDate.year &&
+          d.date.month == selectedDate.month &&
+          d.date.day == selectedDate.day,
+      orElse: () => DateInfo(
+        date: selectedDate,
+        pointCount: 0,
+        filePath: '',
+        distance: 0.0,
+        state: 'original',
+        source: 'merge',
+        hasTimelineBackup: false,
+        hasGpxBackup: false,
+      ),
+    );
+
+    final List<LocationPoint> combined = [];
+    final prevDate = selectedDate.subtract(const Duration(days: 1));
+    final nextDate = selectedDate.add(const Duration(days: 1));
+
+    for (final date in [prevDate, selectedDate, nextDate]) {
+      final info = appState.allDates.firstWhere(
+        (d) =>
+            d.date.year == date.year &&
+            d.date.month == date.month &&
+            d.date.day == date.day,
+        orElse: () => DateInfo(
+          date: date,
+          pointCount: 0,
+          filePath: '',
+          distance: 0.0,
+          state: 'original',
+          source: 'merge',
+          hasTimelineBackup: false,
+          hasGpxBackup: false,
+        ),
+      );
+      if (info.filePath.isNotEmpty &&
+          appState.activePaths.containsKey(info.filePath)) {
+        final pts = appState.activePaths[info.filePath];
+        if (pts != null) {
+          combined.addAll(pts);
+        }
+      }
+    }
+
+    if (combined.isEmpty) {
+      return appState.activePaths[currentDayInfo.filePath] ?? [];
+    }
+
+    final offsetDuration = Duration(minutes: (timezoneOffset * 60).toInt());
+    final dayPoints = combined.where((p) {
+      final local = p.timestamp.toUtc().add(offsetDuration);
+      return local.year == selectedDate.year &&
+          local.month == selectedDate.month &&
+          local.day == selectedDate.day;
+    }).toList();
+
+    dayPoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return dayPoints.isNotEmpty
+        ? dayPoints
+        : (appState.activePaths[currentDayInfo.filePath] ?? []);
+  }
+
+  Future<void> _preloadNeighborDates(
+      DateTime currentDate, AppStateProvider appState) async {
+    final prevDate = currentDate.subtract(const Duration(days: 1));
+    final nextDate = currentDate.add(const Duration(days: 1));
+
+    bool loadedAny = false;
+    for (final d in [prevDate, nextDate]) {
+      final info = appState.allDates.firstWhere(
+        (di) =>
+            di.date.year == d.year &&
+            di.date.month == d.month &&
+            di.date.day == d.day,
+        orElse: () => DateInfo(
+          date: d,
+          pointCount: 0,
+          filePath: '',
+          distance: 0.0,
+          state: 'original',
+          source: 'merge',
+          hasTimelineBackup: false,
+          hasGpxBackup: false,
+        ),
+      );
+      if (info.filePath.isNotEmpty) {
+        if (!appState.activePaths.containsKey(info.filePath) ||
+            appState.activePaths[info.filePath]!.isEmpty) {
+          final pts = await LocationManager.loadLocationFile(info.filePath);
+          appState.activePaths[info.filePath] = pts;
+          loadedAny = true;
+        }
+      }
+    }
+    if (loadedAny && mounted) {
+      setState(() {});
+    }
+  }
+
+  TimelinePlace? _getPreviousDayLastStayPlace(
+      AppStateProvider appState, DateTime currentDate, double offset) {
+    final prevDate = currentDate.subtract(const Duration(days: 1));
+    final prevDateInfo = appState.allDates.firstWhere(
+      (d) =>
+          d.date.year == prevDate.year &&
+          d.date.month == prevDate.month &&
+          d.date.day == prevDate.day,
+      orElse: () => DateInfo(
+        date: prevDate,
+        pointCount: 0,
+        filePath: '',
+        distance: 0.0,
+        state: 'original',
+        source: 'merge',
+        hasTimelineBackup: false,
+        hasGpxBackup: false,
+      ),
+    );
+    if (prevDateInfo.filePath.isEmpty) return null;
+    final prevPoints = appState.activePaths[prevDateInfo.filePath];
+    if (prevPoints == null || prevPoints.isEmpty) return null;
+
+    final prevRawItems = _clusterTimelineRaw(prevPoints, offset);
+    if (prevRawItems.isEmpty) return null;
+
+    final lastItem = prevRawItems.last;
+    if (lastItem is TimelinePlace) {
+      return lastItem;
+    }
+    return null;
+  }
+
+  DateTime? _getNextDayFirstMoveTime(AppStateProvider appState,
+      DateTime currentDate, double offset, LatLng currentCenter) {
+    final nextDate = currentDate.add(const Duration(days: 1));
+    final nextDateInfo = appState.allDates.firstWhere(
+      (d) =>
+          d.date.year == nextDate.year &&
+          d.date.month == nextDate.month &&
+          d.date.day == nextDate.day,
+      orElse: () => DateInfo(
+        date: nextDate,
+        pointCount: 0,
+        filePath: '',
+        distance: 0.0,
+        state: 'original',
+        source: 'merge',
+        hasTimelineBackup: false,
+        hasGpxBackup: false,
+      ),
+    );
+    if (nextDateInfo.filePath.isEmpty) return null;
+    final nextPoints = appState.activePaths[nextDateInfo.filePath];
+    if (nextPoints == null || nextPoints.isEmpty) return null;
+
+    final nextRawItems = _clusterTimelineRaw(nextPoints, offset);
+    if (nextRawItems.isEmpty) return null;
+
+    final firstItem = nextRawItems.first;
+    if (firstItem is TimelinePlace) {
+      final dist = GeoUtils.distanceBetween(firstItem.center, currentCenter);
+      if (dist < TimelineConstants.stayPointDistanceThreshold) {
+        return firstItem.endTime;
+      }
+    } else if (firstItem is TimelinePath && firstItem.points.isNotEmpty) {
+      final dist = GeoUtils.distanceBetween(
+          firstItem.points.first.latLng, currentCenter);
+      if (dist < TimelineConstants.stayPointDistanceThreshold) {
+        return firstItem.startTime;
+      }
+    }
+    return null;
+  }
+
   List<TimelineItem> _clusterTimeline(
       List<LocationPoint> points, double timezoneOffset) {
     final List<TimelineItem> rawItems =
         _clusterTimelineRaw(points, timezoneOffset);
 
-    if (_previousDayLastStayPoint != null && _selectedDate != null) {
+    final appState = context.read<AppStateProvider>();
+    if (_selectedDate != null) {
+      _preloadNeighborDates(_selectedDate!, appState);
       final currentDayMidnight = DateTime.utc(
         _selectedDate!.year,
         _selectedDate!.month,
@@ -6461,62 +8570,471 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         0,
         0,
         0,
-      );
+      ).subtract(Duration(minutes: (timezoneOffset * 60).toInt()));
+
+      final prevStayPlace = _getPreviousDayLastStayPlace(
+          appState, _selectedDate!, timezoneOffset);
 
       if (rawItems.isNotEmpty) {
         final firstItem = rawItems.first;
-        if (firstItem.startTime.difference(currentDayMidnight).inMinutes > 1) {
+        final firstLocation = firstItem is TimelinePlace
+            ? firstItem.center
+            : (firstItem as TimelinePath).points.first.latLng;
+
+        final stayCenter = prevStayPlace != null
+            ? (GeoUtils.distanceBetween(prevStayPlace.center, firstLocation) <
+                    TimelineConstants.stayPointDistanceThreshold
+                ? prevStayPlace.center
+                : firstLocation)
+            : firstLocation;
+
+        final stayStartTime = prevStayPlace != null
+            ? (GeoUtils.distanceBetween(prevStayPlace.center, firstLocation) <
+                    TimelineConstants.stayPointDistanceThreshold
+                ? prevStayPlace.startTime
+                : currentDayMidnight)
+            : currentDayMidnight;
+
+        if (prevStayPlace != null &&
+            firstItem is TimelinePlace &&
+            GeoUtils.distanceBetween(prevStayPlace.center, firstItem.center) <
+                TimelineConstants.stayPointDistanceThreshold) {
+          final newPlace = TimelinePlace(
+            points: [...prevStayPlace.points, ...firstItem.points],
+            startTime: prevStayPlace.startTime,
+            endTime: firstItem.endTime,
+            center: firstItem.center,
+          );
+          newPlace.geotaggedPhotos = firstItem.geotaggedPhotos;
+          newPlace.ungeotaggedPhotos = firstItem.ungeotaggedPhotos;
+          rawItems[0] = newPlace;
+        } else if (firstItem.startTime.isAfter(currentDayMidnight) &&
+            firstItem.startTime.difference(currentDayMidnight).inMinutes > 1) {
           final stayPoints = [
             LocationPoint(
-              latitude: _previousDayLastStayPoint!.latitude,
-              longitude: _previousDayLastStayPoint!.longitude,
-              timestamp: currentDayMidnight,
+              latitude: stayCenter.latitude,
+              longitude: stayCenter.longitude,
+              timestamp: stayStartTime,
             ),
             LocationPoint(
-              latitude: _previousDayLastStayPoint!.latitude,
-              longitude: _previousDayLastStayPoint!.longitude,
+              latitude: stayCenter.latitude,
+              longitude: stayCenter.longitude,
               timestamp: firstItem.startTime,
             ),
           ];
 
           final initialStay = TimelinePlace(
             points: stayPoints,
-            startTime: currentDayMidnight,
+            startTime: stayStartTime,
             endTime: firstItem.startTime,
-            center: LatLng(_previousDayLastStayPoint!.latitude,
-                _previousDayLastStayPoint!.longitude),
+            center: stayCenter,
           );
 
           rawItems.insert(0, initialStay);
         }
-      } else {
+      } else if (prevStayPlace != null) {
         final currentDayEnd = currentDayMidnight.add(const Duration(hours: 24));
         final stayPoints = [
           LocationPoint(
-            latitude: _previousDayLastStayPoint!.latitude,
-            longitude: _previousDayLastStayPoint!.longitude,
-            timestamp: currentDayMidnight,
+            latitude: prevStayPlace.center.latitude,
+            longitude: prevStayPlace.center.longitude,
+            timestamp: prevStayPlace.startTime,
           ),
           LocationPoint(
-            latitude: _previousDayLastStayPoint!.latitude,
-            longitude: _previousDayLastStayPoint!.longitude,
+            latitude: prevStayPlace.center.latitude,
+            longitude: prevStayPlace.center.longitude,
             timestamp: currentDayEnd,
           ),
         ];
 
         final initialStay = TimelinePlace(
           points: stayPoints,
-          startTime: currentDayMidnight,
+          startTime: prevStayPlace.startTime,
           endTime: currentDayEnd,
-          center: LatLng(_previousDayLastStayPoint!.latitude,
-              _previousDayLastStayPoint!.longitude),
+          center: prevStayPlace.center,
         );
 
         rawItems.add(initialStay);
       }
+
+      // Check if last item of today extends into next day
+      if (rawItems.isNotEmpty && rawItems.last is TimelinePlace) {
+        final lastPlace = rawItems.last as TimelinePlace;
+        final nextDayEndTime = _getNextDayFirstMoveTime(
+            appState, _selectedDate!, timezoneOffset, lastPlace.center);
+        if (nextDayEndTime != null &&
+            nextDayEndTime.isAfter(lastPlace.endTime)) {
+          final newPlace = TimelinePlace(
+            points: lastPlace.points,
+            startTime: lastPlace.startTime,
+            endTime: nextDayEndTime,
+            center: lastPlace.center,
+          );
+          newPlace.geotaggedPhotos = lastPlace.geotaggedPhotos;
+          newPlace.ungeotaggedPhotos = lastPlace.ungeotaggedPhotos;
+          rawItems[rawItems.length - 1] = newPlace;
+        }
+      }
     }
 
-    return rawItems;
+    // Post-processing: Automatically merge adjacent TimelinePlace items if at same location (< 70m)
+    final double distThreshold = TimelineConstants.stayPointDistanceThreshold;
+    final List<TimelineItem> mergedItems = [];
+
+    for (final item in rawItems) {
+      if (mergedItems.isNotEmpty &&
+          mergedItems.last is TimelinePlace &&
+          item is TimelinePlace) {
+        final lastPlace = mergedItems.last as TimelinePlace;
+        final dist = GeoUtils.distanceBetween(lastPlace.center, item.center);
+        if (dist < distThreshold) {
+          final combinedPoints = [
+            ...lastPlace.points,
+            ...item.points,
+          ];
+          combinedPoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+          double latSum = 0;
+          double lngSum = 0;
+          for (final p in combinedPoints) {
+            latSum += p.latitude;
+            lngSum += p.longitude;
+          }
+          final newCenter = LatLng(
+              latSum / combinedPoints.length, lngSum / combinedPoints.length);
+
+          mergedItems[mergedItems.length - 1] = TimelinePlace(
+            points: combinedPoints,
+            startTime: lastPlace.startTime.isBefore(item.startTime)
+                ? lastPlace.startTime
+                : item.startTime,
+            endTime: lastPlace.endTime.isAfter(item.endTime)
+                ? lastPlace.endTime
+                : item.endTime,
+            center: newCenter,
+          );
+          continue;
+        }
+      }
+      mergedItems.add(item);
+    }
+
+    // Connect adjacent TimelinePlace items at different locations with a TimelinePath
+    final List<TimelineItem> finalItems = [];
+    for (int k = 0; k < mergedItems.length; k++) {
+      final item = mergedItems[k];
+      finalItems.add(item);
+      if (k < mergedItems.length - 1 &&
+          item is TimelinePlace &&
+          mergedItems[k + 1] is TimelinePlace) {
+        final nextPlace = mergedItems[k + 1] as TimelinePlace;
+        final dist = GeoUtils.distanceBetween(item.center, nextPlace.center);
+        final timeGapSec =
+            nextPlace.startTime.difference(item.endTime).inSeconds;
+        if (timeGapSec >= 10 || dist >= 5.0) {
+          final connectingPoints = [
+            LocationPoint(
+              latitude: item.center.latitude,
+              longitude: item.center.longitude,
+              timestamp: item.endTime,
+            ),
+            LocationPoint(
+              latitude: nextPlace.center.latitude,
+              longitude: nextPlace.center.longitude,
+              timestamp: nextPlace.startTime,
+            ),
+          ];
+          finalItems.add(TimelinePath(
+            points: connectingPoints,
+            startTime: item.endTime,
+            endTime: nextPlace.startTime,
+            distance: dist,
+          ));
+        }
+      }
+    }
+
+    return finalItems;
+  }
+
+  void _openAddPlaceSeparationDialog(
+    BuildContext context,
+    TimelinePath item,
+    AppStateProvider appState,
+    DateInfo dateInfo,
+  ) {
+    final settings = context.read<SettingsProvider>();
+    final offset = settings.geotagTimezone.toDouble();
+
+    double centerLat = 0;
+    double centerLng = 0;
+    if (item.points.isNotEmpty) {
+      centerLat = item.points.fold<double>(0, (sum, p) => sum + p.latitude) /
+          item.points.length;
+      centerLng = item.points.fold<double>(0, (sum, p) => sum + p.longitude) /
+          item.points.length;
+    }
+
+    final latCtrl = TextEditingController(text: centerLat.toStringAsFixed(6));
+    final lngCtrl = TextEditingController(text: centerLng.toStringAsFixed(6));
+
+    final midIndex =
+        (item.points.length / 2).floor().clamp(0, item.points.length - 1);
+    final midTimeUtc = item.points.isNotEmpty
+        ? item.points[midIndex].timestamp
+        : item.startTime;
+    final defaultArrivalLocal =
+        midTimeUtc.toUtc().add(Duration(minutes: (offset * 60).toInt()));
+    final defaultDepartureLocal =
+        defaultArrivalLocal.add(const Duration(minutes: 15));
+
+    TimeOfDay arrivalTime = TimeOfDay(
+      hour: defaultArrivalLocal.hour,
+      minute: defaultArrivalLocal.minute,
+    );
+    TimeOfDay departureTime = TimeOfDay(
+      hour: defaultDepartureLocal.hour,
+      minute: defaultDepartureLocal.minute,
+    );
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final arrivalStr =
+              '${arrivalTime.hour.toString().padLeft(2, '0')}:${arrivalTime.minute.toString().padLeft(2, '0')}';
+          final departureStr =
+              '${departureTime.hour.toString().padLeft(2, '0')}:${departureTime.minute.toString().padLeft(2, '0')}';
+
+          return AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.add_location_alt, color: Colors.deepOrange),
+                SizedBox(width: 8),
+                Text('Add Place (Separation)'),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Insert a place (stay point) into this road to separate it into 2 paths.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: latCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Latitude',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: lngCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Longitude',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text('Arrival Time (Thời gian đến):',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  InkWell(
+                    onTap: () async {
+                      final tod = await showTimePicker(
+                        context: context,
+                        initialTime: arrivalTime,
+                      );
+                      if (tod != null) {
+                        setDialogState(() {
+                          arrivalTime = tod;
+                        });
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .primaryContainer
+                            .withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.access_time,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: 8),
+                          Text(
+                            arrivalStr,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                          const Spacer(),
+                          const Text('Change',
+                              style:
+                                  TextStyle(fontSize: 12, color: Colors.blue)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text('Departure Time (Thời gian đi):',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  InkWell(
+                    onTap: () async {
+                      final tod = await showTimePicker(
+                        context: context,
+                        initialTime: departureTime,
+                      );
+                      if (tod != null) {
+                        setDialogState(() {
+                          departureTime = tod;
+                        });
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .secondaryContainer
+                            .withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.secondary,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.access_time_filled,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.secondary),
+                          const SizedBox(width: 8),
+                          Text(
+                            departureStr,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).colorScheme.secondary,
+                            ),
+                          ),
+                          const Spacer(),
+                          const Text('Change',
+                              style:
+                                  TextStyle(fontSize: 12, color: Colors.blue)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.add_location_alt, size: 16),
+                label: const Text('Add Place'),
+                onPressed: () async {
+                  final lat = double.tryParse(latCtrl.text);
+                  final lng = double.tryParse(lngCtrl.text);
+                  if (lat == null || lng == null) return;
+
+                  final localArr = DateTime(
+                    dateInfo.date.year,
+                    dateInfo.date.month,
+                    dateInfo.date.day,
+                    arrivalTime.hour,
+                    arrivalTime.minute,
+                    0,
+                  );
+                  final localDep = DateTime(
+                    dateInfo.date.year,
+                    dateInfo.date.month,
+                    dateInfo.date.day,
+                    departureTime.hour,
+                    departureTime.minute,
+                    0,
+                  );
+
+                  if (localDep.isBefore(localArr)) {
+                    _MacToastMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content:
+                            Text('Departure time must be after arrival time!'),
+                      ),
+                    );
+                    return;
+                  }
+
+                  final utcArr = localArr
+                      .subtract(Duration(minutes: (offset * 60).toInt()))
+                      .toUtc();
+                  final utcDep = localDep
+                      .subtract(Duration(minutes: (offset * 60).toInt()))
+                      .toUtc();
+
+                  final pArr = LocationPoint(
+                    latitude: lat,
+                    longitude: lng,
+                    timestamp: utcArr,
+                  );
+                  final pDep = LocationPoint(
+                    latitude: lat,
+                    longitude: lng,
+                    timestamp: utcDep,
+                  );
+
+                  final allDayPoints = List<LocationPoint>.from(
+                      appState.activePaths[dateInfo.filePath] ?? []);
+                  _pushUndoState(allDayPoints);
+
+                  allDayPoints.addAll([pArr, pDep]);
+                  allDayPoints
+                      .sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+                  await appState.saveListPoints(dateInfo, allDayPoints);
+                  _loadPointsForSelectedDate();
+
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (context.mounted) {
+                    _MacToastMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                            'Added place separation ($arrivalStr - $departureStr)'),
+                      ),
+                    );
+                  }
+                },
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _showTimelineItemContextMenu(
@@ -6525,6 +9043,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       TimelineItem item,
       int index,
       List<TimelineItem> allItems) async {
+    if (_ignoreNextPlaceContextMenu) {
+      _ignoreNextPlaceContextMenu = false;
+      return;
+    }
+
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final relativeRect = RelativeRect.fromRect(
       Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
@@ -6538,6 +9061,16 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
     if (item is TimelinePlace) {
       menuItems = const [
+        PopupMenuItem(
+          value: 'delete_place',
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline, size: 18, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Delete Place (Merge Paths)'),
+            ],
+          ),
+        ),
         PopupMenuItem(
           value: 'copy_json',
           child: Row(
@@ -6564,6 +9097,16 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           .containsKey(_getSegmentKey(item.startTime, item.endTime));
 
       menuItems = [
+        const PopupMenuItem(
+          value: 'add_place',
+          child: Row(
+            children: [
+              Icon(Icons.add_location_alt, size: 18, color: Colors.deepOrange),
+              SizedBox(width: 8),
+              Text('Add Place (Separation)'),
+            ],
+          ),
+        ),
         if (hasBackup)
           const PopupMenuItem(
             value: 'undo_snap',
@@ -6638,7 +9181,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       ];
     }
 
-    final selected = await showMenu<String>(
+    final selected = await showFadeMenu<String>(
       context: context,
       position: relativeRect,
       items: menuItems,
@@ -6650,6 +9193,62 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     }
   }
 
+  Future<void> _deletePlaceAndMergePaths(
+    BuildContext context,
+    TimelinePlace item,
+    AppStateProvider appState,
+    DateInfo dateInfo,
+  ) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Place'),
+        content: const Text(
+          'Delete this place (stay point)? The paths before and after will merge into a single continuous road segment.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete & Merge'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !context.mounted) return;
+
+    final allDayPoints =
+        List<LocationPoint>.from(appState.activePaths[dateInfo.filePath] ?? []);
+    _pushUndoState(allDayPoints);
+
+    final placePointTimestamps =
+        item.points.map((p) => p.timestamp.millisecondsSinceEpoch).toSet();
+
+    allDayPoints.removeWhere((p) =>
+        placePointTimestamps.contains(p.timestamp.millisecondsSinceEpoch));
+
+    allDayPoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    await appState.saveListPoints(dateInfo, allDayPoints);
+    _loadPointsForSelectedDate();
+
+    if (context.mounted) {
+      _MacToastMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Deleted place and merged connecting paths.'),
+        ),
+      );
+    }
+  }
+
   void _handleTimelineMenuSelection(
       BuildContext context,
       String value,
@@ -6658,11 +9257,15 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       List<TimelineItem> allItems,
       AppStateProvider appState,
       DateInfo dateInfo) async {
-    if (value == 'undo_snap' && item is TimelinePath) {
+    if (value == 'delete_place' && item is TimelinePlace) {
+      _deletePlaceAndMergePaths(context, item, appState, dateInfo);
+    } else if (value == 'add_place' && item is TimelinePath) {
+      _openAddPlaceSeparationDialog(context, item, appState, dateInfo);
+    } else if (value == 'undo_snap' && item is TimelinePath) {
       _undoSnapSegment(item, appState, dateInfo);
     } else if (value == 'snap_osrm' && item is TimelinePath) {
       final dayPoints = appState.activePaths[dateInfo.filePath] ?? [];
-      _snapSegmentToRoads(context, appState, dateInfo, dayPoints, item);
+      _snapSegmentToRoads(context, appState, dateInfo, dayPoints, item, null);
     } else if (value == 'add_favorite' && item is TimelinePath) {
       _addSegmentToFavorites(context, item);
     } else if (value == 'snap_favorite' && item is TimelinePath) {
@@ -6708,6 +9311,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       bool isLast) {
     final item = allItems[index];
     const blueAxis = TimelineConstants.timelineAxisColor;
+
     final hasAnySelection = _selectedTimelineItemIndex != null;
     final lineActiveColor = hasAnySelection
         ? (isSelected ? blueAxis : blueAxis.withValues(alpha: 0.25))
@@ -6823,33 +9427,42 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // Place name box
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .surfaceContainerHighest,
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Flexible(
-                                          child: Text(
-                                            'Place (${item.points.length} pts)',
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.w600,
-                                                fontSize: 13),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                        const Icon(Icons.arrow_drop_down,
-                                            size: 18),
-                                      ],
-                                    ),
+                                  // Place name badge (tap → dropdown search)
+                                  _PlaceNameBadge(
+                                    lat: item.center.latitude,
+                                    lng: item.center.longitude,
+                                    pointsCount: item.points.length,
+                                    cachedName: _geocodeCache[
+                                        '${item.center.latitude.toStringAsFixed(4)},${item.center.longitude.toStringAsFixed(4)}'],
+                                    onAutoLookup: () {
+                                      final key =
+                                          '${item.center.latitude.toStringAsFixed(4)},${item.center.longitude.toStringAsFixed(4)}';
+                                      if (!_geocodingInProgress.contains(key)) {
+                                        _geocodingInProgress.add(key);
+                                        NominatimService.instance
+                                            .reverseLookup(item.center.latitude,
+                                                item.center.longitude)
+                                            .then((name) {
+                                          if (mounted) {
+                                            setState(() {
+                                              _geocodeCache[key] = name;
+                                              _geocodingInProgress.remove(key);
+                                            });
+                                          }
+                                        });
+                                      }
+                                    },
+                                    onNameSelected: (name) {
+                                      final key =
+                                          '${item.center.latitude.toStringAsFixed(4)},${item.center.longitude.toStringAsFixed(4)}';
+                                      setState(() {
+                                        _geocodeCache[key] = name;
+                                      });
+                                      NominatimService.instance.setCustomName(
+                                          item.center.latitude,
+                                          item.center.longitude,
+                                          name);
+                                    },
                                   ),
                                   const SizedBox(height: 4),
                                   // Coordinates
@@ -6879,15 +9492,20 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                               context.read<AppStateProvider>();
                                           final dateInfo =
                                               _currentDateInfo(appState);
+                                          final startLocal = item.startTime
+                                              .toUtc()
+                                              .add(Duration(
+                                                  minutes: (timezoneOffset * 60)
+                                                      .toInt()));
                                           final tod = await showTimePicker(
                                             context: context,
-                                            initialTime: TimeOfDay.fromDateTime(
-                                                item.startTime.toLocal()),
+                                            initialTime: TimeOfDay(
+                                              hour: startLocal.hour,
+                                              minute: startLocal.minute,
+                                            ),
                                           );
                                           if (tod != null) {
-                                            final startLocal =
-                                                item.startTime.toLocal();
-                                            final newStartLocal = DateTime(
+                                            final newStartLocal = DateTime.utc(
                                               startLocal.year,
                                               startLocal.month,
                                               startLocal.day,
@@ -6895,10 +9513,15 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                               tod.minute,
                                               startLocal.second,
                                             );
+                                            final newStartUtc =
+                                                newStartLocal.subtract(Duration(
+                                                    minutes:
+                                                        (timezoneOffset * 60)
+                                                            .toInt()));
                                             _updatePlaceTimeBounds(
                                               item,
-                                              newStartLocal,
-                                              item.endTime.toLocal(),
+                                              newStartUtc,
+                                              item.endTime.toUtc(),
                                               appState,
                                               dateInfo,
                                             );
@@ -6976,7 +9599,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                                             if (newEndLocal.isBefore(
                                                 item.startTime.toLocal())) {
                                               if (context.mounted) {
-                                                ScaffoldMessenger.of(context)
+                                                _MacToastMessenger.of(context)
                                                     .showSnackBar(
                                                   const SnackBar(
                                                       content: Text(
@@ -7445,6 +10068,57 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     return widgets;
   }
 
+  void _interpolatePointsRange(List<LocationPoint> points, int start, int end) {
+    if (end - start <= 1) return;
+
+    final pStart = points[start];
+    final pEnd = points[end];
+    final timeStart = pStart.timestamp;
+    final timeEnd = pEnd.timestamp;
+    final totalDuration = timeEnd.difference(timeStart);
+
+    final List<double> distances = [0.0];
+    double totalDist = 0.0;
+    for (int i = start; i < end; i++) {
+      final d =
+          GeoUtils.distanceBetween(points[i].latLng, points[i + 1].latLng);
+      totalDist += d;
+      distances.add(totalDist);
+    }
+
+    for (int i = start + 1; i < end; i++) {
+      final oldPt = points[i];
+      final double progress = totalDist > 0
+          ? distances[i - start] / totalDist
+          : (i - start) / (end - start);
+
+      final int offsetMs = (totalDuration.inMilliseconds * progress).toInt();
+      final newTime = timeStart.add(Duration(milliseconds: offsetMs));
+
+      points[i] = LocationPoint(
+        latitude: oldPt.latitude,
+        longitude: oldPt.longitude,
+        timestamp: newTime,
+        elevation: oldPt.elevation,
+        activityType: oldPt.activityType,
+      );
+    }
+  }
+
+  LocationPoint _findNearestOldPoint(
+      LocationPoint newPt, List<LocationPoint> originalPoints) {
+    LocationPoint nearest = originalPoints.first;
+    double minDist = double.infinity;
+    for (final oldPt in originalPoints) {
+      final dist = GeoUtils.distanceBetween(newPt.latLng, oldPt.latLng);
+      if (dist < minDist) {
+        minDist = dist;
+        nearest = oldPt;
+      }
+    }
+    return nearest;
+  }
+
   String _getSegmentKey(DateTime start, DateTime end) =>
       '${start.millisecondsSinceEpoch}_${end.millisecondsSinceEpoch}';
 
@@ -7453,7 +10127,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       AppStateProvider appState,
       DateInfo dateInfo,
       List<LocationPoint> dayPoints,
-      TimelinePath segment) async {
+      TimelinePath segment,
+      LatLng? draggedLatLng,
+      {bool forceEvenTimeDistribution = false}) async {
     if (segment.points.isEmpty) return;
 
     final segmentKey = _getSegmentKey(segment.startTime, segment.endTime);
@@ -7465,7 +10141,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     final googleApiKey = settings.googleMapsApiKey;
 
     if (useGoogle && googleApiKey.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      _MacToastMessenger.of(context).showSnackBar(
         const SnackBar(
             content:
                 Text('Please configure your Google Maps API Key in Settings.')),
@@ -7651,7 +10327,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             final responseBody = await response.transform(utf8.decoder).join();
             final data = jsonDecode(responseBody);
             if (data['matchings'] != null &&
-                (data['matchings'] as List).isNotEmpty) {
+                (data['matchings'] as List).length == 1) {
               matchOk = true;
               for (final matchItem in data['matchings']) {
                 final geometry = matchItem['geometry'];
@@ -7735,9 +10411,97 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       Navigator.of(context).pop();
     }
 
+    if (newPoints.isNotEmpty) {
+      if (forceEvenTimeDistribution) {
+        if (draggedLatLng != null) {
+          // Find the dragged point index in newPoints
+          int draggedIdxInNew = 0;
+          double minD = double.infinity;
+          for (int i = 0; i < newPoints.length; i++) {
+            final d =
+                GeoUtils.distanceBetween(newPoints[i].latLng, draggedLatLng);
+            if (d < minD) {
+              minD = d;
+              draggedIdxInNew = i;
+            }
+          }
+
+          // Find anchorStart (closest preceding point near its original position)
+          int anchorStart = 0;
+          for (int k = draggedIdxInNew; k >= 0; k--) {
+            final nearestOld =
+                _findNearestOldPoint(newPoints[k], originalPoints);
+            final dist = GeoUtils.distanceBetween(
+                newPoints[k].latLng, nearestOld.latLng);
+            if (dist < 15.0) {
+              anchorStart = k;
+              break;
+            }
+          }
+
+          // Find anchorEnd (closest succeeding point near its original position)
+          int anchorEnd = newPoints.length - 1;
+          for (int m = draggedIdxInNew; m < newPoints.length; m++) {
+            final nearestOld =
+                _findNearestOldPoint(newPoints[m], originalPoints);
+            final dist = GeoUtils.distanceBetween(
+                newPoints[m].latLng, nearestOld.latLng);
+            if (dist < 15.0) {
+              anchorEnd = m;
+              break;
+            }
+          }
+
+          // Assign original timestamps to points outside the affected range
+          for (int i = 0; i <= anchorStart; i++) {
+            final nearestOld =
+                _findNearestOldPoint(newPoints[i], originalPoints);
+            newPoints[i] = LocationPoint(
+              latitude: newPoints[i].latitude,
+              longitude: newPoints[i].longitude,
+              timestamp: nearestOld.timestamp,
+              elevation: nearestOld.elevation,
+              activityType: nearestOld.activityType,
+            );
+          }
+          for (int i = anchorEnd; i < newPoints.length; i++) {
+            final nearestOld =
+                _findNearestOldPoint(newPoints[i], originalPoints);
+            newPoints[i] = LocationPoint(
+              latitude: newPoints[i].latitude,
+              longitude: newPoints[i].longitude,
+              timestamp: nearestOld.timestamp,
+              elevation: nearestOld.elevation,
+              activityType: nearestOld.activityType,
+            );
+          }
+
+          // Interpolate timestamps inside the affected range
+          if (anchorEnd > anchorStart + 1) {
+            _interpolatePointsRange(newPoints, anchorStart, anchorEnd);
+          }
+        } else {
+          // If no draggedLatLng is provided, interpolate the entire segment
+          _interpolatePointsRange(newPoints, 0, newPoints.length - 1);
+        }
+      } else {
+        // Without Shift: Lock all points to their closest original timestamps
+        for (int i = 0; i < newPoints.length; i++) {
+          final nearestOld = _findNearestOldPoint(newPoints[i], originalPoints);
+          newPoints[i] = LocationPoint(
+            latitude: newPoints[i].latitude,
+            longitude: newPoints[i].longitude,
+            timestamp: nearestOld.timestamp,
+            elevation: nearestOld.elevation,
+            activityType: nearestOld.activityType,
+          );
+        }
+      }
+    }
+
     if (newPoints.isEmpty) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        _MacToastMessenger.of(context).showSnackBar(
           SnackBar(
               content: Text(
                   'Failed to route segment using ${useGoogle ? 'Google Roads API' : 'OSRM'}.')),
@@ -7769,7 +10533,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     appState.saveListPoints(dateInfo, updatedPoints);
 
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      _MacToastMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Segment successfully snapped to roads!')),
       );
     }
@@ -7829,7 +10593,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
     if (!await origFile.exists()) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        _MacToastMessenger.of(context).showSnackBar(
           const SnackBar(
               content: Text('No original backup file found for this date.')),
         );
@@ -7853,7 +10617,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
       if (origSegmentPoints.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          _MacToastMessenger.of(context).showSnackBar(
             const SnackBar(
                 content: Text('No original points found for this segment.')),
           );
@@ -7888,14 +10652,14 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       appState.saveListPoints(dateInfo, updated);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        _MacToastMessenger.of(context).showSnackBar(
           const SnackBar(
               content: Text('Road segment restored to original raw state.')),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        _MacToastMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to restore segment: $e')),
         );
       }
@@ -7909,43 +10673,101 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
     final updated = List<LocationPoint>.from(dayPoints);
     final placePts = place.points;
-    final origStart = place.startTime;
-    final origEnd = place.endTime;
+    final origStart = place.startTime.toUtc();
+    final origEnd = place.endTime.toUtc();
+    var newStartUtc = newStart.toUtc();
+    var newEndUtc = newEnd.toUtc();
 
-    // Save adjacent path segments for session Undo
     final settings = context.read<SettingsProvider>();
     final timelineItems =
         _clusterTimeline(dayPoints, settings.geotagTimezone.toDouble());
     final placeIdx =
         timelineItems.indexWhere((t) => t is TimelinePlace && t == place);
+
+    TimelinePath? prevPath;
+    TimelinePath? nextPath;
+
     if (placeIdx != -1) {
       if (placeIdx - 1 >= 0 && timelineItems[placeIdx - 1] is TimelinePath) {
-        final seg = timelineItems[placeIdx - 1] as TimelinePath;
-        final key = _getSegmentKey(seg.startTime, seg.endTime);
+        prevPath = timelineItems[placeIdx - 1] as TimelinePath;
+        final key = _getSegmentKey(prevPath.startTime, prevPath.endTime);
         _unsnappedSegmentBackups.putIfAbsent(
-            key, () => List<LocationPoint>.from(seg.points));
+            key, () => List<LocationPoint>.from(prevPath!.points));
       }
       if (placeIdx + 1 < timelineItems.length &&
           timelineItems[placeIdx + 1] is TimelinePath) {
-        final seg = timelineItems[placeIdx + 1] as TimelinePath;
-        final key = _getSegmentKey(seg.startTime, seg.endTime);
+        nextPath = timelineItems[placeIdx + 1] as TimelinePath;
+        final key = _getSegmentKey(nextPath.startTime, nextPath.endTime);
         _unsnappedSegmentBackups.putIfAbsent(
-            key, () => List<LocationPoint>.from(seg.points));
+            key, () => List<LocationPoint>.from(nextPath!.points));
       }
     }
 
+    // 1. Constrain bounds within adjacent path segment start/end
+    if (prevPath != null) {
+      if (newStartUtc.isBefore(prevPath.startTime.toUtc())) {
+        newStartUtc = prevPath.startTime.toUtc();
+      }
+    }
+    if (nextPath != null) {
+      if (newEndUtc.isAfter(nextPath.endTime.toUtc())) {
+        newEndUtc = nextPath.endTime.toUtc();
+      }
+    }
+
+    if (newEndUtc.difference(newStartUtc) < const Duration(minutes: 1)) {
+      newEndUtc = newStartUtc.add(const Duration(minutes: 1));
+    }
+
+    _pushUndoState(dayPoints);
+
+    // 2. If newStartUtc reaches or precedes prevPath.startTime, delete prevPath points
+    if (prevPath != null && !newStartUtc.isAfter(prevPath.startTime.toUtc())) {
+      final prevPointTimestamps = prevPath.points
+          .map((p) => p.timestamp.millisecondsSinceEpoch)
+          .toSet();
+      final placeTimestamps =
+          placePts.map((p) => p.timestamp.millisecondsSinceEpoch).toSet();
+      updated.removeWhere((p) =>
+          prevPointTimestamps.contains(p.timestamp.millisecondsSinceEpoch) &&
+          !placeTimestamps.contains(p.timestamp.millisecondsSinceEpoch));
+    } else if (prevPath != null && newStartUtc.isBefore(origStart)) {
+      updated.removeWhere((p) =>
+          prevPath!.points.contains(p) &&
+          !p.timestamp.toUtc().isBefore(newStartUtc));
+    }
+
+    // 3. If newEndUtc reaches or exceeds nextPath.endTime, delete nextPath points
+    if (nextPath != null && !newEndUtc.isBefore(nextPath.endTime.toUtc())) {
+      final nextPointTimestamps = nextPath.points
+          .map((p) => p.timestamp.millisecondsSinceEpoch)
+          .toSet();
+      final placeTimestamps =
+          placePts.map((p) => p.timestamp.millisecondsSinceEpoch).toSet();
+      updated.removeWhere((p) =>
+          nextPointTimestamps.contains(p.timestamp.millisecondsSinceEpoch) &&
+          !placeTimestamps.contains(p.timestamp.millisecondsSinceEpoch));
+    } else if (nextPath != null && newEndUtc.isAfter(origEnd)) {
+      updated.removeWhere((p) =>
+          nextPath!.points.contains(p) &&
+          !p.timestamp.toUtc().isAfter(newEndUtc));
+    }
+
+    // 4. Update timestamps for the points of this place
     final totalOldDuration = origEnd.difference(origStart).inMilliseconds;
-    final totalNewDuration = newEnd.difference(newStart).inMilliseconds;
+    final totalNewDuration = newEndUtc.difference(newStartUtc).inMilliseconds;
 
     for (int i = 0; i < updated.length; i++) {
       final p = updated[i];
       if (placePts.contains(p)) {
-        final elapsed = p.timestamp.difference(origStart).inMilliseconds;
+        final elapsed =
+            p.timestamp.toUtc().difference(origStart).inMilliseconds;
         final ratio = totalOldDuration > 0
             ? (elapsed / totalOldDuration).clamp(0.0, 1.0)
             : 0.0;
-        final newTimestamp = newStart
-            .add(Duration(milliseconds: (totalNewDuration * ratio).round()));
+        final newTimestamp = newStartUtc
+            .add(Duration(milliseconds: (totalNewDuration * ratio).round()))
+            .toUtc();
         updated[i] = LocationPoint(
           latitude: p.latitude,
           longitude: p.longitude,
@@ -7967,10 +10789,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     appState.saveListPoints(dateInfo, updated);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      _MacToastMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-              'Place time range updated to ${DateFormat('HH:mm:ss').format(newStart.toLocal())} – ${DateFormat('HH:mm:ss').format(newEnd.toLocal())}'),
+              'Place time range updated to ${DateFormat('HH:mm').format(newStartUtc.toLocal())} – ${DateFormat('HH:mm').format(newEndUtc.toLocal())}'),
         ),
       );
     }
@@ -7979,7 +10801,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   void _copyToClipboard(
       BuildContext context, String text, String successMessage) {
     Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(
+    _MacToastMessenger.of(context).showSnackBar(
       SnackBar(content: Text(successMessage)),
     );
   }
@@ -8001,7 +10823,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
   void _copyJsonWithNeighbors(
       BuildContext context, List<TimelineItem> allItems, int currentIndex) {
-    final messenger = ScaffoldMessenger.of(context);
+    final messenger = _MacToastMessenger.of(context);
     final ctrl = TextEditingController(text: '2');
     showDialog(
       context: context,
@@ -8404,24 +11226,51 @@ class _CustomCalendarDialogState extends State<CustomCalendarDialog> {
                   }
                 }
 
+                final isSelected = widget.initialDate.year == date.year &&
+                    widget.initialDate.month == date.month &&
+                    widget.initialDate.day == date.day;
+
+                final isToday = date.year == DateTime.now().year &&
+                    date.month == DateTime.now().month &&
+                    date.day == DateTime.now().day;
+
                 Color cellColor = Colors.transparent;
                 Color textColor = Theme.of(context).colorScheme.onSurface;
 
-                if (dayInfo != null) {
-                  if (dayInfo.state == 'snapped') {
-                    cellColor = Colors.green.shade100;
-                    textColor = Colors.green.shade900;
-                  } else if (dayInfo.state == 'edited') {
-                    cellColor = Colors.blue.shade100;
-                    textColor = Colors.blue.shade900;
+                if (dayInfo != null && dayInfo.filePath.isNotEmpty) {
+                  if (dayInfo.state == 'edited' || dayInfo.state == 'snapped') {
+                    // Edit rồi -> Màu shade50 (tím nhạt)
+                    cellColor = Colors.purple.shade50;
+                    textColor = Colors.purple.shade900;
                   } else {
-                    // Unedited date -> White instead of grey
+                    // Chưa edit (có timeline data) -> Màu trắng
                     cellColor = Colors.white;
                     textColor = Colors.grey.shade900;
                   }
+                } else {
+                  // Ko có data -> Trong suốt (trùng màu nền)
+                  cellColor = Colors.transparent;
                 }
 
-                Color? dotColor;
+                if (isSelected) {
+                  cellColor = Theme.of(context).colorScheme.primary;
+                  textColor = Theme.of(context).colorScheme.onPrimary;
+                } else if (isToday) {
+                  textColor = Theme.of(context).colorScheme.primary;
+                }
+
+                Border? cellBorder;
+                if (isSelected) {
+                  cellBorder = Border.all(
+                      color: Theme.of(context).colorScheme.primary, width: 2);
+                } else if (isToday) {
+                  cellBorder = Border.all(
+                      color: Theme.of(context).colorScheme.primary, width: 1.5);
+                }
+
+                bool hasPhotos = false;
+                int missingCount = 0;
+                String? missingTooltipMsg;
                 if (widget.photos != null && widget.photos!.isNotEmpty) {
                   final photosOnDate = widget.photos!
                       .where((p) =>
@@ -8432,61 +11281,104 @@ class _CustomCalendarDialogState extends State<CustomCalendarDialog> {
                       .toList();
 
                   if (photosOnDate.isNotEmpty) {
-                    final allGeotagged =
-                        photosOnDate.every((p) => p.gpsLatLng != null);
-                    dotColor = allGeotagged ? Colors.purple : Colors.blue;
+                    hasPhotos = true;
+                    final bool missingGeotag =
+                        photosOnDate.any((p) => p.gpsLatLng == null);
+                    final bool missingLens =
+                        photosOnDate.any((p) => !p.hasLensInfo);
+
+                    if (missingGeotag && missingLens) {
+                      missingCount = 2;
+                      missingTooltipMsg = 'Thiếu Geotag & thông tin Lens';
+                    } else if (missingGeotag) {
+                      missingCount = 1;
+                      missingTooltipMsg = 'Thiếu toạ độ Geotag';
+                    } else if (missingLens) {
+                      missingCount = 1;
+                      missingTooltipMsg = 'Thiếu thông tin Lens';
+                    }
                   }
                 }
 
-                final isSelected = widget.initialDate.year == date.year &&
-                    widget.initialDate.month == date.month &&
-                    widget.initialDate.day == date.day;
+                Widget cellChild = Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: cellColor,
+                        borderRadius: BorderRadius.circular(8),
+                        border: cellBorder,
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            day.toString(),
+                            style: TextStyle(
+                              fontSize: 11,
+                              height: 1.0,
+                              fontWeight: isSelected || isToday
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                              color: textColor,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          if (hasPhotos)
+                            Container(
+                              width: 4.5,
+                              height: 4.5,
+                              decoration: BoxDecoration(
+                                color:
+                                    isSelected ? Colors.white : Colors.purple,
+                                shape: BoxShape.circle,
+                              ),
+                            )
+                          else
+                            const SizedBox(height: 4.5),
+                        ],
+                      ),
+                    ),
+                    if (missingCount > 0)
+                      Positioned(
+                        top: -3,
+                        right: -3,
+                        child: Container(
+                          width: 14,
+                          height: 14,
+                          alignment: Alignment.center,
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            missingCount.toString(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 8.5,
+                              fontWeight: FontWeight.bold,
+                              height: 1.0,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+
+                if (missingTooltipMsg != null) {
+                  cellChild = Tooltip(
+                    message: missingTooltipMsg,
+                    child: cellChild,
+                  );
+                }
 
                 return InkWell(
                   onTap: () {
                     Navigator.pop(context, date);
                   },
                   borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: cellColor,
-                      borderRadius: BorderRadius.circular(8),
-                      border: isSelected
-                          ? Border.all(
-                              color: Theme.of(context).colorScheme.primary,
-                              width: 2)
-                          : null,
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          day.toString(),
-                          style: TextStyle(
-                            fontSize: 11,
-                            height: 1.0,
-                            fontWeight: isSelected
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                            color: textColor,
-                          ),
-                        ),
-                        SizedBox(height: dotColor != null ? 3 : 0),
-                        if (dotColor != null)
-                          Container(
-                            width: 4.5,
-                            height: 4.5,
-                            decoration: BoxDecoration(
-                              color: isSelected ? Colors.white : dotColor,
-                              shape: BoxShape.circle,
-                            ),
-                          )
-                        else
-                          const SizedBox(height: 4.5),
-                      ],
-                    ),
-                  ),
+                  child: cellChild,
                 );
               },
             ),
@@ -8543,11 +11435,13 @@ class MonthlyDistanceChart extends StatefulWidget {
 class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
   late String _mode; // 'daily', 'monthly', 'yearly'
   int? _hoveredIndex;
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _mode = widget.chartMode;
+    _scrollToSelectedDate();
   }
 
   @override
@@ -8555,7 +11449,40 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.chartMode != widget.chartMode) {
       _mode = widget.chartMode;
+      _scrollToSelectedDate();
+    } else if (oldWidget.selectedDate != widget.selectedDate) {
+      _scrollToSelectedDate();
     }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToSelectedDate() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      int targetIndex = 0;
+      if (_mode == 'daily') {
+        targetIndex = widget.selectedDate.day - 1;
+      } else if (_mode == 'monthly') {
+        targetIndex = widget.selectedDate.month - 1;
+      } else {
+        targetIndex = 3;
+      }
+      final double itemWidth =
+          _mode == 'daily' ? 38.0 : (_mode == 'monthly' ? 43.0 : 53.0);
+      final double targetOffset = (targetIndex * itemWidth) -
+          (_scrollController.position.viewportDimension / 2) +
+          (itemWidth / 2);
+      _scrollController.animateTo(
+        targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   String _formatDistance(double meters) {
@@ -8720,13 +11647,102 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        '$titleText ($currentModeTotal)',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleSmall
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                        overflow: TextOverflow.ellipsis,
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              '$titleText ($currentModeTotal)',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.bold),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (selectedDateInfo.filePath.isNotEmpty) ...[
+                            const SizedBox(width: 6),
+                            InkWell(
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: () async {
+                                final appState =
+                                    context.read<AppStateProvider>();
+                                await appState
+                                    .restoreDateToOriginal(selectedDateInfo);
+                                if (context.mounted) {
+                                  _MacToastMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          'Restored ${DateFormat('yyyy-MM-dd').format(selectedDateInfo.date)} to original state.'),
+                                      duration: const Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
+                                widget.onDateSelected(widget.selectedDate);
+                              },
+                              child: Tooltip(
+                                message: 'Restore to Original Raw Track',
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: selectedDateInfo.state == 'edited' ||
+                                            selectedDateInfo.state == 'snapped'
+                                        ? Theme.of(context)
+                                            .colorScheme
+                                            .primaryContainer
+                                        : Theme.of(context)
+                                            .colorScheme
+                                            .surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .outlineVariant
+                                          .withValues(alpha: 0.5),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.restart_alt,
+                                          size: 13,
+                                          color: selectedDateInfo.state ==
+                                                      'edited' ||
+                                                  selectedDateInfo.state ==
+                                                      'snapped'
+                                              ? Theme.of(context)
+                                                  .colorScheme
+                                                  .primary
+                                              : Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        'Restore',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: selectedDateInfo.state ==
+                                                      'edited' ||
+                                                  selectedDateInfo.state ==
+                                                      'snapped'
+                                              ? Theme.of(context)
+                                                  .colorScheme
+                                                  .primary
+                                              : Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       if (hoverSubtitle != null) ...[
                         const SizedBox(height: 2),
@@ -8849,6 +11865,7 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                   },
                 ),
                 child: ListView.builder(
+                  controller: _scrollController,
                   physics: const BouncingScrollPhysics(
                       parent: AlwaysScrollableScrollPhysics()),
                   scrollDirection: Axis.horizontal,
@@ -8892,6 +11909,7 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                     }
 
                     return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
                       onTap: () {
                         setState(() {
                           _hoveredIndex = index;
@@ -8927,6 +11945,7 @@ class _MonthlyDistanceChartState extends State<MonthlyDistanceChart> {
                             ? 30
                             : (_mode == 'monthly' ? 35 : 45),
                         margin: const EdgeInsets.symmetric(horizontal: 4),
+                        color: Colors.transparent,
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
@@ -9213,24 +12232,51 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
                 }
               }
 
+              final isSelected = widget.selectedDate.year == date.year &&
+                  widget.selectedDate.month == date.month &&
+                  widget.selectedDate.day == date.day;
+
+              final isToday = date.year == DateTime.now().year &&
+                  date.month == DateTime.now().month &&
+                  date.day == DateTime.now().day;
+
               Color cellColor = Colors.transparent;
               Color textColor = Theme.of(context).colorScheme.onSurface;
 
-              if (dayInfo != null) {
-                if (dayInfo.state == 'snapped') {
-                  cellColor = Colors.green.shade100;
-                  textColor = Colors.green.shade900;
-                } else if (dayInfo.state == 'edited') {
-                  cellColor = Colors.blue.shade100;
-                  textColor = Colors.blue.shade900;
+              if (dayInfo != null && dayInfo.filePath.isNotEmpty) {
+                if (dayInfo.state == 'edited' || dayInfo.state == 'snapped') {
+                  // Edit rồi -> Màu shade50 (tím nhạt)
+                  cellColor = Colors.purple.shade50;
+                  textColor = Colors.purple.shade900;
                 } else {
-                  // Unedited date -> White instead of grey
+                  // Chưa edit (có timeline data) -> Màu trắng
                   cellColor = Colors.white;
                   textColor = Colors.grey.shade900;
                 }
+              } else {
+                // Ko có data -> Trong suốt (trùng màu nền)
+                cellColor = Colors.transparent;
               }
 
-              Color? dotColor;
+              if (isSelected) {
+                cellColor = Theme.of(context).colorScheme.primary;
+                textColor = Theme.of(context).colorScheme.onPrimary;
+              } else if (isToday) {
+                textColor = Theme.of(context).colorScheme.primary;
+              }
+
+              Border? cellBorder;
+              if (isSelected) {
+                cellBorder = Border.all(
+                    color: Theme.of(context).colorScheme.primary, width: 2);
+              } else if (isToday) {
+                cellBorder = Border.all(
+                    color: Theme.of(context).colorScheme.primary, width: 1.5);
+              }
+
+              bool hasPhotos = false;
+              int missingCount = 0;
+              String? missingTooltipMsg;
               if (widget.photos != null && widget.photos!.isNotEmpty) {
                 final photosOnDate = widget.photos!
                     .where((p) =>
@@ -9241,68 +12287,103 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
                     .toList();
 
                 if (photosOnDate.isNotEmpty) {
-                  final allGeotagged =
-                      photosOnDate.every((p) => p.gpsLatLng != null);
-                  dotColor = allGeotagged ? Colors.purple : Colors.blue;
+                  hasPhotos = true;
+                  final bool missingGeotag =
+                      photosOnDate.any((p) => p.gpsLatLng == null);
+                  final bool missingLens =
+                      photosOnDate.any((p) => !p.hasLensInfo);
+
+                  if (missingGeotag && missingLens) {
+                    missingCount = 2;
+                    missingTooltipMsg = 'Thiếu Geotag & thông tin Lens';
+                  } else if (missingGeotag) {
+                    missingCount = 1;
+                    missingTooltipMsg = 'Thiếu toạ độ Geotag';
+                  } else if (missingLens) {
+                    missingCount = 1;
+                    missingTooltipMsg = 'Thiếu thông tin Lens';
+                  }
                 }
               }
 
-              final isSelected = widget.selectedDate.year == date.year &&
-                  widget.selectedDate.month == date.month &&
-                  widget.selectedDate.day == date.day;
+              Widget cellChild = Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: cellColor,
+                      borderRadius: BorderRadius.circular(8),
+                      border: cellBorder,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          day.toString(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            height: 1.0,
+                            fontWeight: isSelected || isToday
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: textColor,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        if (hasPhotos)
+                          Container(
+                            width: 4.5,
+                            height: 4.5,
+                            decoration: BoxDecoration(
+                              color: isSelected ? Colors.white : Colors.purple,
+                              shape: BoxShape.circle,
+                            ),
+                          )
+                        else
+                          const SizedBox(height: 4.5),
+                      ],
+                    ),
+                  ),
+                  if (missingCount > 0)
+                    Positioned(
+                      top: -3,
+                      right: -3,
+                      child: Container(
+                        width: 14,
+                        height: 14,
+                        alignment: Alignment.center,
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          missingCount.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.bold,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+
+              if (missingTooltipMsg != null) {
+                cellChild = Tooltip(
+                  message: missingTooltipMsg,
+                  child: cellChild,
+                );
+              }
 
               return InkWell(
                 onTap: () {
                   widget.onDateSelected(date);
                 },
                 borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? Theme.of(context).colorScheme.primary
-                        : cellColor,
-                    borderRadius: BorderRadius.circular(8),
-                    border: isSelected
-                        ? null
-                        : (date.year == DateTime.now().year &&
-                                date.month == DateTime.now().month &&
-                                date.day == DateTime.now().day)
-                            ? Border.all(
-                                color: Theme.of(context).colorScheme.primary,
-                                width: 1)
-                            : null,
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        day.toString(),
-                        style: TextStyle(
-                          fontSize: 11,
-                          height: 1.0,
-                          fontWeight:
-                              isSelected ? FontWeight.bold : FontWeight.normal,
-                          color: isSelected
-                              ? Theme.of(context).colorScheme.onPrimary
-                              : textColor,
-                        ),
-                      ),
-                      SizedBox(height: dotColor != null ? 3 : 0),
-                      if (dotColor != null)
-                        Container(
-                          width: 4.5,
-                          height: 4.5,
-                          decoration: BoxDecoration(
-                            color: isSelected ? Colors.white : dotColor,
-                            shape: BoxShape.circle,
-                          ),
-                        )
-                      else
-                        const SizedBox(height: 4.5),
-                    ],
-                  ),
-                ),
+                child: cellChild,
               );
             },
           ),
@@ -9311,3 +12392,315 @@ class _CustomCalendarInlineState extends State<CustomCalendarInline> {
     );
   }
 }
+
+class _MacNotification {
+  final String id;
+  final String message;
+  final Color backgroundColor;
+
+  _MacNotification({
+    required this.id,
+    required this.message,
+    required this.backgroundColor,
+  });
+}
+
+class _MacToastMessenger {
+  final BuildContext context;
+  _MacToastMessenger(this.context);
+
+  static _MacToastMessenger of(BuildContext context) {
+    return _MacToastMessenger(context);
+  }
+
+  void showSnackBar(SnackBar snackBar) {
+    String text = '';
+    if (snackBar.content is Text) {
+      text = (snackBar.content as Text).data ?? '';
+    } else {
+      text = snackBar.content.toString();
+    }
+
+    // Tìm state trực tiếp qua context — bền vững hơn static field khi hot reload
+    _MapViewerScreenState? state;
+    try {
+      state = context.findAncestorStateOfType<_MapViewerScreenState>();
+    } catch (_) {}
+
+    // Fallback sang static activeState nếu context không tìm được (e.g. async gap)
+    final target = state ?? _MapViewerScreenState.activeState;
+    if (target != null && target.mounted) {
+      target.showMacToast(text, backgroundColor: snackBar.backgroundColor);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION: _PlaceNameBadge — inline expandable place name search
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A badge chip that shows the current place name and, on tap, expands an
+/// inline search panel directly below it (no overlay, no lifecycle issues).
+class _PlaceNameBadge extends StatefulWidget {
+  final double lat;
+  final double lng;
+  final int pointsCount;
+  final String? cachedName;
+  final VoidCallback onAutoLookup;
+  final ValueChanged<String> onNameSelected;
+
+  const _PlaceNameBadge({
+    required this.lat,
+    required this.lng,
+    required this.pointsCount,
+    required this.cachedName,
+    required this.onAutoLookup,
+    required this.onNameSelected,
+  });
+
+  @override
+  State<_PlaceNameBadge> createState() => _PlaceNameBadgeState();
+}
+
+class _PlaceNameBadgeState extends State<_PlaceNameBadge> {
+  bool _isOpen = false;
+  final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+  List<NominatimResult> _results = [];
+  bool _isSearching = false;
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.cachedName == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onAutoLookup();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() {
+      _isOpen = !_isOpen;
+      if (_isOpen) {
+        _searchCtrl.text = widget.cachedName ?? '';
+        _results = [];
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => _searchFocus.requestFocus());
+      } else {
+        _results = [];
+        _debounce?.cancel();
+      }
+    });
+  }
+
+  void _onTextChanged(String q) {
+    _debounce?.cancel();
+    if (q.trim().isEmpty) {
+      setState(() => _results = []);
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 500), () async {
+      if (!mounted) return;
+      setState(() => _isSearching = true);
+      final results = await NominatimService.instance.search(
+        q,
+        lat: widget.lat,
+        lng: widget.lng,
+      );
+      if (mounted) {
+        setState(() {
+          _results = results;
+          _isSearching = false;
+        });
+      }
+    });
+  }
+
+  void _select(String name) {
+    setState(() {
+      _isOpen = false;
+      _results = [];
+      _debounce?.cancel();
+    });
+    widget.onNameSelected(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final displayName =
+        (widget.cachedName != null && widget.cachedName!.isNotEmpty)
+            ? widget.cachedName!
+            : 'Place (${widget.pointsCount} pts)';
+
+    final cs = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // ── Badge button ────────────────────────────────────────────
+        InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: _toggle,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(6),
+              border:
+                  _isOpen ? Border.all(color: cs.primary, width: 1.5) : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    displayName,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 13),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                AnimatedRotation(
+                  turns: _isOpen ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  child: const Icon(Icons.arrow_drop_down, size: 18),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // ── Inline search panel (AnimatedSize) ───────────────────
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          alignment: Alignment.topLeft,
+          child: _isOpen
+              ? Container(
+                  margin: const EdgeInsets.only(top: 4),
+                  width: 280,
+                  decoration: BoxDecoration(
+                    color: cs.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border:
+                        Border.all(color: cs.outline.withValues(alpha: 0.3)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.12),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Search TextField
+                      Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: TextField(
+                          controller: _searchCtrl,
+                          focusNode: _searchFocus,
+                          onChanged: _onTextChanged,
+                          decoration: InputDecoration(
+                            hintText: 'Tìm địa điểm...',
+                            hintStyle: const TextStyle(fontSize: 12),
+                            prefixIcon: const Icon(Icons.search, size: 16),
+                            suffixIcon: _isSearching
+                                ? const Padding(
+                                    padding: EdgeInsets.all(10),
+                                    child: SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    ))
+                                : (_searchCtrl.text.isNotEmpty
+                                    ? IconButton(
+                                        iconSize: 14,
+                                        icon: const Icon(Icons.clear),
+                                        onPressed: () {
+                                          _searchCtrl.clear();
+                                          setState(() => _results = []);
+                                        },
+                                      )
+                                    : null),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6)),
+                            contentPadding: const EdgeInsets.symmetric(
+                                vertical: 6, horizontal: 8),
+                            isDense: true,
+                          ),
+                          style: const TextStyle(fontSize: 12),
+                          onSubmitted: (v) {
+                            if (v.trim().isNotEmpty) _select(v.trim());
+                          },
+                        ),
+                      ),
+                      if (_results.isNotEmpty) const Divider(height: 1),
+                      if (_results.isNotEmpty)
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (final r in _results.take(6))
+                              InkWell(
+                                onTap: () => _select(r.shortName),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 7),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.place,
+                                          size: 14, color: Colors.deepOrange),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              r.shortName,
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 12),
+                                            ),
+                                            Text(
+                                              r.displayName,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: cs.onSurface
+                                                      .withValues(alpha: 0.5)),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                    ],
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+}
+
