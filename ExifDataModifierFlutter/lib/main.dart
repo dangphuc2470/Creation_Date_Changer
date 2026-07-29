@@ -215,7 +215,10 @@ class MainLayoutScreen extends StatelessWidget {
             ),
             const VerticalDivider(thickness: 1, width: 1),
             Expanded(
-              child: _pages[appState.currentIndex],
+              child: IndexedStack(
+                index: appState.currentIndex,
+                children: _pages,
+              ),
             ),
           ],
         ),
@@ -223,7 +226,10 @@ class MainLayoutScreen extends StatelessWidget {
     }
 
     return Scaffold(
-      body: _pages[appState.currentIndex],
+      body: IndexedStack(
+        index: appState.currentIndex,
+        children: _pages,
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: appState.currentIndex,
         onDestinationSelected: appState.setIndex,
