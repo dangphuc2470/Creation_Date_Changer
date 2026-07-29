@@ -1,4 +1,4 @@
-﻿// ignore_for_file: unused_field
+// ignore_for_file: unused_field
 
 import 'dart:async';
 import 'dart:math';
@@ -114,7 +114,10 @@ bool _isInvalidLensName(String? val) {
       lower == 'n/a' ||
       lower == 'none' ||
       lower.startsWith('unknown') ||
-      lower.contains('unknown (')) {
+      lower.contains('unknown (') ||
+      // Canon manual/chipless lens sentinel: full focal range 1-65535mm
+      lower == '1-65535mm' ||
+      lower.startsWith('1-65535')) {
     return true;
   }
   return false;
