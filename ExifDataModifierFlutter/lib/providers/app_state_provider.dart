@@ -60,7 +60,11 @@ class AppStateProvider extends ChangeNotifier {
       for (final file in group.files) {
         if (file.isSelected) {
           final isGpx = file.filePath.toLowerCase().endsWith('.gpx');
-          final filePoints = file.points.where((p) => DateFormat('yyyy-MM-dd').format(p.timestamp.toUtc()) == dateStr).toList();
+          final filePoints = file.points
+              .where((p) =>
+                  DateFormat('yyyy-MM-dd').format(p.timestamp.toLocal()) ==
+                  dateStr)
+              .toList();
           if (isGpx) {
             gpxPts.addAll(filePoints);
           } else {
@@ -74,15 +78,17 @@ class AppStateProvider extends ChangeNotifier {
       // Save backups
       if (timelinePts.isNotEmpty) {
         final f = File(path.join(originalDir, '${dateStr}_timeline.json'));
-        await f.writeAsString(const JsonEncoder.withIndent('  ').convert(
-          LocationPoint.toGeoJson(timelinePts, null, 'original', 'timeline')
-        ), flush: true);
+        await f.writeAsString(
+            const JsonEncoder.withIndent('  ').convert(LocationPoint.toGeoJson(
+                timelinePts, null, 'original', 'timeline')),
+            flush: true);
       }
       if (gpxPts.isNotEmpty) {
         final f = File(path.join(originalDir, '${dateStr}_gpx.json'));
-        await f.writeAsString(const JsonEncoder.withIndent('  ').convert(
-          LocationPoint.toGeoJson(gpxPts, null, 'original', 'gpx')
-        ), flush: true);
+        await f.writeAsString(
+            const JsonEncoder.withIndent('  ').convert(
+                LocationPoint.toGeoJson(gpxPts, null, 'original', 'gpx')),
+            flush: true);
       }
 
       // Merge and save active
@@ -99,20 +105,39 @@ class AppStateProvider extends ChangeNotifier {
       }
 
       final activeFile = File(path.join(activeDir, '$dateStr.json'));
-      await activeFile.writeAsString(const JsonEncoder.withIndent('  ').convert(
-        LocationPoint.toGeoJson(activePoints, null, 'original', activeSource)
-      ), flush: true);
+      bool preserveActive = false;
+      if (await activeFile.exists()) {
+        try {
+          final content = await activeFile.readAsString();
+          final decoded = jsonDecode(content);
+          if (decoded is Map<String, dynamic>) {
+            final props = decoded['properties'] as Map<String, dynamic>? ?? {};
+            final currentState = props['state'] as String? ?? 'original';
+            if (currentState == 'edited' || currentState == 'snapped') {
+              preserveActive = true;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (!preserveActive) {
+        await activeFile.writeAsString(
+            const JsonEncoder.withIndent('  ').convert(LocationPoint.toGeoJson(
+                activePoints, null, 'original', activeSource)),
+            flush: true);
+      }
     }
 
     await initializeAndScanAppStorage();
   }
 
-  Future<void> saveImportedPoints(List<LocationPoint> points, String importSource) async {
+  Future<void> saveImportedPoints(
+      List<LocationPoint> points, String importSource) async {
     if (points.isEmpty) return;
 
     final Map<String, List<LocationPoint>> pointsByDate = {};
     for (final p in points) {
-      final dateKey = DateFormat('yyyy-MM-dd').format(p.timestamp.toUtc());
+      final dateKey = DateFormat('yyyy-MM-dd').format(p.timestamp.toLocal());
       pointsByDate.putIfAbsent(dateKey, () => []).add(p);
     }
 
@@ -125,36 +150,61 @@ class AppStateProvider extends ChangeNotifier {
       dayPoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
       // 1. Save original copy for this specific source: e.g. YYYY-MM-DD_gpx.json or YYYY-MM-DD_timeline.json
-      final specificOriginalFile = File(path.join(originalDir, '${dateStr}_$importSource.json'));
-      final geojsonSpecific = LocationPoint.toGeoJson(dayPoints, null, 'original', importSource);
-      await specificOriginalFile.writeAsString(const JsonEncoder.withIndent('  ').convert(geojsonSpecific), flush: true);
+      final specificOriginalFile =
+          File(path.join(originalDir, '${dateStr}_$importSource.json'));
+      final geojsonSpecific =
+          LocationPoint.toGeoJson(dayPoints, null, 'original', importSource);
+      await specificOriginalFile.writeAsString(
+          const JsonEncoder.withIndent('  ').convert(geojsonSpecific),
+          flush: true);
 
       // 2. Check if the other backup file exists to merge, or just use this one
       final otherSource = importSource == 'gpx' ? 'timeline' : 'gpx';
-      final otherOriginalFile = File(path.join(originalDir, '${dateStr}_$otherSource.json'));
-      
+      final otherOriginalFile =
+          File(path.join(originalDir, '${dateStr}_$otherSource.json'));
+
       List<LocationPoint> activePoints = [];
       String activeSource = importSource;
 
       if (await otherOriginalFile.exists()) {
         activeSource = 'merge';
         final otherContent = await otherOriginalFile.readAsString();
-        final otherPoints = LocationPoint.parseAnyJson(jsonDecode(otherContent));
-        
-        final timelinePts = importSource == 'timeline' ? dayPoints : otherPoints;
+        final otherPoints =
+            LocationPoint.parseAnyJson(jsonDecode(otherContent));
+
+        final timelinePts =
+            importSource == 'timeline' ? dayPoints : otherPoints;
         final gpxPts = importSource == 'gpx' ? dayPoints : otherPoints;
         activePoints = mergeTimelineAndGpx(timelinePts, gpxPts);
       } else {
         activePoints = dayPoints;
       }
 
-      // 3. Save to active YYYY-MM-DD.json
+      // 3. Save to active YYYY-MM-DD.json (preserve if edited/snapped)
       final activeFile = File(path.join(activeDir, '$dateStr.json'));
-      final geojsonActive = LocationPoint.toGeoJson(activePoints, null, 'original', activeSource);
-      await activeFile.writeAsString(const JsonEncoder.withIndent('  ').convert(geojsonActive), flush: true);
+      bool preserveActive = false;
+      if (await activeFile.exists()) {
+        try {
+          final content = await activeFile.readAsString();
+          final decoded = jsonDecode(content);
+          if (decoded is Map<String, dynamic>) {
+            final props = decoded['properties'] as Map<String, dynamic>? ?? {};
+            final currentState = props['state'] as String? ?? 'original';
+            if (currentState == 'edited' || currentState == 'snapped') {
+              preserveActive = true;
+            }
+          }
+        } catch (_) {}
+      }
 
-      // Cache active points in memory so UI screens instantly receive updated track data
-      _activePaths[activeFile.path] = activePoints;
+      if (!preserveActive) {
+        final geojsonActive = LocationPoint.toGeoJson(
+            activePoints, null, 'original', activeSource);
+        await activeFile.writeAsString(
+            const JsonEncoder.withIndent('  ').convert(geojsonActive),
+            flush: true);
+        _activePaths[activeFile.path] = activePoints;
+      }
     }
 
     if (points.isNotEmpty) {
@@ -164,7 +214,8 @@ class AppStateProvider extends ChangeNotifier {
     await initializeAndScanAppStorage();
   }
 
-  List<LocationPoint> mergeTimelineAndGpx(List<LocationPoint> timeline, List<LocationPoint> gpx) {
+  List<LocationPoint> mergeTimelineAndGpx(
+      List<LocationPoint> timeline, List<LocationPoint> gpx) {
     if (gpx.isEmpty) return timeline;
     if (timeline.isEmpty) return gpx;
 
@@ -172,7 +223,10 @@ class AppStateProvider extends ChangeNotifier {
     final gpxEnd = gpx.last.timestamp;
 
     // Filter out timeline points in GPX range
-    final filteredTimeline = timeline.where((p) => p.timestamp.isBefore(gpxStart) || p.timestamp.isAfter(gpxEnd)).toList();
+    final filteredTimeline = timeline
+        .where((p) =>
+            p.timestamp.isBefore(gpxStart) || p.timestamp.isAfter(gpxEnd))
+        .toList();
 
     final merged = [...filteredTimeline, ...gpx];
     merged.sort((a, b) => a.timestamp.compareTo(b.timestamp));
@@ -184,36 +238,44 @@ class AppStateProvider extends ChangeNotifier {
     final dateStr = DateFormat('yyyy-MM-dd').format(dateInfo.date);
     final originalDir = await getAppTimelinesDirectoryPath(active: false);
 
-    final timelineFile = File(path.join(originalDir, '${dateStr}_timeline.json'));
+    final timelineFile =
+        File(path.join(originalDir, '${dateStr}_timeline.json'));
     final gpxFile = File(path.join(originalDir, '${dateStr}_gpx.json'));
 
     List<LocationPoint> finalPoints = [];
 
     if (newSource == 'timeline') {
       if (await timelineFile.exists()) {
-        finalPoints = LocationPoint.parseAnyJson(jsonDecode(await timelineFile.readAsString()));
+        finalPoints = LocationPoint.parseAnyJson(
+            jsonDecode(await timelineFile.readAsString()));
       }
     } else if (newSource == 'gpx') {
       if (await gpxFile.exists()) {
-        finalPoints = LocationPoint.parseAnyJson(jsonDecode(await gpxFile.readAsString()));
+        finalPoints = LocationPoint.parseAnyJson(
+            jsonDecode(await gpxFile.readAsString()));
       }
     } else {
       // merge
       List<LocationPoint> timelinePts = [];
       List<LocationPoint> gpxPts = [];
       if (await timelineFile.exists()) {
-        timelinePts = LocationPoint.parseAnyJson(jsonDecode(await timelineFile.readAsString()));
+        timelinePts = LocationPoint.parseAnyJson(
+            jsonDecode(await timelineFile.readAsString()));
       }
       if (await gpxFile.exists()) {
-        gpxPts = LocationPoint.parseAnyJson(jsonDecode(await gpxFile.readAsString()));
+        gpxPts = LocationPoint.parseAnyJson(
+            jsonDecode(await gpxFile.readAsString()));
       }
       finalPoints = mergeTimelineAndGpx(timelinePts, gpxPts);
     }
 
     // Save to active with current day state
     final activeFile = File(activePath);
-    final geojsonMap = LocationPoint.toGeoJson(finalPoints, null, dateInfo.state, newSource);
-    await activeFile.writeAsString(const JsonEncoder.withIndent('  ').convert(geojsonMap), flush: true);
+    final geojsonMap =
+        LocationPoint.toGeoJson(finalPoints, null, dateInfo.state, newSource);
+    await activeFile.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(geojsonMap),
+        flush: true);
 
     await initializeAndScanAppStorage();
   }
@@ -225,20 +287,27 @@ class AppStateProvider extends ChangeNotifier {
       final points = await LocationManager.loadLocationFile(activePath);
 
       // Save with state: 'snapped'
-      final geojsonMap = LocationPoint.toGeoJson(points, null, 'snapped', dateInfo.source);
-      await activeFile.writeAsString(const JsonEncoder.withIndent('  ').convert(geojsonMap), flush: true);
+      final geojsonMap =
+          LocationPoint.toGeoJson(points, null, 'snapped', dateInfo.source);
+      await activeFile.writeAsString(
+          const JsonEncoder.withIndent('  ').convert(geojsonMap),
+          flush: true);
 
       await initializeAndScanAppStorage();
     }
   }
 
-  Future<void> saveListPoints(DateInfo dateInfo, List<LocationPoint> points) async {
+  Future<void> saveListPoints(
+      DateInfo dateInfo, List<LocationPoint> points) async {
     points.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     final activeFile = File(dateInfo.filePath);
-    
+
     // Save to active with state: 'edited'
-    final geojsonMap = LocationPoint.toGeoJson(points, null, 'edited', dateInfo.source);
-    await activeFile.writeAsString(const JsonEncoder.withIndent('  ').convert(geojsonMap), flush: true);
+    final geojsonMap =
+        LocationPoint.toGeoJson(points, null, 'edited', dateInfo.source);
+    await activeFile.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(geojsonMap),
+        flush: true);
 
     LocationManager.updateCache(dateInfo.filePath, points);
 
@@ -259,8 +328,10 @@ class AppStateProvider extends ChangeNotifier {
       sourceToRestore = originalFileBackup;
     } else {
       final dateStr = DateFormat('yyyy-MM-dd').format(dateInfo.date);
-      final timelineBackup = File(path.join(originalFileBackup.parent.path, '${dateStr}_timeline.json'));
-      final gpxBackup = File(path.join(originalFileBackup.parent.path, '${dateStr}_gpx.json'));
+      final timelineBackup = File(path.join(
+          originalFileBackup.parent.path, '${dateStr}_timeline.json'));
+      final gpxBackup = File(
+          path.join(originalFileBackup.parent.path, '${dateStr}_gpx.json'));
       if (await timelineBackup.exists()) {
         sourceToRestore = timelineBackup;
       } else if (await gpxBackup.exists()) {
@@ -278,8 +349,11 @@ class AppStateProvider extends ChangeNotifier {
         originalSource = properties['source'] as String? ?? dateInfo.source;
       }
 
-      final geojsonMap = LocationPoint.toGeoJson(points, null, 'original', originalSource);
-      await activeFile.writeAsString(const JsonEncoder.withIndent('  ').convert(geojsonMap), flush: true);
+      final geojsonMap =
+          LocationPoint.toGeoJson(points, null, 'original', originalSource);
+      await activeFile.writeAsString(
+          const JsonEncoder.withIndent('  ').convert(geojsonMap),
+          flush: true);
 
       // Invalidate the cache to reload restored file data
       LocationManager.invalidateCache(activePath);
@@ -300,14 +374,16 @@ class AppStateProvider extends ChangeNotifier {
   Future<void> deleteDate(DateInfo dateInfo) async {
     final activePath = dateInfo.filePath;
     final dateStr = DateFormat('yyyy-MM-dd').format(dateInfo.date);
-    
+
     final activeFile = File(activePath);
     final originalFile = File(activePath.replaceAll(
       path.join('timelines', 'active'),
       path.join('timelines', 'original'),
     ));
-    final originalTimelineFile = File(path.join(originalFile.parent.path, '${dateStr}_timeline.json'));
-    final originalGpxFile = File(path.join(originalFile.parent.path, '${dateStr}_gpx.json'));
+    final originalTimelineFile =
+        File(path.join(originalFile.parent.path, '${dateStr}_timeline.json'));
+    final originalGpxFile =
+        File(path.join(originalFile.parent.path, '${dateStr}_gpx.json'));
 
     if (await activeFile.exists()) {
       await activeFile.delete();
@@ -332,7 +408,8 @@ class AppStateProvider extends ChangeNotifier {
   List<DateInfo> _allDates = [];
   String? _lastLoadedPath;
   DateTime? _lastImportedDate;
-  final Map<String, List<LocationPoint>> _activePaths = {}; // filePath -> points
+  final Map<String, List<LocationPoint>> _activePaths =
+      {}; // filePath -> points
   final Map<String, Color> _pathColors = {}; // filePath -> color
 
   List<DateInfo> get allDates => _allDates;
@@ -416,7 +493,7 @@ class AppStateProvider extends ChangeNotifier {
     if (!_activePaths.containsKey(pathKey)) return;
     _editingPathKey = pathKey;
     _editingPoints = List<LocationPoint>.from(_activePaths[pathKey]!);
-    
+
     // Default anchors: always pin the start and end points
     if (_editingPoints.isNotEmpty) {
       _pinnedPointIndices = {0, _editingPoints.length - 1};
@@ -514,13 +591,23 @@ class AppStateProvider extends ChangeNotifier {
       }
     }
 
-    if (b > a + 1) {
-      _interpolateRange(a, b);
-      notifyListeners();
+    if (_pinnedPointIndices.contains(index)) {
+      if (index > a + 1) {
+        _interpolateRange(a, index);
+      }
+      if (b > index + 1) {
+        _interpolateRange(index, b);
+      }
+    } else {
+      if (b > a + 1) {
+        _interpolateRange(a, b);
+      }
     }
+    notifyListeners();
   }
 
-  void updatePointCoordinate(int index, LatLng newLatLng, {bool autoRedistributeTime = true}) {
+  void updatePointCoordinate(int index, LatLng newLatLng,
+      {bool autoRedistributeTime = true}) {
     if (index < 0 || index >= _editingPoints.length) return;
     final oldPt = _editingPoints[index];
     _editingPoints[index] = LocationPoint(
@@ -606,7 +693,8 @@ class AppStateProvider extends ChangeNotifier {
     final List<double> distances = [0.0];
     double totalDist = 0.0;
     for (int i = start; i < end; i++) {
-      final d = GeoUtils.distanceBetween(_editingPoints[i].latLng, _editingPoints[i + 1].latLng);
+      final d = GeoUtils.distanceBetween(
+          _editingPoints[i].latLng, _editingPoints[i + 1].latLng);
       totalDist += d;
       distances.add(totalDist);
     }
@@ -616,7 +704,7 @@ class AppStateProvider extends ChangeNotifier {
       final double progress = totalDist > 0
           ? distances[i - start] / totalDist
           : (i - start) / (end - start);
-      
+
       final int offsetMs = (totalDuration.inMilliseconds * progress).toInt();
       final newTime = timeStart.add(Duration(milliseconds: offsetMs));
 
@@ -632,11 +720,11 @@ class AppStateProvider extends ChangeNotifier {
 
   Future<void> saveEditingChanges(double? timezoneOffset) async {
     if (_editingPathKey == null) return;
-    
+
     // 1. Update the local memory state
     _editingPoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     _activePaths[_editingPathKey!] = List<LocationPoint>.from(_editingPoints);
-    
+
     // Get existing source
     final savedKey = _editingPathKey;
     final dateIdx = _allDates.indexWhere((d) => d.filePath == savedKey);
@@ -647,10 +735,11 @@ class AppStateProvider extends ChangeNotifier {
 
     // 2. Write to the file (marking state as edited)
     final file = File(_editingPathKey!);
-    final geojsonMap = LocationPoint.toGeoJson(_editingPoints, timezoneOffset, 'edited', source);
+    final geojsonMap = LocationPoint.toGeoJson(
+        _editingPoints, timezoneOffset, 'edited', source);
     final jsonString = const JsonEncoder.withIndent('  ').convert(geojsonMap);
     await file.writeAsString(jsonString, flush: true);
-    
+
     // 3. Scan storage to update metadata
     await initializeAndScanAppStorage();
 
@@ -658,7 +747,7 @@ class AppStateProvider extends ChangeNotifier {
     _editingPathKey = null;
     _editingPoints.clear();
     _pinnedPointIndices.clear();
-    
+
     notifyListeners();
   }
 }
