@@ -71,14 +71,18 @@ class FileGroup {
 }
 
 class BatchImportService {
-  static String _formatDate(DateTime date) {
-    return DateFormat('yyyy-MM-dd').format(date);
+  static String _formatDate(DateTime date, [double? timezoneOffset]) {
+    final localTime = (timezoneOffset != null && timezoneOffset != 0)
+        ? date.toUtc().add(Duration(minutes: (timezoneOffset * 60).toInt()))
+        : date.toLocal();
+    return DateFormat('yyyy-MM-dd').format(localTime);
   }
 
   static Future<List<FileGroup>> scanDirectory(
     String dirPath,
-    Function(double progress, String message)? onProgress,
-  ) async {
+    Function(double progress, String message)? onProgress, [
+    double? timezoneOffset,
+  ]) async {
     final dir = Directory(dirPath);
     if (!await dir.exists()) return [];
 
@@ -128,7 +132,7 @@ class BatchImportService {
           // Group by all dates covered by the file
           final Set<String> coveredDates = {};
           for (final p in points) {
-            coveredDates.add(_formatDate(p.timestamp));
+            coveredDates.add(_formatDate(p.timestamp, timezoneOffset));
           }
 
           for (final dateKey in coveredDates) {
@@ -157,13 +161,13 @@ class BatchImportService {
   }
 
   /// Merge points from selected files in a group
-  static List<LocationPoint> mergeGroup(FileGroup group) {
+  static List<LocationPoint> mergeGroup(FileGroup group, [double? timezoneOffset]) {
     final List<LocationPoint> allPoints = [];
     for (final file in group.files) {
       if (file.isSelected) {
         // Only include points that match this group's date
         allPoints.addAll(
-            file.points.where((p) => _formatDate(p.timestamp) == group.date));
+            file.points.where((p) => _formatDate(p.timestamp, timezoneOffset) == group.date));
       }
     }
 
