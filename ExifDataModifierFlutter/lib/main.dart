@@ -151,10 +151,17 @@ class _NotifListenerState extends State<_NotifListener> {
   Widget build(BuildContext context) => widget.child;
 }
 
-class MainLayoutScreen extends StatelessWidget {
+class MainLayoutScreen extends StatefulWidget {
   const MainLayoutScreen({super.key});
 
-  final List<Widget> _pages = const [
+  @override
+  State<MainLayoutScreen> createState() => _MainLayoutScreenState();
+}
+
+class _MainLayoutScreenState extends State<MainLayoutScreen> {
+  final Set<int> _visitedIndices = {};
+
+  static const List<Widget> _pages = [
     ChangeDateScreen(),
     ChangeFilenameScreen(),
     GeotagScreen(),
@@ -169,6 +176,15 @@ class MainLayoutScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDesktop = MediaQuery.of(context).size.width >= 600;
     final appState = context.watch<AppStateProvider>();
+
+    _visitedIndices.add(appState.currentIndex);
+
+    final lazyPages = List<Widget>.generate(_pages.length, (i) {
+      if (_visitedIndices.contains(i)) {
+        return _pages[i];
+      }
+      return const SizedBox.shrink();
+    });
 
     if (isDesktop) {
       return Scaffold(
@@ -217,7 +233,7 @@ class MainLayoutScreen extends StatelessWidget {
             Expanded(
               child: IndexedStack(
                 index: appState.currentIndex,
-                children: _pages,
+                children: lazyPages,
               ),
             ),
           ],
@@ -228,7 +244,7 @@ class MainLayoutScreen extends StatelessWidget {
     return Scaffold(
       body: IndexedStack(
         index: appState.currentIndex,
-        children: _pages,
+        children: lazyPages,
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: appState.currentIndex,

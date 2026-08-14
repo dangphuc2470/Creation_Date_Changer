@@ -12,6 +12,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/geotag_provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/app_state_provider.dart';
 import '../models/location_point.dart';
 
 class GeotagScreen extends StatefulWidget {
@@ -246,6 +247,7 @@ class _GeotagScreenState extends State<GeotagScreen> {
   Widget build(BuildContext context) {
     return DropTarget(
       onDragDone: (detail) {
+        if (context.read<AppStateProvider>().currentIndex != 2) return;
         final files = detail.files.map((e) => File(e.path)).toList();
         context.read<GeotagProvider>().addFiles(files);
       },

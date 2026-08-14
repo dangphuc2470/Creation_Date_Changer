@@ -931,6 +931,22 @@ class GeotagProvider extends ChangeNotifier {
           final escapedPath = _escapeCsv(item.path);
           csvBuf.writeln('"$escapedPath",$lat,$latRef,$lng,$lngRef');
 
+          // Remove ReadOnly attribute if present on Windows so ExifTool can edit file
+          if (Platform.isWindows) {
+            try { await Process.run('attrib', ['-r', item.path]); } catch (_) {}
+          }
+
+          // Clean up any stale temp file from previous interrupted runs
+          final tmpFile = File('${item.path}_exiftool_tmp');
+          if (await tmpFile.exists()) {
+            try {
+              if (Platform.isWindows) {
+                await Process.run('attrib', ['-r', tmpFile.path]);
+              }
+              await tmpFile.delete();
+            } catch (_) {}
+          }
+
           // Add to argfile for the command line
           argBuf.writeln(item.path);
         }

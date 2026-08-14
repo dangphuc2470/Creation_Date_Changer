@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../providers/app_state_provider.dart';
 import '../providers/change_filename_provider.dart';
 
 class ChangeFilenameScreen extends StatelessWidget {
@@ -14,6 +15,7 @@ class ChangeFilenameScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return DropTarget(
       onDragDone: (detail) {
+        if (context.read<AppStateProvider>().currentIndex != 1) return;
         final files = detail.files.map((e) => File(e.path)).toList();
         context.read<ChangeFilenameProvider>().addFiles(files);
       },

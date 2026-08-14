@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/lens_template.dart';
+import '../providers/app_state_provider.dart';
 import '../providers/lens_metadata_provider.dart';
 import '../providers/settings_provider.dart';
 
@@ -53,6 +54,7 @@ class _LensMetadataScreenState extends State<LensMetadataScreen> {
   Widget build(BuildContext context) {
     return DropTarget(
       onDragDone: (detail) {
+        if (context.read<AppStateProvider>().currentIndex != 6) return;
         final files = detail.files.map((e) => File(e.path)).toList();
         final settings = context.read<SettingsProvider>();
         context.read<LensMetadataProvider>().scanFiles(

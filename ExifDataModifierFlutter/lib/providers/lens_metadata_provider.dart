@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -361,6 +361,18 @@ class LensMetadataProvider extends ChangeNotifier {
       argBuf.writeln('-overwrite_original');
 
       for (var item in selectedItems) {
+        if (Platform.isWindows) {
+          try { await Process.run('attrib', ['-r', item.path]); } catch (_) {}
+        }
+        final tmpFile = File('${item.path}_exiftool_tmp');
+        if (await tmpFile.exists()) {
+          try {
+            if (Platform.isWindows) {
+              await Process.run('attrib', ['-r', tmpFile.path]);
+            }
+            await tmpFile.delete();
+          } catch (_) {}
+        }
         // Add original EXIF as comment
         argBuf.writeln('-UserComment=Original: ${item.originalExif}');
         argBuf.writeln(item.path);

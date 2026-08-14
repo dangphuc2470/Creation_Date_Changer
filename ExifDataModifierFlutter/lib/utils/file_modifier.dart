@@ -2,46 +2,120 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 class FileModifier {
-  /// Modify file creation and modification dates.
-  /// Note: Dart's File API only allows modifying the last modified/accessed exact time easily.
-  /// For exact "Creation Date" on Windows/macOS/Linux natively without FFI, we use the accessed time as a proxy, 
-  /// or fall back to pure shell commands for actual creation dates.
+  // ── Single-file helpers (kept for backward compat) ─────────────────────────
+
+  /// Modify file last-modified and last-accessed dates.
   static Future<bool> changeFileDates(String path, DateTime newDate) async {
     try {
       final file = File(path);
       if (!await file.exists()) return false;
-
-      // Set last modified/accessed (Dart's limitation for creation date)
       await file.setLastModified(newDate);
       await file.setLastAccessed(newDate);
-      
       return true;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
 
-  /// Change filename
-  static Future<String?> changeFilename(String oldPath, String newNameTemplate, DateTime date, int sequenceNum) async {
+  // ── Batch operations ────────────────────────────────────────────────────────
+
+  /// Batch-sets `LastModified` + `LastAccessed` for all [entries] in parallel,
+  /// then issues a single PowerShell call (Windows) to also set `CreationTime`.
+  ///
+  /// Returns a map of `path → success`.
+  static Future<Map<String, bool>> changeFileDatesBatch(
+    Map<String, DateTime> entries, {
+    void Function(int processed, int total)? onProgress,
+  }) async {
+    if (entries.isEmpty) return {};
+
+    final results = <String, bool>{};
+    int processed = 0;
+    final total = entries.length;
+
+    // 1. Set LastModified + LastAccessed in parallel (fast Dart I/O)
+    await Future.wait(entries.entries.map((e) async {
+      try {
+        final file = File(e.key);
+        if (!await file.exists()) {
+          results[e.key] = false;
+          return;
+        }
+        await file.setLastModified(e.value);
+        await file.setLastAccessed(e.value);
+        results[e.key] = true;
+      } catch (_) {
+        results[e.key] = false;
+      }
+      onProgress?.call(++processed, total);
+    }));
+
+    // 2. Set CreationTime on Windows via a single PowerShell batch call.
+    //    Dart's File API has no native API for creation time.
+    if (Platform.isWindows) {
+      await _batchSetWindowsCreationTime(entries);
+    }
+
+    return results;
+  }
+
+  /// Issues one PowerShell process to set CreationTime for all [entries].
+  /// Much faster than spawning PowerShell per file.
+  static Future<void> _batchSetWindowsCreationTime(
+    Map<String, DateTime> entries,
+  ) async {
+    if (entries.isEmpty) return;
+    try {
+      // Build a compact PowerShell script:
+      //   $d = @{ 'path1' = '2024-06-06 13:06:14'; ... }
+      //   foreach ($kv in $d.GetEnumerator()) {
+      //     (Get-Item $kv.Key).CreationTime = [DateTime]$kv.Value
+      //   }
+      final buf = StringBuffer();
+      buf.write(r'$d = @{');
+      bool first = true;
+      for (final e in entries.entries) {
+        if (!first) buf.write('; ');
+        first = false;
+        final escaped = e.key.replaceAll("'", "''");
+        final dateStr = _psDate(e.value);
+        buf.write("'$escaped'='$dateStr'");
+      }
+      buf.writeln('};');
+      buf.writeln(
+        r"foreach ($kv in $d.GetEnumerator()) { "
+        r"Try { (Get-Item $kv.Key -EA Stop).CreationTime = [DateTime]$kv.Value } "
+        r"Catch {} }",
+      );
+
+      await Process.run('powershell', ['-NoProfile', '-Command', buf.toString()]);
+    } catch (_) {}
+  }
+
+  // ── Change filename ─────────────────────────────────────────────────────────
+
+  /// Rename a file using a template like `IMG_<yyyyMMdd_HHmmss>_[nnnn]`.
+  static Future<String?> changeFilename(
+    String oldPath,
+    String newNameTemplate,
+    DateTime date,
+    int sequenceNum,
+  ) async {
     try {
       final file = File(oldPath);
       if (!await file.exists()) return null;
 
       final directory = p.dirname(oldPath);
       final extension = p.extension(oldPath);
-      
-      // Parse template, replace <dateformat> and [nnnn]
-      // Assume a template like "IMG_<yyyyMMdd_HHmmss>_[nnnn]"
+
       String newName = newNameTemplate;
-      
-      // 1. Replce Date
+
+      // 1. Replace <dateformat>
       final dateRegex = RegExp(r'<([^>]+)>');
       final match = dateRegex.firstMatch(newName);
       if (match != null) {
         final formatStr = match.group(1)!;
-        // Simple manual format mapping since DateFormat needs initialization
-        // We will just replace common patterns
-        String dateStr = formatStr
+        final dateStr = formatStr
             .replaceAll('yyyy', date.year.toString().padLeft(4, '0'))
             .replaceAll('yy', (date.year % 100).toString().padLeft(2, '0'))
             .replaceAll('MM', date.month.toString().padLeft(2, '0'))
@@ -49,11 +123,10 @@ class FileModifier {
             .replaceAll('HH', date.hour.toString().padLeft(2, '0'))
             .replaceAll('mm', date.minute.toString().padLeft(2, '0'))
             .replaceAll('ss', date.second.toString().padLeft(2, '0'));
-            
         newName = newName.replaceFirst('<$formatStr>', dateStr);
       }
 
-      // 2. Replace Sequence
+      // 2. Replace [nnnn] sequence
       final seqRegex = RegExp(r'\[(n+)\]');
       final seqMatch = seqRegex.firstMatch(newName);
       if (seqMatch != null) {
@@ -61,13 +134,22 @@ class FileModifier {
         final seqStr = sequenceNum.toString().padLeft(nString.length, '0');
         newName = newName.replaceFirst('[$nString]', seqStr);
       }
-      
+
       final newPath = p.join(directory, newName + extension);
       await file.rename(newPath);
-      
       return newPath;
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  static String _psDate(DateTime dt) =>
+      '${dt.year}-'
+      '${dt.month.toString().padLeft(2, '0')}-'
+      '${dt.day.toString().padLeft(2, '0')} '
+      '${dt.hour.toString().padLeft(2, '0')}:'
+      '${dt.minute.toString().padLeft(2, '0')}:'
+      '${dt.second.toString().padLeft(2, '0')}';
 }

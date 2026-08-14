@@ -27,6 +27,7 @@ import '../services/location_manager.dart';
 import '../constants/timeline_constants.dart';
 import '../utils/geo_utils.dart';
 import '../services/nominatim_service.dart';
+import '../services/thumbnail_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION: Top-level helpers — ProjectionResult, IndexPoint, PhotoEntry
@@ -129,6 +130,7 @@ bool _isInvalidLensName(String? val) {
 class PhotoEntry {
   final File file;
   final String filename;
+  File? thumbnailFile;
 
   /// Stored as DateTime.utc() but with LOCAL time values from EXIF.
   /// Subtract timezone offset to get proper UTC for comparisons.
@@ -447,6 +449,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   final Set<PhotoEntry> _selectedPhotoSet = {};
   PhotoEntry? _shiftStartPhoto;
   double _clusterJitterMeters = 5.0;
+  int _maxClusterGroups = 3;
   bool _isWritingExif = false;
   int _exifTotal = 0;
   int _exifProcessed = 0;
@@ -657,6 +660,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             _photos.addAll(restoredEntries);
           });
           await _autoInsertGeotaggedPhotoPoints(restoredEntries);
+          if (!mounted) return;
           final appState = context.read<AppStateProvider>();
           final settings = context.read<SettingsProvider>();
           final dateInfo = _currentDateInfo(appState);
@@ -675,6 +679,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               if (mounted) setState(() {});
             });
           }
+          _loadThumbnailsForPhotos(restoredEntries);
         }
         return;
       }
@@ -697,6 +702,46 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       debugPrint('Error loading cached photos: $e');
     }
   }
+
+  void _loadThumbnailsForPhotos(List<PhotoEntry> entries) {
+    if (entries.isEmpty) return;
+
+    for (final entry in entries) {
+      if (entry.thumbnailFile != null) continue;
+      ThumbnailService.getCachedThumbnail(entry.file.path).then((thumbFile) {
+        if (thumbFile != null && mounted) {
+          setState(() {
+            entry.thumbnailFile = thumbFile;
+          });
+        }
+      });
+    }
+
+    final missingPaths = entries
+        .where((e) => e.thumbnailFile == null)
+        .map((e) => e.file.path)
+        .toList();
+
+    if (missingPaths.isEmpty) return;
+
+    final entryMap = <String, PhotoEntry>{
+      for (final e in entries) e.file.path: e,
+    };
+
+    ThumbnailService.batchEnsureThumbnails(
+      missingPaths,
+      onItemDone: (filePath, thumbFile) {
+        final entry = entryMap[filePath];
+        if (entry != null && mounted) {
+          setState(() {
+            entry.thumbnailFile = thumbFile;
+          });
+        }
+      },
+    );
+  }
+
+
 
   Future<void> _clearCachedPhotos() async {
     try {
@@ -1303,6 +1348,22 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         final escapedPath = photo.file.path.replaceAll('"', '""');
         csvBuf.writeln('"$escapedPath",$lat,$latRef,$lng,$lngRef');
 
+        // Remove ReadOnly attribute if present on Windows so ExifTool can edit file
+        if (Platform.isWindows) {
+          try { await Process.run('attrib', ['-r', photo.file.path]); } catch (_) {}
+        }
+
+        // Clean up any stale temp file from previous interrupted runs
+        final tmpFile = File('${photo.file.path}_exiftool_tmp');
+        if (await tmpFile.exists()) {
+          try {
+            if (Platform.isWindows) {
+              await Process.run('attrib', ['-r', tmpFile.path]);
+            }
+            await tmpFile.delete();
+          } catch (_) {}
+        }
+
         argBuf.writeln(photo.file.path);
         validCount++;
       }
@@ -1453,6 +1514,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       _importCurrentStatus = 'Inserting photos into timeline...';
       _photos.addAll(newEntries);
     });
+
+    _loadThumbnailsForPhotos(newEntries);
 
     // Save imported photo paths cache
     await _saveCachedPhotoPaths();
@@ -2085,6 +2148,28 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   // ── Photo helpers for Timeline tiles ──────────────────────────────────
   final Set<int> _expandedPhotoGrids = {};
 
+  void _selectAllPhotosInItem(TimelineItem item) {
+    final photos = (item is TimelinePlace)
+        ? [...item.geotaggedPhotos, ...item.ungeotaggedPhotos]
+        : (item is TimelinePath
+            ? [...item.geotaggedPhotos, ...item.ungeotaggedPhotos]
+            : <PhotoEntry>[]);
+    if (photos.isEmpty) return;
+
+    setState(() {
+      _selectedPhotoSet
+        ..clear()
+        ..addAll(photos);
+      _selectedPhoto = photos.first;
+      _shiftStartPhoto = photos.first;
+    });
+
+    _focusTimelineForPhoto(photos.first);
+  }
+
+
+
+
   Future<void> _geotagAllInItem(TimelineItem item) async {
     final ungeotagged = (item is TimelinePlace)
         ? item.ungeotaggedPhotos
@@ -2300,7 +2385,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             child: ClipRRect(
               borderRadius: BorderRadius.circular(6.5),
               child: Image.file(
-                photo.file,
+                photo.thumbnailFile ?? photo.file,
                 width: 38,
                 height: 38,
                 fit: BoxFit.cover,
@@ -2342,6 +2427,22 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       });
     }
 
+    TimelineItem? parentItem;
+    if (_timelineItemsWithPhotos != null) {
+      for (final item in _timelineItemsWithPhotos!) {
+        final g = (item is TimelinePlace)
+            ? item.geotaggedPhotos
+            : (item is TimelinePath ? item.geotaggedPhotos : <PhotoEntry>[]);
+        final u = (item is TimelinePlace)
+            ? item.ungeotaggedPhotos
+            : (item is TimelinePath ? item.ungeotaggedPhotos : <PhotoEntry>[]);
+        if (g.contains(photo) || u.contains(photo)) {
+          parentItem = item;
+          break;
+        }
+      }
+    }
+
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final relativeRect = RelativeRect.fromRect(
       Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
@@ -2354,6 +2455,22 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       context: context,
       position: relativeRect,
       items: [
+        if (parentItem != null) ...[
+          PopupMenuItem(
+            value: 'select_all_in_place',
+            child: Row(
+              children: [
+                const Icon(Icons.select_all, size: 18, color: Colors.amber),
+                const SizedBox(width: 8),
+                Text(
+                  'Select All Images of this ${parentItem is TimelinePlace ? "Place" : "Road Segment"}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+          const PopupMenuDivider(),
+        ],
         PopupMenuItem(
           value: 'geotag_all',
           child: Row(
@@ -2375,6 +2492,19 @@ class _MapViewerScreenState extends State<MapViewerScreen>
               Text(selectedCount > 1
                   ? 'Add Lens Metadata ($selectedCount)'
                   : 'Add Lens Metadata'),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'remove_selected',
+          child: Row(
+            children: [
+              const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+              const SizedBox(width: 8),
+              Text(selectedCount > 1
+                  ? 'Remove All Selected ($selectedCount)'
+                  : 'Remove Photo'),
             ],
           ),
         ),
@@ -2402,10 +2532,14 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       ],
     ).then((val) {
       if (val == null) return;
-      if (val == 'geotag_all') {
+      if (val == 'select_all_in_place' && parentItem != null) {
+        _selectAllPhotosInItem(parentItem);
+      } else if (val == 'geotag_all') {
         _geotagSelectedPhotos();
       } else if (val == 'add_lens') {
         _showAddLensDialogForSelectedPhotos();
+      } else if (val == 'remove_selected') {
+        _removeSelectedPhotos();
       } else if (val == 'invert_select') {
         _invertPhotoSelection();
       } else if (val == 'deselect_all') {
@@ -2415,6 +2549,32 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         });
       }
     });
+  }
+
+  void _removeSelectedPhotos() {
+    final targets = _selectedPhotoSet.isNotEmpty
+        ? _selectedPhotoSet.toList()
+        : (_selectedPhoto != null ? [_selectedPhoto!] : <PhotoEntry>[]);
+    if (targets.isEmpty) return;
+
+    setState(() {
+      for (final p in targets) {
+        _photos.remove(p);
+        _selectedPhotoSet.remove(p);
+      }
+      if (_selectedPhoto != null && !_photos.contains(_selectedPhoto)) {
+        _selectedPhoto =
+            _selectedPhotoSet.isNotEmpty ? _selectedPhotoSet.first : null;
+      }
+    });
+
+    _saveCachedPhotoPaths();
+
+    final appState = context.read<AppStateProvider>();
+    final settings = context.read<SettingsProvider>();
+    final dateInfo = _currentDateInfo(appState);
+    final pts = appState.activePaths[dateInfo.filePath] ?? [];
+    _assignPhotosToTimelineItems(pts, settings.geotagTimezone.toDouble());
   }
 
   void _invertPhotoSelection() {
@@ -2897,6 +3057,20 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       argBuf.writeln('-overwrite_original');
 
       for (final photo in photos) {
+        // Remove ReadOnly attribute if present on Windows so ExifTool can edit file
+        if (Platform.isWindows) {
+          try { await Process.run('attrib', ['-r', photo.file.path]); } catch (_) {}
+        }
+
+        final tmpFile = File('${photo.file.path}_exiftool_tmp');
+        if (await tmpFile.exists()) {
+          try {
+            if (Platform.isWindows) {
+              await Process.run('attrib', ['-r', tmpFile.path]);
+            }
+            await tmpFile.delete();
+          } catch (_) {}
+        }
         argBuf.writeln(photo.file.path);
       }
 
@@ -3086,7 +3260,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
   }
 
   Widget _buildTimelinePhotoRows(
-      BuildContext context, TimelineItem item, int itemIndex) {
+      BuildContext context, TimelineItem item, int itemIndex, List<TimelineItem> allItems) {
     final geotagged = (item is TimelinePlace)
         ? item.geotaggedPhotos
         : (item is TimelinePath ? item.geotaggedPhotos : <PhotoEntry>[]);
@@ -3211,9 +3385,16 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 2),
-      child: body,
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onSecondaryTapDown: (details) {
+        _showTimelineItemContextMenu(
+            context, details.globalPosition, item, itemIndex, allItems);
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8, bottom: 2),
+        child: body,
+      ),
     );
   }
 
@@ -3268,10 +3449,16 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     // 3. Nếu vẫn không thấy, lấy tâm bản đồ hiện tại
     baseLatLng ??= _mapController.camera.center;
 
+    final int maxPossibleClusters = min(10, _selectedPhotoSet.length);
+    final clusterCountCtrl = TextEditingController();
+
     showDialog(
       context: context,
       builder: (context) {
         double localJitter = _clusterJitterMeters;
+        int localMaxClusters = min(_maxClusterGroups, maxPossibleClusters);
+        if (localMaxClusters < 1) localMaxClusters = 1;
+
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
@@ -3289,11 +3476,88 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Gom ${_selectedPhotoSet.length} ảnh về tọa độ:\n'
-                    '${baseLatLng!.latitude.toStringAsFixed(5)}, ${baseLatLng.longitude.toStringAsFixed(5)}',
-                    style: const TextStyle(fontSize: 13),
+                    'Gom ${_selectedPhotoSet.length} ảnh theo thời gian & vị trí timeline:',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  // Slider 1: Max Clusters Count
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Số cụm (cục) tối đa:',
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600)),
+                      Text('$localMaxClusters cụm',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.teal,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  Slider(
+                    value: localMaxClusters.toDouble().clamp(1.0, maxPossibleClusters.toDouble()),
+                    min: 1.0,
+                    max: maxPossibleClusters.toDouble(),
+                    divisions: maxPossibleClusters > 1
+                        ? maxPossibleClusters - 1
+                        : 1,
+                    label: '$localMaxClusters cụm',
+                    onChanged: (val) {
+                      setDialogState(() {
+                        localMaxClusters = val.round();
+                      });
+                    },
+                  ),
+                  // Show text input when slider is at max
+                  if (localMaxClusters >= maxPossibleClusters) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.edit, size: 14, color: Colors.teal),
+                        const SizedBox(width: 6),
+                        const Text('Nhập số cụm tuỳ ý:',
+                            style: TextStyle(fontSize: 11, color: Colors.teal)),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 64,
+                          height: 32,
+                          child: TextField(
+                            keyboardType: TextInputType.number,
+                            textAlign: TextAlign.center,
+                            decoration: InputDecoration(
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(color: Colors.teal),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide:
+                                    const BorderSide(color: Colors.teal, width: 2),
+                              ),
+                            ),
+                            controller: clusterCountCtrl,
+                            onChanged: (val) {
+                              final parsed = int.tryParse(val);
+                              if (parsed != null && parsed >= 1) {
+                                setDialogState(() {
+                                  localMaxClusters = parsed;
+                                });
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+                  Text(
+                    '* Tự động gom các ảnh gần thời gian nhau thành $localMaxClusters cụm dọc theo lịch trình.',
+                    style: const TextStyle(fontSize: 10, color: Colors.grey),
                   ),
                   const SizedBox(height: 16),
+                  // Slider 2: Jitter Radius
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -3320,7 +3584,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                     },
                   ),
                   const Text(
-                    '* 0m sẽ xếp chồng hoàn toàn. Giá trị lớn hơn sẽ nhích nhẹ ngẫu nhiên quanh tọa độ chuẩn.',
+                    '* 0m sẽ xếp chồng hoàn toàn. Giá trị lớn hơn sẽ nhích nhẹ ngẫu nhiên quanh tọa độ cụm.',
                     style: TextStyle(fontSize: 10, color: Colors.grey),
                   ),
                 ],
@@ -3336,9 +3600,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                   onPressed: () {
                     setState(() {
                       _clusterJitterMeters = localJitter;
+                      _maxClusterGroups = localMaxClusters;
                     });
                     Navigator.pop(context);
-                    _executeClusterPhotos(baseLatLng!, localJitter);
+                    _executeClusterPhotos(baseLatLng!, localJitter, localMaxClusters);
                   },
                   child: const Text('Cluster'),
                 ),
@@ -3350,40 +3615,142 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     );
   }
 
-  void _executeClusterPhotos(LatLng baseLatLng, double jitterMeters) {
-    // Chuyển đổi mét sang độ vĩ độ/kinh độ xấp xỉ
-    // Ở xích đạo, 1 độ vĩ độ/kinh độ khoảng 111,320m.
-    final double maxDegreeJitter = jitterMeters / 111320.0;
-
-    final random = Random();
-    setState(() {
-      for (final photo in _selectedPhotoSet) {
-        double latJitter = 0.0;
-        double lngJitter = 0.0;
-        if (maxDegreeJitter > 0) {
-          latJitter = (random.nextDouble() - 0.5) * 2 * maxDegreeJitter;
-          lngJitter = (random.nextDouble() - 0.5) * 2 * maxDegreeJitter;
-        }
-        final newLatLng = LatLng(
-          baseLatLng.latitude + latJitter,
-          baseLatLng.longitude + lngJitter,
-        );
-        photo.gpsLatLng = newLatLng;
-        photo.interpolatedLatLng = null; // Cập nhật thành GPS thực tế
-        photo.isGpsModified = true;
-      }
-    });
+  void _executeClusterPhotos(
+      LatLng baseLatLng, double jitterMeters, int maxClusters) {
+    if (_selectedPhotoSet.isEmpty) return;
 
     final appState = context.read<AppStateProvider>();
     final settings = context.read<SettingsProvider>();
     final dateInfo = _currentDateInfo(appState);
     final points = appState.activePaths[dateInfo.filePath] ?? [];
-    _assignPhotosToTimelineItems(points, settings.geotagTimezone.toDouble());
+    final tz = settings.geotagTimezone.toDouble();
+
+    final List<PhotoEntry> sortedPhotos = _selectedPhotoSet.toList();
+    sortedPhotos.sort((a, b) {
+      if (a.dateTaken != null && b.dateTaken != null) {
+        return a.dateTaken!.compareTo(b.dateTaken!);
+      }
+      return a.filename.compareTo(b.filename);
+    });
+
+    final int targetClusterCount = min(maxClusters, sortedPhotos.length);
+    final List<List<PhotoEntry>> photoGroups = [];
+
+    if (targetClusterCount <= 1 || sortedPhotos.length <= 1) {
+      photoGroups.add(sortedPhotos);
+    } else {
+      // Find top (targetClusterCount - 1) largest time gaps between adjacent photos
+      final List<MapEntry<int, int>> timeGaps = [];
+      for (int i = 0; i < sortedPhotos.length - 1; i++) {
+        final t1 = sortedPhotos[i].dateTaken;
+        final t2 = sortedPhotos[i + 1].dateTaken;
+        final int gapMs = (t1 != null && t2 != null)
+            ? (t2.difference(t1).inMilliseconds).abs()
+            : 0;
+        timeGaps.add(MapEntry(i, gapMs));
+      }
+
+      timeGaps.sort((a, b) => b.value.compareTo(a.value));
+      final List<int> splitIndices = timeGaps
+          .take(targetClusterCount - 1)
+          .map((e) => e.key)
+          .toList()
+        ..sort();
+
+      int currentStart = 0;
+      for (final splitIdx in splitIndices) {
+        photoGroups.add(sortedPhotos.sublist(currentStart, splitIdx + 1));
+        currentStart = splitIdx + 1;
+      }
+      if (currentStart < sortedPhotos.length) {
+        photoGroups.add(sortedPhotos.sublist(currentStart));
+      }
+    }
+
+    final double maxDegreeJitter = jitterMeters / 111320.0;
+    final random = Random();
+
+    setState(() {
+      for (int gIdx = 0; gIdx < photoGroups.length; gIdx++) {
+        final group = photoGroups[gIdx];
+        if (group.isEmpty) continue;
+
+        // Determine cluster center for group g
+        LatLng groupCenter = baseLatLng;
+        final validDates = group
+            .where((p) => p.dateTaken != null)
+            .map((p) => p.dateTaken!)
+            .toList();
+
+        if (validDates.isNotEmpty) {
+          final int avgEpoch = (validDates
+                      .map((d) => d.millisecondsSinceEpoch)
+                      .reduce((a, b) => a + b) /
+                  validDates.length)
+              .round();
+          final avgTime = DateTime.fromMillisecondsSinceEpoch(avgEpoch);
+
+          // Try to interpolate position on timeline for this group's average time
+          if (points.isNotEmpty) {
+            final interpolated =
+                _interpolatePositionAtTime(avgTime, points, tz);
+            if (interpolated != null) {
+              groupCenter = interpolated;
+            }
+          }
+        }
+
+        // If no timeline interpolated point, check if any photos in group have existing assigned locations
+        if (groupCenter == baseLatLng) {
+          final existingLocs = group
+              .where((p) => p.assignedLatLng != null)
+              .map((p) => p.assignedLatLng!)
+              .toList();
+          if (existingLocs.isNotEmpty) {
+            double avgLat = 0, avgLng = 0;
+            for (final loc in existingLocs) {
+              avgLat += loc.latitude;
+              avgLng += loc.longitude;
+            }
+            groupCenter =
+                LatLng(avgLat / existingLocs.length, avgLng / existingLocs.length);
+          }
+        }
+
+        // 1 cluster → per-photo jitter (ảnh tản ra quanh tâm)
+        // Multiple clusters → per-group jitter (ảnh cùng cụm chung 1 điểm, cụm khác nhau tách nhau)
+        double groupLatJitter = 0.0;
+        double groupLngJitter = 0.0;
+        if (maxDegreeJitter > 0 && photoGroups.length > 1) {
+          // Compute one offset for the whole group
+          groupLatJitter = (random.nextDouble() - 0.5) * 2 * maxDegreeJitter;
+          groupLngJitter = (random.nextDouble() - 0.5) * 2 * maxDegreeJitter;
+        }
+
+        for (final photo in group) {
+          double latJitter = groupLatJitter;
+          double lngJitter = groupLngJitter;
+          if (maxDegreeJitter > 0 && photoGroups.length == 1) {
+            // Single cluster: each photo gets its own random jitter
+            latJitter = (random.nextDouble() - 0.5) * 2 * maxDegreeJitter;
+            lngJitter = (random.nextDouble() - 0.5) * 2 * maxDegreeJitter;
+          }
+          photo.gpsLatLng = LatLng(
+            groupCenter.latitude + latJitter,
+            groupCenter.longitude + lngJitter,
+          );
+          photo.interpolatedLatLng = null;
+          photo.isGpsModified = true;
+        }
+      }
+    });
+
+    _assignPhotosToTimelineItems(points, tz);
 
     _MacToastMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Clustered ${_selectedPhotoSet.length} photo(s) with ${jitterMeters.toStringAsFixed(1)}m jitter — tap "Save All" to write EXIF',
+          'Clustered ${_selectedPhotoSet.length} photo(s) into ${photoGroups.length} cluster(s) — tap "Save All" to write EXIF',
         ),
         backgroundColor: Colors.orange.shade700,
         duration: const Duration(seconds: 3),
@@ -5668,21 +6035,31 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                               child: DropdownButton<int>(
                                 isExpanded: true,
                                 value: _selectedDate?.year,
-                                items: List.generate(
-                                        DateTime.now().year - 2000 + 1,
-                                        (i) => 2000 + i)
-                                    .map((y) => DropdownMenuItem(
-                                          value: y,
-                                          child: Center(
-                                            child: Text(
-                                              y.toString(),
-                                              style: const TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 14),
+                                items: () {
+                                  final currentYear = DateTime.now().year;
+                                  final selectedYear = _selectedDate?.year;
+                                  int minYear = 1970;
+                                  int maxYear = currentYear;
+                                  if (selectedYear != null) {
+                                    if (selectedYear < minYear) minYear = selectedYear;
+                                    if (selectedYear > maxYear) maxYear = selectedYear;
+                                  }
+                                  return List.generate(
+                                          maxYear - minYear + 1,
+                                          (i) => minYear + i)
+                                      .map((y) => DropdownMenuItem(
+                                            value: y,
+                                            child: Center(
+                                              child: Text(
+                                                y.toString(),
+                                                style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 14),
+                                              ),
                                             ),
-                                          ),
-                                        ))
-                                    .toList(),
+                                          ))
+                                      .toList();
+                                }(),
                                 onChanged: (year) {
                                   if (year != null) {
                                     final daysInMonth = DateTime(
@@ -6882,6 +7259,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       onDragExited: (_) => setState(() => _isDraggingPhotoOver = false),
       onDragDone: (detail) async {
         setState(() => _isDraggingPhotoOver = false);
+        if (context.read<AppStateProvider>().currentIndex != 5) return;
         final droppedFiles = detail.files.map((f) => File(f.path)).toList();
 
         const locationExtensions = [
@@ -9062,9 +9440,28 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
     List<PopupMenuEntry<String>> menuItems = [];
 
+    final itemPhotos = (item is TimelinePlace)
+        ? [...item.geotaggedPhotos, ...item.ungeotaggedPhotos]
+        : (item is TimelinePath
+            ? [...item.geotaggedPhotos, ...item.ungeotaggedPhotos]
+            : <PhotoEntry>[]);
+    final photoLabel = item is TimelinePlace ? 'Place' : 'Road Segment';
+
     if (item is TimelinePlace) {
-      menuItems = const [
+      menuItems = [
         PopupMenuItem(
+          value: 'select_all_images',
+          enabled: itemPhotos.isNotEmpty,
+          child: Row(
+            children: [
+              const Icon(Icons.select_all, size: 18, color: Colors.amber),
+              const SizedBox(width: 8),
+              Text('Select All Images of this $photoLabel (${itemPhotos.length})'),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
           value: 'delete_place',
           child: Row(
             children: [
@@ -9074,7 +9471,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             ],
           ),
         ),
-        PopupMenuItem(
+        const PopupMenuItem(
           value: 'copy_json',
           child: Row(
             children: [
@@ -9084,7 +9481,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             ],
           ),
         ),
-        PopupMenuItem(
+        const PopupMenuItem(
           value: 'copy_json_neighbors',
           child: Row(
             children: [
@@ -9181,6 +9578,18 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             ],
           ),
         ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'select_all_images',
+          enabled: itemPhotos.isNotEmpty,
+          child: Row(
+            children: [
+              const Icon(Icons.select_all, size: 18, color: Colors.amber),
+              const SizedBox(width: 8),
+              Text('Select All Images of this $photoLabel (${itemPhotos.length})'),
+            ],
+          ),
+        ),
       ];
     }
 
@@ -9260,7 +9669,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
       List<TimelineItem> allItems,
       AppStateProvider appState,
       DateInfo dateInfo) async {
-    if (value == 'delete_place' && item is TimelinePlace) {
+    if (value == 'select_all_images') {
+      _selectAllPhotosInItem(item);
+    } else if (value == 'delete_place' && item is TimelinePlace) {
       _deletePlaceAndMergePaths(context, item, appState, dateInfo);
     } else if (value == 'add_place' && item is TimelinePath) {
       _openAddPlaceSeparationDialog(context, item, appState, dateInfo);
@@ -9733,7 +10144,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                         ),
                         if (item.geotaggedPhotos.isNotEmpty ||
                             item.ungeotaggedPhotos.isNotEmpty)
-                          _buildTimelinePhotoRows(context, item, index),
+                          _buildTimelinePhotoRows(context, item, index, allItems),
                       ],
                     ),
                   ),
@@ -9963,7 +10374,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                         ),
                         if (item.geotaggedPhotos.isNotEmpty ||
                             item.ungeotaggedPhotos.isNotEmpty)
-                          _buildTimelinePhotoRows(context, item, index),
+                          _buildTimelinePhotoRows(context, item, index, allItems),
                       ],
                     ),
                   ),

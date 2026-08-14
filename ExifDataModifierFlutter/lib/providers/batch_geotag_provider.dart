@@ -772,6 +772,18 @@ class BatchGeotagProvider extends ChangeNotifier {
         final lng = loc.longitude.abs();
         final lngRef = loc.longitude >= 0 ? 'E' : 'W';
         csvBuf.writeln('"${_escapeCsv(destPath)}",$lat,$latRef,$lng,$lngRef');
+        if (Platform.isWindows) {
+          try { await Process.run('attrib', ['-r', destPath]); } catch (_) {}
+        }
+        final tmpFile = File('${destPath}_exiftool_tmp');
+        if (await tmpFile.exists()) {
+          try {
+            if (Platform.isWindows) {
+              await Process.run('attrib', ['-r', tmpFile.path]);
+            }
+            await tmpFile.delete();
+          } catch (_) {}
+        }
         argBuf.writeln(destPath);
       }
 
