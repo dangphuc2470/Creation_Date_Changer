@@ -656,8 +656,10 @@ class _MapViewerScreenState extends State<MapViewerScreen>
         }
 
         if (restoredEntries.isNotEmpty && mounted) {
+          restoredEntries.sort((a, b) => a.filename.compareTo(b.filename));
           setState(() {
             _photos.addAll(restoredEntries);
+            _photos.sort((a, b) => a.filename.compareTo(b.filename));
           });
           await _autoInsertGeotaggedPhotoPoints(restoredEntries);
           if (!mounted) return;
@@ -1510,9 +1512,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
     await _batchReadExifWithExifTool(newEntries);
     if (!mounted) return;
 
+    newEntries.sort((a, b) => a.filename.compareTo(b.filename));
     setState(() {
       _importCurrentStatus = 'Inserting photos into timeline...';
       _photos.addAll(newEntries);
+      _photos.sort((a, b) => a.filename.compareTo(b.filename));
     });
 
     _loadThumbnailsForPhotos(newEntries);
@@ -1941,7 +1945,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
 
   /// Returns photos taken on the currently selected date (or all photos if no date selected).
   List<PhotoEntry> get _currentDatePhotos {
-    if (_selectedDate == null) return _photos;
+    if (_selectedDate == null) {
+      final list = List<PhotoEntry>.from(_photos);
+      list.sort((a, b) => a.filename.compareTo(b.filename));
+      return list;
+    }
     final sel = _selectedDate!;
     final filtered = _photos.where((p) {
       if (p.dateTaken == null) return true;
@@ -1949,12 +1957,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           p.dateTaken!.month == sel.month &&
           p.dateTaken!.day == sel.day;
     }).toList();
-    filtered.sort((a, b) {
-      if (a.dateTaken == null && b.dateTaken == null) return 0;
-      if (a.dateTaken == null) return 1;
-      if (b.dateTaken == null) return -1;
-      return a.dateTaken!.compareTo(b.dateTaken!);
-    });
+    filtered.sort((a, b) => a.filename.compareTo(b.filename));
     return filtered;
   }
 
@@ -4047,7 +4050,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             _hoveredPoint?.timestamp != finalTime) {
           setState(() {
             _hoveredPoint = newHovered;
-            _hoveredColor = isSnapped ? Colors.white : Colors.purple;
+            _hoveredColor = isSnapped ? Colors.white : const Color(0xFF0D47A1);
             _hoveredLatLng = finalPoint;
           });
         }
@@ -6685,8 +6688,8 @@ class _MapViewerScreenState extends State<MapViewerScreen>
             }
 
             final outlineColor = (lineColor.a < 1.0)
-                ? Colors.purple.shade900.withValues(alpha: lineColor.a)
-                : Colors.purple.shade900;
+                ? const Color(0xFF0A2E6B).withValues(alpha: lineColor.a)
+                : const Color(0xFF0A2E6B);
 
             polylines.add(
               Polyline(
@@ -6705,9 +6708,9 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           Polyline(
             points: pointsToShow.map((p) => p.latLng).toList(),
             strokeWidth: 4.0,
-            color: Colors.purple,
+            color: const Color(0xFF0D47A1),
             borderStrokeWidth: 1.5,
-            borderColor: Colors.purple.shade900,
+            borderColor: const Color(0xFF0A2E6B),
           ),
         );
       }
@@ -6771,7 +6774,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
           height: 14,
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.purple.withValues(alpha: 0.8),
+              color: const Color(0xFF0D47A1).withValues(alpha: 0.8),
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white, width: 1.5),
             ),
@@ -6963,7 +6966,7 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 color: Colors.white.withValues(alpha: 0.75),
                 shape: BoxShape.circle,
                 border: Border.all(
-                    color: Colors.purple.withValues(alpha: 0.8), width: 1.5),
+                    color: const Color(0xFF0D47A1).withValues(alpha: 0.8), width: 1.5),
                 boxShadow: const [
                   BoxShadow(color: Colors.black26, blurRadius: 2),
                 ],
@@ -6994,11 +6997,11 @@ class _MapViewerScreenState extends State<MapViewerScreen>
                 decoration: BoxDecoration(
                   color: _hoveredColor == Colors.white
                       ? Colors.white
-                      : (_hoveredColor ?? const Color(0xFF7F92FF)),
+                      : (_hoveredColor ?? const Color(0xFF0D47A1)),
                   shape: BoxShape.circle,
                   border: Border.all(
                     color: _hoveredColor == Colors.white
-                        ? Colors.purple
+                        ? const Color(0xFF0D47A1)
                         : Colors.white,
                     width: 2.5,
                   ),

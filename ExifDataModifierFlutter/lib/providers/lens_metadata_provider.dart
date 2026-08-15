@@ -273,6 +273,9 @@ class LensMetadataProvider extends ChangeNotifier {
     }
 
     groups = groupMap.values.toList();
+    for (final group in groups) {
+      group.items.sort((a, b) => a.filename.compareTo(b.filename));
+    }
     groups.sort((a, b) {
       if (a.focalLength != b.focalLength) {
         return a.focalLength.compareTo(b.focalLength);

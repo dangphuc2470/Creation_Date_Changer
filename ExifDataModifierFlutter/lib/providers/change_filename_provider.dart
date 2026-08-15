@@ -49,6 +49,7 @@ class ChangeFilenameProvider extends ChangeNotifier {
         ));
       }
     }
+    items.sort((a, b) => a.originalName.compareTo(b.originalName));
     previewNames();
   }
 

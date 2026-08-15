@@ -155,6 +155,7 @@ class ChangeDateProvider extends ChangeNotifier {
         }
       }
     }
+    items.sort((a, b) => a.filename.compareTo(b.filename));
     _autoSelectBestGroup();
     _refreshAllDates();
     notifyListeners();
@@ -164,6 +165,7 @@ class ChangeDateProvider extends ChangeNotifier {
   /// Pass [recursive] = true to include all sub-directories.
   Future<void> addFolder(String folderPath, {bool recursive = true}) async {
     _scanFolderInternal(folderPath, recursive: recursive);
+    items.sort((a, b) => a.filename.compareTo(b.filename));
     _autoSelectBestGroup();
     _refreshAllDates();
     notifyListeners();

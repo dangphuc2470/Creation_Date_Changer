@@ -49,6 +49,7 @@ dependencies:
   cross_file: ^0.3.4+2
   exif: ^3.3.0
   cached_network_image: ^3.4.1
+  window_manager: ^0.4.3
 
 dev_dependencies:
   flutter_test:

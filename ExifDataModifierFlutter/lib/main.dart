@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'providers/app_state_provider.dart';
 import 'providers/change_date_provider.dart';
@@ -17,8 +19,29 @@ import 'screens/map_viewer_screen.dart';
 import 'screens/lens_metadata_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/app_notifier.dart';
+import 'widgets/window_title_bar.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    await windowManager.ensureInitialized();
+
+    const windowOptions = WindowOptions(
+      size: Size(1280, 720),
+      minimumSize: Size(960, 600),
+      center: true,
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+      titleBarStyle: TitleBarStyle.hidden,
+      title: 'EXIF Data Modifier',
+    );
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
+
   runApp(
     MultiProvider(
       providers: [
@@ -41,15 +64,15 @@ class ExifModifierApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Exif Data Modifier',
+      title: 'EXIF Data Modifier',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.deepPurple, brightness: Brightness.light),
+            seedColor: Colors.blue, brightness: Brightness.light),
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.deepPurple, brightness: Brightness.dark),
+            seedColor: Colors.blue, brightness: Brightness.dark),
         useMaterial3: true,
       ),
       themeMode: ThemeMode.system,
@@ -188,52 +211,60 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
 
     if (isDesktop) {
       return Scaffold(
-        body: Row(
+        body: Column(
           children: [
-            NavigationRail(
-              selectedIndex: appState.currentIndex,
-              onDestinationSelected: appState.setIndex,
-              labelType: NavigationRailLabelType.all,
-              destinations: const [
-                NavigationRailDestination(
-                  icon: Icon(Icons.date_range),
-                  label: Text('Change Date'),
-                ),
-                NavigationRailDestination(
-                  icon: Icon(Icons.edit_document),
-                  label: Text('Rename'),
-                ),
-                NavigationRailDestination(
-                  icon: Icon(Icons.pin_drop),
-                  label: Text('Geotag'),
-                ),
-                NavigationRailDestination(
-                  icon: Icon(Icons.photo_library_outlined),
-                  label: Text('Batch Geotag'),
-                ),
-                NavigationRailDestination(
-                  icon: Icon(Icons.import_export),
-                  label: Text('Timeline Import'),
-                ),
-                NavigationRailDestination(
-                  icon: Icon(Icons.map),
-                  label: Text('Timeline Map'),
-                ),
-                NavigationRailDestination(
-                  icon: Icon(Icons.camera),
-                  label: Text('Lens'),
-                ),
-                NavigationRailDestination(
-                  icon: Icon(Icons.settings),
-                  label: Text('Settings'),
-                ),
-              ],
-            ),
-            const VerticalDivider(thickness: 1, width: 1),
+            const AppTitleBar(),
+            const Divider(thickness: 1, height: 1),
             Expanded(
-              child: IndexedStack(
-                index: appState.currentIndex,
-                children: lazyPages,
+              child: Row(
+                children: [
+                  NavigationRail(
+                    selectedIndex: appState.currentIndex,
+                    onDestinationSelected: appState.setIndex,
+                    labelType: NavigationRailLabelType.all,
+                    destinations: const [
+                      NavigationRailDestination(
+                        icon: Icon(Icons.date_range),
+                        label: Text('Change Date'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.edit_document),
+                        label: Text('Rename'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.pin_drop),
+                        label: Text('Geotag'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.photo_library_outlined),
+                        label: Text('Batch Geotag'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.import_export),
+                        label: Text('Timeline Import'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.map),
+                        label: Text('Timeline Map'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.camera),
+                        label: Text('Lens'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.settings),
+                        label: Text('Settings'),
+                      ),
+                    ],
+                  ),
+                  const VerticalDivider(thickness: 1, width: 1),
+                  Expanded(
+                    child: IndexedStack(
+                      index: appState.currentIndex,
+                      children: lazyPages,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

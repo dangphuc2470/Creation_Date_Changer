@@ -7,9 +7,9 @@ class TimelineConstants {
   static const Color stayPointIconColor =
       Color(0xFF795548); // Brown place icon color
   static const Color defaultRouteColor =
-      Color(0xFF7F92FF); // Default map route color
+      Color(0xFF0D47A1); // Default map route color (dark blue)
   static const Color activeRouteColor =
-      Colors.purple; // Selected day map route color
+      Color(0xFF0D47A1); // Selected day map route color (dark blue)
   static const Color editRouteColor =
       Colors.orange; // Edit mode map route color
 

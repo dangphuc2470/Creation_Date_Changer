@@ -378,6 +378,7 @@ class BatchGeotagProvider extends ChangeNotifier {
           statusMessage: isSupported ? null : 'Unsupported format',
         ));
       }
+      items.sort((a, b) => a.filename.compareTo(b.filename));
 
       statusMessage =
           'Found ${items.length} files (${items.where((i) => i.isSupported).length} supported images).';
